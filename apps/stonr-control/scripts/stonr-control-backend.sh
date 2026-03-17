@@ -241,6 +241,12 @@ event_size_cache_path() {
   printf '%s\n' "$store_root/runtime/events-bytes.cache"
 }
 
+retention_apply_lockdir() {
+  env_path=${1-}
+  store_root=$(store_root_from_env "$env_path")
+  printf '%s\n' "$store_root/runtime/retention-apply.lock"
+}
+
 refresh_event_size_cache() {
   events_dir=${1-}
   cache_path=${2-}
@@ -666,15 +672,26 @@ case "$cmd" in
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
     ensure_runtime_dirs "$env_path"
-    was_running=0
-    if relay_running "$env_path"; then
-      was_running=1
-      "$0" relay-stop "$env_path" >/dev/null
+    lockdir=$(retention_apply_lockdir "$env_path")
+    mkdir -p "$(dirname "$lockdir")"
+    if ! mkdir "$lockdir" 2>/dev/null; then
+      printf 'started=0\n'
+      printf 'already_running=1\n'
+      exit 0
     fi
-    run_stonr --env "$env_path" prune-retention
-    if [ "$was_running" -eq 1 ]; then
-      "$0" relay-start "$env_path" >/dev/null
-    fi
+    (
+      trap 'rmdir "$lockdir" 2>/dev/null || :' EXIT HUP INT TERM
+      was_running=0
+      if relay_running "$env_path"; then
+        was_running=1
+        "$0" relay-stop "$env_path" >/dev/null || :
+      fi
+      run_stonr --env "$env_path" prune-retention >/dev/null 2>&1 || :
+      if [ "$was_running" -eq 1 ]; then
+        "$0" relay-start "$env_path" >/dev/null || :
+      fi
+    ) >/dev/null 2>&1 &
+    printf 'started=1\n'
     ;;
   query-events)
     env_path=$(resolve_env_path "${1-}")

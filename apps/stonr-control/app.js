@@ -163,8 +163,8 @@
         groupField('Store Retention'),
         withExplicitSave(numberField('MAX_STORED_EVENT_BYTES', 'policy.max_stored_event_bytes', 'Max stored event size', '', null, null, 'When stored event files exceed this total size, it deletes the oldest stored events first. Leave blank for unlimited.'), 'store-retention'),
         withExplicitSave(numberField('MAX_STORED_EVENTS', 'policy.max_stored_events', 'Max stored events', '', null, null, 'When this relay stores more events than this, it deletes the oldest stored events first. Leave blank for unlimited.'), 'store-retention'),
-        noteField('When either limit is reached, the oldest stored events are deleted first and the newest events are kept.'),
         retentionApplyField(),
+        noteField('When either limit is reached, the oldest stored events are deleted first and the newest events are kept.'),
         groupField('Rate Limits'),
         numberField('RATE_LIMIT_WINDOW_SECS', 'policy.rate_limit_window_secs', 'Rate-limit window', '', null, null, 'Time window used for the read, write, count, and upload limits below.'),
         numberField('MAX_QUERIES_PER_WINDOW', 'policy.max_queries_per_window', 'Reads per window', '', null, null, 'How many read queries one actor can make per rate-limit window.'),
@@ -1078,7 +1078,7 @@
     var button = document.createElement('button');
     button.type = 'button';
     button.className = 'action mini retention-apply-btn';
-    button.textContent = state.retentionBusy ? 'Applying...' : 'Apply Retention';
+    button.textContent = state.retentionBusy ? 'Starting...' : 'Save And Apply';
     button.disabled = !state.bridge || state.retentionBusy;
     button.title = 'Save these retention limits and prune stored events immediately.';
     button.addEventListener('click', function () {
@@ -2446,10 +2446,7 @@
       }
       await backend('apply-retention', [state.envPath]);
       state.eventsLoadedOnce = false;
-      if (state.activeSection === 'events') {
-        await loadEvents();
-      }
-      toast('Store retention applied', 'good');
+      toast('Retention apply started', 'good');
     } finally {
       state.retentionBusy = false;
       renderActiveSection();

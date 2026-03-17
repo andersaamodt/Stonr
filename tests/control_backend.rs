@@ -1,4 +1,5 @@
 use std::{fs, process::Command};
+use std::{thread, time::Duration};
 
 use serde_json::Value;
 use tempfile::TempDir;
@@ -141,6 +142,12 @@ fn apply_retention_prunes_oldest_events() {
     .unwrap();
 
     run_backend(&["apply-retention", &env_path]);
+    for _ in 0..40 {
+        if !store_root.join("events/aa/11/aa11.json").exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 
     assert!(!store_root.join("events/aa/11/aa11.json").exists());
     assert!(store_root.join("events/bb/22/bb22.json").exists());
