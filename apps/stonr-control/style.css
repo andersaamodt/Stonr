@@ -419,7 +419,15 @@ h4 {
 }
 
 .section-tab.events-tab {
-  background: color-mix(in srgb, var(--accent) 8%, white);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, white 82%, var(--accent) 18%) 0%,
+      color-mix(in srgb, white 76%, var(--accent) 24%) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .section-tab:hover,
@@ -430,7 +438,12 @@ h4 {
 
 .section-tab.events-tab:hover,
 .section-tab.events-tab:focus-visible {
-  background: color-mix(in srgb, var(--accent) 14%, white);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, white 78%, var(--accent) 22%) 0%,
+      color-mix(in srgb, white 71%, var(--accent) 29%) 100%
+    );
 }
 
 .section-tab.active {
@@ -439,7 +452,12 @@ h4 {
 }
 
 .section-tab.events-tab.active {
-  background: color-mix(in srgb, var(--accent) 15%, white);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, white 74%, var(--accent) 26%) 0%,
+      color-mix(in srgb, white 67%, var(--accent) 33%) 100%
+    );
 }
 
 .rail-settings {
@@ -636,7 +654,7 @@ h4 {
 }
 
 .events-search input {
-  width: min(24.2rem, 100%);
+  width: min(26.6rem, 100%);
 }
 
 .event-list {
