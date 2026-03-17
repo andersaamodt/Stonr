@@ -159,14 +159,9 @@
       title: 'Limits And Quotas',
       detail: 'Result caps, created_at bounds, and file-backed rate limits.',
       fields: [
-        groupField('Event Safety'),
-        numberField('MAX_LIMIT', 'policy.max_limit', 'Max results per read', '', null, null, 'Maximum number of events returned from one read query.'),
-        numberField('MAX_EVENT_BYTES', 'policy.max_event_bytes', 'Max event size', '', null, null, 'Largest serialized event this relay will accept.'),
-        numberField('MAX_EVENT_AGE_SECS', 'policy.max_event_age_secs', 'Oldest accepted event', '', null, null, 'Reject events older than this age.'),
-        numberField('MAX_EVENT_FUTURE_SECS', 'policy.max_event_future_secs', 'Future clock skew', '', null, null, 'Reject events dated too far into the future.'),
         groupField('Store Retention'),
+        numberField('MAX_STORED_EVENT_BYTES', 'policy.max_stored_event_bytes', 'Max stored event size', '', null, null, 'When stored event files exceed this total size, it deletes the oldest stored events first. Leave blank for unlimited.'),
         numberField('MAX_STORED_EVENTS', 'policy.max_stored_events', 'Max stored events', '', null, null, 'When this relay stores more events than this, it deletes the oldest stored events first. Leave blank for unlimited.'),
-        numberField('MAX_STORED_EVENT_BYTES', 'policy.max_stored_event_bytes', 'Max stored event bytes', '', null, null, 'When stored event files exceed this total size, it deletes the oldest stored events first. Leave blank for unlimited.'),
         groupField('Rate Limits'),
         numberField('RATE_LIMIT_WINDOW_SECS', 'policy.rate_limit_window_secs', 'Rate-limit window', '', null, null, 'Time window used for the read, write, count, and upload limits below.'),
         numberField('MAX_QUERIES_PER_WINDOW', 'policy.max_queries_per_window', 'Reads per window', '', null, null, 'How many read queries one actor can make per rate-limit window.'),
@@ -174,6 +169,11 @@
         numberField('MAX_PUBLISHES_PER_WINDOW', 'policy.max_publishes_per_window', 'Writes per window', '', null, null, 'How many events one actor can publish per rate-limit window.'),
         numberField('MAX_UPLOADS_PER_WINDOW', 'policy.max_uploads_per_window', 'Uploads per window', '', null, null, 'How many file uploads one actor can start per rate-limit window.'),
         numberField('MAX_UPLOAD_BYTES_PER_WINDOW', 'policy.max_upload_bytes_per_window', 'Upload bytes per window', '', null, null, 'Total upload volume one actor can send per rate-limit window.'),
+        groupField('Event Safety'),
+        numberField('MAX_LIMIT', 'policy.max_limit', 'Max results per read', '', null, null, 'Maximum number of events returned from one read query.'),
+        numberField('MAX_EVENT_BYTES', 'policy.max_event_bytes', 'Max event size', '', null, null, 'Largest serialized event this relay will accept.'),
+        numberField('MAX_EVENT_AGE_SECS', 'policy.max_event_age_secs', 'Oldest accepted event', '', null, null, 'Reject events older than this age.'),
+        numberField('MAX_EVENT_FUTURE_SECS', 'policy.max_event_future_secs', 'Future clock skew', '', null, null, 'Reject events dated too far into the future.'),
         groupField('Blob Quota'),
         numberField('MAX_BLOB_BYTES_PER_PUBKEY', 'policy.max_blob_bytes_per_pubkey', 'Blob quota per pubkey', '', null, null, 'Maximum stored blob space one pubkey may own on this relay.')
       ]
@@ -1058,6 +1058,9 @@
 
   function displayValue(field) {
     var value = resolvedFieldValue(field);
+    if (field.envKey === 'MAX_STORED_EVENT_BYTES') {
+      return formatStoredEventMegabytes(value);
+    }
     if (field.format) {
       return field.format(value);
     }
@@ -1204,6 +1207,9 @@
   function serializeInput(field, input) {
     if (field.type === 'bool') {
       return input.checked ? '1' : '0';
+    }
+    if (field.envKey === 'MAX_STORED_EVENT_BYTES') {
+      return serializeStoredEventMegabytes(input.value);
     }
     if (field.type === 'textarea' && field.lineDelimited) {
       return String(input.value || '')
@@ -1780,10 +1786,11 @@
         return 'sec';
       case 'FILE_MAX_BYTES':
       case 'MAX_EVENT_BYTES':
-      case 'MAX_STORED_EVENT_BYTES':
       case 'MAX_UPLOAD_BYTES_PER_WINDOW':
       case 'MAX_BLOB_BYTES_PER_PUBKEY':
         return 'bytes';
+      case 'MAX_STORED_EVENT_BYTES':
+        return 'MB';
       case 'MAX_LIMIT':
       case 'MAX_STORED_EVENTS':
         return 'events';
@@ -2091,6 +2098,29 @@
       default:
         return null;
     }
+  }
+
+  function formatStoredEventMegabytes(value) {
+    if (value === null || typeof value === 'undefined' || String(value).trim() === '') {
+      return '';
+    }
+    var bytes = Number(value);
+    if (!isFinite(bytes) || bytes <= 0) {
+      return '';
+    }
+    return String(Math.round(bytes / (1024 * 1024)));
+  }
+
+  function serializeStoredEventMegabytes(value) {
+    var trimmed = String(value || '').trim();
+    if (!trimmed) {
+      return '';
+    }
+    var megabytes = Number(trimmed);
+    if (!isFinite(megabytes) || megabytes <= 0) {
+      return '';
+    }
+    return String(Math.round(megabytes * 1024 * 1024));
   }
 
   function bindHttpOrigin() {
