@@ -228,6 +228,39 @@ log_path() {
   printf '%s\n' "$store_root/runtime/relay.log"
 }
 
+event_log_path() {
+  env_path=${1-}
+  store_root=$(store_root_from_env "$env_path")
+  printf '%s\n' "$store_root/log/events.ndjson"
+}
+
+event_size_cache_path() {
+  env_path=${1-}
+  store_root=$(store_root_from_env "$env_path")
+  printf '%s\n' "$store_root/runtime/events-bytes.cache"
+}
+
+refresh_event_size_cache() {
+  events_dir=${1-}
+  cache_path=${2-}
+  lockdir=${cache_path}.lock
+  mkdir -p "$(dirname "$cache_path")"
+  if ! mkdir "$lockdir" 2>/dev/null; then
+    return 0
+  fi
+  (
+    tmp="${cache_path}.tmp.$$"
+    if [ -d "$events_dir" ]; then
+      du -sk "$events_dir" | awk '{print $1 * 1024}' > "$tmp"
+      mv "$tmp" "$cache_path"
+    else
+      printf '0\n' > "$tmp"
+      mv "$tmp" "$cache_path"
+    fi
+    rmdir "$lockdir" 2>/dev/null || :
+  ) >/dev/null 2>&1 &
+}
+
 ensure_runtime_dirs() {
   env_path=${1-}
   normalize_env_file "$env_path"
@@ -352,6 +385,122 @@ run_stonr() {
   "$bin" "$@"
 }
 
+summarize_events_json() {
+  limit=${1-50}
+  python3 -c '
+import json, re, sys, time
+
+MAX_CONTENT = 220
+IMAGE_RE = re.compile(r"https?://\S+\.(?:png|jpe?g|gif|webp|avif)(?:\?\S*)?$", re.I)
+URL_RE = re.compile(r"https?://\S+")
+LIMIT = int(sys.argv[1])
+NOW = int(time.time())
+
+def image_url_from_text(text):
+    for match in URL_RE.findall(text or ""):
+        if IMAGE_RE.match(match.rstrip(".,);]")):
+            return match.rstrip(".,);]")
+    return None
+
+def image_url_from_tags(event):
+    for tag in event.get("tags") or []:
+        if not isinstance(tag, list):
+            continue
+        for value in tag[1:]:
+            if isinstance(value, str):
+                image = image_url_from_text(value)
+                if image:
+                    return image
+    return None
+
+def preview_text(event):
+    kind = event.get("kind")
+    content = str(event.get("content") or "").strip()
+    if kind == 1059:
+        return "Encrypted message payload"
+    if kind == 1063:
+        return "File metadata event"
+    if not content:
+        return "(empty content)"
+    if len(content) > MAX_CONTENT:
+        content = content[:MAX_CONTENT - 1].rstrip() + "…"
+    return content
+
+def summarize(event):
+    return {
+        "id": event.get("id", ""),
+        "pubkey": event.get("pubkey", ""),
+        "kind": event.get("kind"),
+        "created_at": event.get("created_at"),
+        "content": preview_text(event),
+        "image_url": image_url_from_text(str(event.get("content") or "")) or image_url_from_tags(event),
+    }
+
+events = json.load(sys.stdin)
+summaries = [summarize(event) for event in events]
+summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
+summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
+summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
+json.dump(summaries[:LIMIT], sys.stdout)
+' "$limit"
+}
+
+query_events_from_log() {
+  log_file=${1-}
+  search=${2-}
+  limit=${3-50}
+  python3 - "$log_file" "$search" "$limit" <<'PY'
+import json, os, sys
+
+log_path = sys.argv[1]
+needle = sys.argv[2].strip().lower()
+limit = int(sys.argv[3])
+target = max(limit * 2, limit)
+chunk_size = 262144
+matches = []
+
+def event_matches(event):
+    if not needle:
+        return True
+    content = str(event.get("content") or "")
+    return needle in content.lower()
+
+with open(log_path, "rb") as handle:
+    handle.seek(0, os.SEEK_END)
+    position = handle.tell()
+    remainder = b""
+    while position > 0 and len(matches) < target:
+        read_size = chunk_size if position >= chunk_size else position
+        position -= read_size
+        handle.seek(position)
+        chunk = handle.read(read_size)
+        data = chunk + remainder
+        parts = data.split(b"\n")
+        remainder = parts[0]
+        for raw in reversed(parts[1:]):
+            if not raw.strip():
+                continue
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if event_matches(event):
+                matches.append(event)
+                if len(matches) >= target:
+                    break
+    if position == 0 and remainder.strip() and len(matches) < target:
+        try:
+            event = json.loads(remainder)
+        except json.JSONDecodeError:
+            event = None
+        if event and event_matches(event):
+            matches.append(event)
+
+matches.reverse()
+json.dump(matches, sys.stdout)
+PY
+}
+
 status_kv() {
   env_path=${1-}
   status=stopped
@@ -474,7 +623,10 @@ case "$cmd" in
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
     root=$(store_root_from_env "$env_path")
-    if [ -d "$root/events" ]; then
+    event_log=$(event_log_path "$env_path")
+    if [ -f "$event_log" ]; then
+      wc -l < "$event_log" | awk '{print $1}'
+    elif [ -d "$root/events" ]; then
       find "$root/events" -type f | wc -l | awk '{print $1}'
     else
       printf '0\n'
@@ -484,8 +636,21 @@ case "$cmd" in
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
     root=$(store_root_from_env "$env_path")
+    cache_path=$(event_size_cache_path "$env_path")
+    event_log=$(event_log_path "$env_path")
     if [ -d "$root/events" ]; then
-      find "$root/events" -type f -exec stat -f '%z' {} \; | awk '{sum += $1} END {print sum + 0}'
+      if [ -f "$cache_path" ] && { [ ! -f "$event_log" ] || [ ! "$event_log" -nt "$cache_path" ]; }; then
+        cat "$cache_path"
+      else
+        refresh_event_size_cache "$root/events" "$cache_path"
+        if [ -f "$cache_path" ]; then
+          cat "$cache_path"
+        elif [ -f "$event_log" ]; then
+          stat -f '%z' "$event_log"
+        else
+          printf '0\n'
+        fi
+      fi
     else
       printf '0\n'
     fi
@@ -502,122 +667,31 @@ case "$cmd" in
     limit=${3-50}
     query_limit=$((limit * 2))
     normalize_env_file "$env_path"
-    if [ -n "$search" ]; then
+    event_log=$(event_log_path "$env_path")
+    if [ -f "$event_log" ]; then
+      if [ -n "$search" ]; then
+        query_events_from_log "$event_log" "$search" "$limit" | summarize_events_json "$limit"
+      else
+        tail -n "$query_limit" "$event_log" | python3 -c '
+import json, sys
+events = []
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        events.append(json.loads(raw))
+    except json.JSONDecodeError:
+        continue
+json.dump(events, sys.stdout)
+' | summarize_events_json "$limit"
+      fi
+    elif [ -n "$search" ]; then
       query_json=$(run_stonr --env "$env_path" query --search "$search" --limit "$query_limit")
-      printf '%s' "$query_json" | python3 -c '
-import json, re, sys, time
-
-MAX_CONTENT = 220
-IMAGE_RE = re.compile(r"https?://\S+\.(?:png|jpe?g|gif|webp|avif)(?:\?\S*)?$", re.I)
-URL_RE = re.compile(r"https?://\S+")
-LIMIT = int(sys.argv[1])
-NOW = int(time.time())
-
-def image_url_from_text(text):
-    for match in URL_RE.findall(text or ""):
-        if IMAGE_RE.match(match.rstrip(".,);]")):
-            return match.rstrip(".,);]")
-    return None
-
-def image_url_from_tags(event):
-    for tag in event.get("tags") or []:
-        if not isinstance(tag, list):
-            continue
-        for value in tag[1:]:
-            if isinstance(value, str):
-                image = image_url_from_text(value)
-                if image:
-                    return image
-    return None
-
-def preview_text(event):
-    kind = event.get("kind")
-    content = str(event.get("content") or "").strip()
-    if kind == 1059:
-        return "Encrypted message payload"
-    if kind == 1063:
-        return "File metadata event"
-    if not content:
-        return "(empty content)"
-    if len(content) > MAX_CONTENT:
-        content = content[:MAX_CONTENT - 1].rstrip() + "…"
-    return content
-
-def summarize(event):
-    return {
-        "id": event.get("id", ""),
-        "pubkey": event.get("pubkey", ""),
-        "kind": event.get("kind"),
-        "created_at": event.get("created_at"),
-        "content": preview_text(event),
-        "image_url": image_url_from_text(str(event.get("content") or "")) or image_url_from_tags(event),
-    }
-
-events = json.load(sys.stdin)
-summaries = [summarize(event) for event in events]
-summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
-summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
-summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
-json.dump(summaries[:LIMIT], sys.stdout)
-' "$limit"
+      printf '%s' "$query_json" | summarize_events_json "$limit"
     else
       query_json=$(run_stonr --env "$env_path" query --limit "$query_limit")
-      printf '%s' "$query_json" | python3 -c '
-import json, re, sys, time
-
-MAX_CONTENT = 220
-IMAGE_RE = re.compile(r"https?://\S+\.(?:png|jpe?g|gif|webp|avif)(?:\?\S*)?$", re.I)
-URL_RE = re.compile(r"https?://\S+")
-LIMIT = int(sys.argv[1])
-NOW = int(time.time())
-
-def image_url_from_text(text):
-    for match in URL_RE.findall(text or ""):
-        if IMAGE_RE.match(match.rstrip(".,);]")):
-            return match.rstrip(".,);]")
-    return None
-
-def image_url_from_tags(event):
-    for tag in event.get("tags") or []:
-        if not isinstance(tag, list):
-            continue
-        for value in tag[1:]:
-            if isinstance(value, str):
-                image = image_url_from_text(value)
-                if image:
-                    return image
-    return None
-
-def preview_text(event):
-    kind = event.get("kind")
-    content = str(event.get("content") or "").strip()
-    if kind == 1059:
-        return "Encrypted message payload"
-    if kind == 1063:
-        return "File metadata event"
-    if not content:
-        return "(empty content)"
-    if len(content) > MAX_CONTENT:
-        content = content[:MAX_CONTENT - 1].rstrip() + "…"
-    return content
-
-def summarize(event):
-    return {
-        "id": event.get("id", ""),
-        "pubkey": event.get("pubkey", ""),
-        "kind": event.get("kind"),
-        "created_at": event.get("created_at"),
-        "content": preview_text(event),
-        "image_url": image_url_from_text(str(event.get("content") or "")) or image_url_from_tags(event),
-    }
-
-events = json.load(sys.stdin)
-summaries = [summarize(event) for event in events]
-summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
-summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
-summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
-json.dump(summaries[:LIMIT], sys.stdout)
-' "$limit"
+      printf '%s' "$query_json" | summarize_events_json "$limit"
     fi
     ;;
   save-env)

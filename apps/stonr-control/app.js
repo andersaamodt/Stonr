@@ -35,6 +35,7 @@
     eventsLoading: false,
     eventsTotalLoading: false,
     eventsLoadedOnce: false,
+    eventsStatsLoadedAt: 0,
     eventsError: '',
     events: [],
     eventsTotal: 0,
@@ -628,6 +629,7 @@
     state.eventsLoading = false;
     state.eventsTotalLoading = false;
     state.eventsLoadedOnce = false;
+    state.eventsStatsLoadedAt = 0;
     state.railWidth = parseRailWidth(prefs.rail_width) || state.railWidth;
     els.envPath.value = state.envPath;
     applyRailWidth(state.railWidth);
@@ -1439,23 +1441,31 @@
       state.eventsLoading = false;
       state.eventsTotalLoading = false;
       state.eventsLoadedOnce = true;
+      state.eventsStatsLoadedAt = 0;
       return;
     }
     state.eventsLoading = true;
-    state.eventsTotalLoading = true;
+    var now = Date.now();
+    var shouldRefreshStats =
+      !state.eventsStatsLoadedAt || now - state.eventsStatsLoadedAt >= 30000;
+    if (shouldRefreshStats) {
+      state.eventsTotalLoading = true;
+    }
     var hadSnapshot = state.eventsLoadedOnce || state.events.length > 0 || state.eventsTotal > 0 || state.eventsBytes > 0;
     try {
-      var results = await Promise.all([
-        backend('query-events', [state.envPath, state.eventsSearch.trim(), '60']),
-        backend('count-events', [state.envPath]),
-        backend('size-events', [state.envPath])
-      ]);
-      var output = results[0];
-      var total = results[1];
-      var size = results[2];
+      var output = await backend('query-events', [state.envPath, state.eventsSearch.trim(), '60']);
       state.events = JSON.parse(output || '[]');
-      state.eventsTotal = Number(String(total || '0').trim()) || 0;
-      state.eventsBytes = Number(String(size || '0').trim()) || 0;
+      if (shouldRefreshStats) {
+        var results = await Promise.all([
+          backend('count-events', [state.envPath]),
+          backend('size-events', [state.envPath])
+        ]);
+        var total = results[0];
+        var size = results[1];
+        state.eventsTotal = Number(String(total || '0').trim()) || 0;
+        state.eventsBytes = Number(String(size || '0').trim()) || 0;
+        state.eventsStatsLoadedAt = Date.now();
+      }
       state.eventsError = '';
       state.eventsLoadedOnce = true;
     } catch (error) {
@@ -1464,6 +1474,7 @@
         state.events = [];
         state.eventsTotal = 0;
         state.eventsBytes = 0;
+        state.eventsStatsLoadedAt = 0;
         state.eventsError = summarizeBackendError(error, 'Failed to load events');
         state.eventsLoadedOnce = true;
       } else {
@@ -1471,7 +1482,9 @@
       }
     } finally {
       state.eventsLoading = false;
-      state.eventsTotalLoading = false;
+      if (shouldRefreshStats) {
+        state.eventsTotalLoading = false;
+      }
     }
   }
 
@@ -1489,6 +1502,7 @@
     state.eventsBytes = 0;
     state.eventsTotalLoading = false;
     state.eventsLoadedOnce = false;
+    state.eventsStatsLoadedAt = 0;
     state.eventsError = '';
     await loadEvents();
     renderActiveSection();
