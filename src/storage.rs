@@ -27,7 +27,13 @@ pub struct Store {
 
 impl Store {
     /// Create a new store rooted at `root`.
-    pub fn new(
+    #[allow(dead_code)]
+    pub fn new(root: PathBuf, verify_sig: bool) -> Self {
+        Self::with_limits(root, verify_sig, None, None)
+    }
+
+    /// Create a new store rooted at `root` with retention limits.
+    pub fn with_limits(
         root: PathBuf,
         verify_sig: bool,
         max_stored_events: Option<usize>,
@@ -809,5 +815,35 @@ mod tests {
             arr
         };
         assert_eq!(event_hash(&ev).unwrap(), expected);
+    }
+
+    #[test]
+    fn enforce_retention_deletes_oldest_events_first() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(dir.path().to_path_buf(), false, Some(2), None);
+        store.init().unwrap();
+        let e1 = sample_event("aa11", "p1", 1, None, 10);
+        let e2 = sample_event("bb22", "p1", 1, None, 20);
+        let e3 = sample_event("cc33", "p1", 1, None, 30);
+        store.ingest(&e1).unwrap();
+        store.ingest(&e2).unwrap();
+        store.ingest(&e3).unwrap();
+
+        let res = store
+            .query(Query {
+                authors: Some(vec!["p1".into()]),
+                kinds: Some(vec![1]),
+                d: None,
+                t: None,
+                since: None,
+                until: None,
+                limit: Some(10),
+            })
+            .unwrap();
+        let ids: Vec<String> = res.into_iter().map(|event| event.id).collect();
+        assert_eq!(ids, vec!["cc33".to_string(), "bb22".to_string()]);
+        assert!(!store.event_path("aa11").exists());
+        assert!(store.event_path("bb22").exists());
+        assert!(store.event_path("cc33").exists());
     }
 }

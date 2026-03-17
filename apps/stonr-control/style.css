@@ -747,6 +747,14 @@ h4 {
   line-height: 1.35;
 }
 
+.retention-apply-field {
+  margin-top: -0.15rem;
+}
+
+.retention-apply-btn {
+  justify-self: start;
+}
+
 .field-disabled {
   opacity: 0.54;
 }

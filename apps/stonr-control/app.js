@@ -19,6 +19,7 @@
     saveStatusTicket: 0,
     saveStatusShownAt: 0,
     relayBusyAction: '',
+    retentionBusy: false,
     railWidth: 224,
     dragPointerId: null,
     fieldSaveTimers: {},
@@ -160,9 +161,10 @@
       detail: 'Result caps, created_at bounds, and file-backed rate limits.',
       fields: [
         groupField('Store Retention'),
-        numberField('MAX_STORED_EVENT_BYTES', 'policy.max_stored_event_bytes', 'Max stored event size', '', null, null, 'When stored event files exceed this total size, it deletes the oldest stored events first. Leave blank for unlimited.'),
-        numberField('MAX_STORED_EVENTS', 'policy.max_stored_events', 'Max stored events', '', null, null, 'When this relay stores more events than this, it deletes the oldest stored events first. Leave blank for unlimited.'),
+        withExplicitSave(numberField('MAX_STORED_EVENT_BYTES', 'policy.max_stored_event_bytes', 'Max stored event size', '', null, null, 'When stored event files exceed this total size, it deletes the oldest stored events first. Leave blank for unlimited.'), 'store-retention'),
+        withExplicitSave(numberField('MAX_STORED_EVENTS', 'policy.max_stored_events', 'Max stored events', '', null, null, 'When this relay stores more events than this, it deletes the oldest stored events first. Leave blank for unlimited.'), 'store-retention'),
         noteField('When either limit is reached, the oldest stored events are deleted first and the newest events are kept.'),
+        retentionApplyField(),
         groupField('Rate Limits'),
         numberField('RATE_LIMIT_WINDOW_SECS', 'policy.rate_limit_window_secs', 'Rate-limit window', '', null, null, 'Time window used for the read, write, count, and upload limits below.'),
         numberField('MAX_QUERIES_PER_WINDOW', 'policy.max_queries_per_window', 'Reads per window', '', null, null, 'How many read queries one actor can make per rate-limit window.'),
@@ -856,6 +858,9 @@
     if (field.type === 'note') {
       return renderNoteField(field);
     }
+    if (field.type === 'retention-apply') {
+      return renderRetentionApplyField();
+    }
     var wrap = document.createElement('div');
     wrap.className = 'field' + (field.type === 'bool' ? ' checkbox-field' : '');
     if (sectionId === 'nips') {
@@ -1065,6 +1070,25 @@
     note.className = 'section-note';
     note.textContent = field.text;
     return note;
+  }
+
+  function renderRetentionApplyField() {
+    var wrap = document.createElement('div');
+    wrap.className = 'field retention-apply-field';
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'action mini retention-apply-btn';
+    button.textContent = state.retentionBusy ? 'Applying...' : 'Apply Retention';
+    button.disabled = !state.bridge || state.retentionBusy;
+    button.title = 'Save these retention limits and prune stored events immediately.';
+    button.addEventListener('click', function () {
+      applyRetentionSettings().catch(function (error) {
+        console.error(error);
+        toast(error.message || 'Failed to apply retention', 'bad');
+      });
+    });
+    wrap.appendChild(button);
+    return wrap;
   }
 
   function displayValue(field) {
@@ -1843,12 +1867,21 @@
     return { envKey: envKey, path: path, label: label, hint: hint, type: 'select', options: options, format: format, dependsOn: dependsOn || [], tooltip: tooltip || '' };
   }
 
+  function withExplicitSave(field, explicitSaveGroup) {
+    field.explicitSaveGroup = explicitSaveGroup;
+    return field;
+  }
+
   function groupField(label) {
     return { type: 'group', label: label };
   }
 
   function noteField(text) {
     return { type: 'note', text: text };
+  }
+
+  function retentionApplyField() {
+    return { type: 'retention-apply' };
   }
 
   function getPath(source, path) {
@@ -2235,11 +2268,17 @@
     var eventName = field.type === 'bool' || field.type === 'select' ? 'change' : 'input';
     input.addEventListener(eventName, function () {
       applyInputToState(field, input);
+      if (field.explicitSaveGroup) {
+        return;
+      }
       queueFieldSave(field, input, eventName === 'change' ? 0 : 500);
     });
     if (eventName !== 'change') {
       input.addEventListener('blur', function () {
         applyInputToState(field, input);
+        if (field.explicitSaveGroup) {
+          return;
+        }
         queueFieldSave(field, input, 0);
       });
     }
@@ -2346,6 +2385,10 @@
       if (!target) {
         return;
       }
+      if (target.field.explicitSaveGroup) {
+        delete state.fieldSaveTargets[envKey];
+        return;
+      }
       var nextValue = serializeInput(target.field, target.input);
       if (target.input.dataset.savedValue === nextValue && !state.pendingFieldSavePromises[envKey]) {
         return;
@@ -2379,6 +2422,37 @@
       await saveField(field, input);
     } finally {
       button.disabled = !state.bridge;
+    }
+  }
+
+  async function applyRetentionSettings() {
+    if (!state.bridge || state.retentionBusy) {
+      return;
+    }
+    var keys = ['MAX_STORED_EVENT_BYTES', 'MAX_STORED_EVENTS'];
+    state.retentionBusy = true;
+    renderActiveSection();
+    try {
+      for (var index = 0; index < keys.length; index += 1) {
+        var key = keys[index];
+        var target = state.fieldNodes[key];
+        if (!target) {
+          continue;
+        }
+        clearTimeout(state.fieldSaveTimers[key]);
+        state.fieldSaveTimers[key] = null;
+        delete state.fieldSaveTargets[key];
+        await saveField(target.field, target.input);
+      }
+      await backend('apply-retention', [state.envPath]);
+      state.eventsLoadedOnce = false;
+      if (state.activeSection === 'events') {
+        await loadEvents();
+      }
+      toast('Store retention applied', 'good');
+    } finally {
+      state.retentionBusy = false;
+      renderActiveSection();
     }
   }
 

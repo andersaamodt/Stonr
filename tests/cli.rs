@@ -165,7 +165,7 @@ fn cli_help_lists_commands() {
         .stdout
         .clone();
     let text = String::from_utf8(output).unwrap();
-    for cmd in ["init", "ingest", "serve", "reindex", "verify"] {
+    for cmd in ["init", "ingest", "serve", "reindex", "prune-retention", "verify"] {
         assert!(text.contains(cmd));
     }
 }

@@ -23,6 +23,7 @@ Commands:
   count-events [ENV_PATH]
   size-events [ENV_PATH]
   purge-events [ENV_PATH]
+  apply-retention [ENV_PATH]
   query-events [ENV_PATH] [SEARCH] [LIMIT]
   save-env [ENV_PATH] KEY VALUE
   load-list [ENV_PATH] NAME
@@ -660,6 +661,20 @@ case "$cmd" in
     normalize_env_file "$env_path"
     ensure_runtime_dirs "$env_path"
     run_stonr --env "$env_path" purge-events
+    ;;
+  apply-retention)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    was_running=0
+    if relay_running "$env_path"; then
+      was_running=1
+      "$0" relay-stop "$env_path" >/dev/null
+    fi
+    run_stonr --env "$env_path" prune-retention
+    if [ "$was_running" -eq 1 ]; then
+      "$0" relay-start "$env_path" >/dev/null
+    fi
     ;;
   query-events)
     env_path=$(resolve_env_path "${1-}")

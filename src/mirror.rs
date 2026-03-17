@@ -241,6 +241,8 @@ mod tests {
             filter_kinds: None,
             filter_tag_t: None,
             filter_since_mode: SinceMode::Fixed(0),
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         mirror_relay(relay_url, cfg.clone(), store.clone())
             .await
@@ -301,6 +303,8 @@ mod tests {
             filter_kinds: None,
             filter_tag_t: None,
             filter_since_mode: SinceMode::Cursor,
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         mirror_relay(relay_url.clone(), cfg, store.clone())
             .await
@@ -401,6 +405,8 @@ mod tests {
             filter_kinds: None,
             filter_tag_t: None,
             filter_since_mode: SinceMode::Fixed(0),
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
@@ -442,6 +448,8 @@ mod tests {
             filter_kinds: Some(vec![1]),
             filter_tag_t: Some(vec!["tag1".into()]),
             filter_since_mode: SinceMode::Fixed(5),
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
@@ -492,6 +500,8 @@ mod tests {
             filter_kinds: None,
             filter_tag_t: None,
             filter_since_mode: SinceMode::Cursor,
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         mirror_relay(relay_url.clone(), cfg, store.clone())
             .await
@@ -544,6 +554,8 @@ mod tests {
             filter_kinds: None,
             filter_tag_t: None,
             filter_since_mode: SinceMode::Fixed(0),
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
@@ -584,6 +596,8 @@ mod tests {
             filter_kinds: None,
             filter_tag_t: None,
             filter_since_mode: SinceMode::Fixed(0),
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         super::run(cfg, store).await;
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -626,6 +640,8 @@ mod tests {
             filter_kinds: None,
             filter_tag_t: None,
             filter_since_mode: SinceMode::Fixed(0),
+            max_stored_events: None,
+            max_stored_event_bytes: None,
         };
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();

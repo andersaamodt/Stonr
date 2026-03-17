@@ -103,3 +103,46 @@ fn query_events_searches_recent_matches_from_log() {
     assert_eq!(events[0]["id"], "c");
     assert_eq!(events[1]["id"], "a");
 }
+
+#[test]
+fn apply_retention_prunes_oldest_events() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let store_root = dir.path().join("store");
+    fs::write(
+        &env_path,
+        format!(
+            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:7777\nBIND_WS=127.0.0.1:7778\nVERIFY_SIG=0\nMAX_STORED_EVENTS=2\n",
+            store_root.display()
+        ),
+    )
+    .unwrap();
+
+    fs::create_dir_all(store_root.join("events/aa/11")).unwrap();
+    fs::create_dir_all(store_root.join("events/bb/22")).unwrap();
+    fs::create_dir_all(store_root.join("events/cc/33")).unwrap();
+    fs::create_dir_all(store_root.join("index/by-author")).unwrap();
+    fs::create_dir_all(store_root.join("mirror/authors/p1")).unwrap();
+    fs::create_dir_all(store_root.join("latest")).unwrap();
+    fs::write(
+        store_root.join("events/aa/11/aa11.json"),
+        r#"{"id":"aa11","pubkey":"p1","kind":1,"created_at":10,"tags":[],"content":"","sig":""}"#,
+    )
+    .unwrap();
+    fs::write(
+        store_root.join("events/bb/22/bb22.json"),
+        r#"{"id":"bb22","pubkey":"p1","kind":1,"created_at":20,"tags":[],"content":"","sig":""}"#,
+    )
+    .unwrap();
+    fs::write(
+        store_root.join("events/cc/33/cc33.json"),
+        r#"{"id":"cc33","pubkey":"p1","kind":1,"created_at":30,"tags":[],"content":"","sig":""}"#,
+    )
+    .unwrap();
+
+    run_backend(&["apply-retention", &env_path]);
+
+    assert!(!store_root.join("events/aa/11/aa11.json").exists());
+    assert!(store_root.join("events/bb/22/bb22.json").exists());
+    assert!(store_root.join("events/cc/33/cc33.json").exists());
+}

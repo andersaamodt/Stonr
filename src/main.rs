@@ -40,6 +40,8 @@ enum Commands {
     },
     /// Rebuild indexes and latest pointers from existing events.
     Reindex,
+    /// Apply store retention limits immediately.
+    PruneRetention,
     /// Launch HTTP and WebSocket services (and mirror if configured).
     Serve,
     /// Verify a random sample of stored events.
@@ -52,7 +54,12 @@ enum Commands {
 /// Execute the selected CLI subcommand.
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let cfg = Settings::from_env(&cli.env)?;
-    let store = Store::new(cfg.store_root.clone(), cfg.verify_sig);
+    let store = Store::with_limits(
+        cfg.store_root.clone(),
+        cfg.verify_sig,
+        cfg.max_stored_events,
+        cfg.max_stored_event_bytes,
+    );
     match cli.command {
         Commands::Init => {
             // Create the on-disk directory structure.
@@ -70,9 +77,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             // Rebuild indexes and latest pointers from existing events.
             store.reindex()?;
         }
+        Commands::PruneRetention => {
+            store.init()?;
+            store.enforce_retention()?;
+        }
         Commands::Serve => {
             // Initialize storage then start HTTP and WS servers.
             store.init()?;
+            store.enforce_retention()?;
             let http_addr: SocketAddr = cfg.bind_http.parse()?;
             let ws_addr: SocketAddr = cfg.bind_ws.parse()?;
             // If upstream relays are configured, start mirroring in the background.
@@ -266,5 +278,52 @@ mod tests {
         let resp = reqwest::get(url).await.unwrap();
         assert!(resp.status().is_success());
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn run_prune_retention_removes_oldest_events() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let env_file = write_env(&dir, "MAX_STORED_EVENTS=2\n").await;
+
+        run(Cli {
+            env: env_file.clone(),
+            command: Commands::Init,
+        })
+        .await
+        .unwrap();
+
+        for (id, created_at) in [("aa11", 10u64), ("bb22", 20u64), ("cc33", 30u64)] {
+            let ev_path = dir.path().join(format!("{id}.json"));
+            let ev = Event {
+                id: id.into(),
+                pubkey: "p".into(),
+                kind: 1,
+                created_at,
+                tags: vec![],
+                content: String::new(),
+                sig: String::new(),
+            };
+            fs::write(&ev_path, serde_json::to_string(&ev).unwrap()).unwrap();
+            run(Cli {
+                env: env_file.clone(),
+                command: Commands::Ingest {
+                    files: vec![ev_path.to_str().unwrap().into()],
+                },
+            })
+            .await
+            .unwrap();
+        }
+
+        run(Cli {
+            env: env_file,
+            command: Commands::PruneRetention,
+        })
+        .await
+        .unwrap();
+
+        assert!(!dir.path().join("events/aa/11/aa11.json").exists());
+        assert!(dir.path().join("events/bb/22/bb22.json").exists());
+        assert!(dir.path().join("events/cc/33/cc33.json").exists());
     }
 }
