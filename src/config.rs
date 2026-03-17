@@ -3,9 +3,10 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 
 /// Runtime settings derived from environment variables.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Settings {
     /// Root directory for all storage.
     pub store_root: PathBuf,
@@ -34,7 +35,7 @@ pub struct Settings {
 }
 
 /// Determines how the mirroring process derives the `since` value for subscriptions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum SinceMode {
     /// Resume from the last cursor stored per relay.
     Cursor,

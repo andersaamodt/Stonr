@@ -40,6 +40,8 @@ enum Commands {
     },
     /// Rebuild indexes and latest pointers from existing events.
     Reindex,
+    /// Print the effective parsed configuration as JSON.
+    PrintConfig,
     /// Apply store retention limits immediately.
     PruneRetention,
     /// Launch HTTP and WebSocket services (and mirror if configured).
@@ -76,6 +78,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::Reindex => {
             // Rebuild indexes and latest pointers from existing events.
             store.reindex()?;
+        }
+        Commands::PrintConfig => {
+            println!("{}", serde_json::to_string(&cfg)?);
         }
         Commands::PruneRetention => {
             store.init()?;
