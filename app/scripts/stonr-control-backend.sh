@@ -4,7 +4,9 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 APP_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)
-REPO_ROOT=$(CDPATH= cd -- "$APP_DIR/../.." && pwd -P)
+# The app now lives at <repo>/app in source and <bundle>/Resources/<slug>/app in desktop bundles.
+# In both cases, the repo/workspace root is the direct parent of APP_DIR.
+REPO_ROOT=$(CDPATH= cd -- "$APP_DIR/.." && pwd -P)
 PREF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/stonr-control
 PREFS_FILE=$PREF_DIR/ui-prefs.env
 STONR_CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/stonr

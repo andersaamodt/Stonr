@@ -5,7 +5,7 @@
 It is intentionally thin:
 
 - the UI is static HTML, CSS, and JavaScript
-- backend actions go through [`scripts/stonr-control-backend.sh`](/Users/andersaamodt/git/stonr/apps/stonr-control/scripts/stonr-control-backend.sh)
+- backend actions go through [`scripts/stonr-control-backend.sh`](/Users/andersaamodt/git/stonr/app/scripts/stonr-control-backend.sh)
 - relay configuration still lives in the relay `.env`
 - moderation lists still live in the relay store under `admin/`
 

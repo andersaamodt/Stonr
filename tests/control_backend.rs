@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 fn backend_script() -> String {
     format!(
-        "{}/apps/stonr-control/scripts/stonr-control-backend.sh",
+        "{}/app/scripts/stonr-control-backend.sh",
         env!("CARGO_MANIFEST_DIR")
     )
 }
