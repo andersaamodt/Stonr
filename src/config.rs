@@ -1,6 +1,6 @@
 //! Configuration loading from `.env` files.
 
-use std::{env, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -41,14 +41,14 @@ pub enum SinceMode {
 impl Settings {
     /// Load settings from the specified `.env` file.
     pub fn from_env(path: &str) -> Result<Self> {
-        dotenvy::from_filename(path).context("reading env file")?;
-        let store_root = PathBuf::from(env::var("STORE_ROOT")?);
-        let bind_http = env::var("BIND_HTTP")?;
-        let bind_ws = env::var("BIND_WS")?;
-        let verify_sig = env::var("VERIFY_SIG").unwrap_or_else(|_| "0".into()) == "1";
-        let relays_upstream = csv_strings(env::var("RELAYS_UPSTREAM").unwrap_or_default());
-        let tor_socks = env::var("TOR_SOCKS").ok().filter(|s| !s.is_empty());
-        let filter_authors = env::var("FILTER_AUTHORS").ok().and_then(|s| {
+        let env = parse_env_file(path).context("reading env file")?;
+        let store_root = PathBuf::from(required_env(&env, "STORE_ROOT")?);
+        let bind_http = required_env(&env, "BIND_HTTP")?;
+        let bind_ws = required_env(&env, "BIND_WS")?;
+        let verify_sig = env_value(&env, "VERIFY_SIG").unwrap_or("0") == "1";
+        let relays_upstream = csv_strings(env_value(&env, "RELAYS_UPSTREAM").unwrap_or_default());
+        let tor_socks = env_value(&env, "TOR_SOCKS").filter(|s| !s.is_empty()).map(str::to_string);
+        let filter_authors = env_value(&env, "FILTER_AUTHORS").and_then(|s| {
             let v = csv_strings(s);
             if v.is_empty() {
                 None
@@ -56,7 +56,7 @@ impl Settings {
                 Some(v)
             }
         });
-        let filter_kinds = env::var("FILTER_KINDS").ok().and_then(|s| {
+        let filter_kinds = env_value(&env, "FILTER_KINDS").and_then(|s| {
             let v = csv_u32(s);
             if v.is_empty() {
                 None
@@ -64,7 +64,7 @@ impl Settings {
                 Some(v)
             }
         });
-        let filter_tag_t = env::var("FILTER_TAG_T").ok().and_then(|s| {
+        let filter_tag_t = env_value(&env, "FILTER_TAG_T").and_then(|s| {
             let v = csv_strings(s);
             if v.is_empty() {
                 None
@@ -72,7 +72,7 @@ impl Settings {
                 Some(v)
             }
         });
-        let since_str = env::var("FILTER_SINCE_MODE").unwrap_or_else(|_| "cursor".into());
+        let since_str = env_value(&env, "FILTER_SINCE_MODE").unwrap_or("cursor");
         let filter_since_mode = if let Some(rest) = since_str.strip_prefix("fixed:") {
             SinceMode::Fixed(rest.parse().unwrap_or(0))
         } else {
@@ -91,6 +91,31 @@ impl Settings {
             filter_since_mode,
         })
     }
+}
+
+fn parse_env_file(path: &str) -> Result<HashMap<String, String>> {
+    let data = fs::read_to_string(path)?;
+    let mut values = HashMap::new();
+    for line in data.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once('=') {
+            values.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+    Ok(values)
+}
+
+fn env_value<'a>(env: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    env.get(key).map(String::as_str)
+}
+
+fn required_env(env: &HashMap<String, String>, key: &str) -> Result<String> {
+    env.get(key)
+        .cloned()
+        .context(format!("missing required field: {key}"))
 }
 
 /// Split a comma-separated string into trimmed string values.
@@ -117,7 +142,7 @@ pub fn csv_u32(input: impl AsRef<str>) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, fs, sync::Mutex};
+    use std::{fs, sync::Mutex};
     use tempfile::tempdir;
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
@@ -125,21 +150,6 @@ mod tests {
     #[test]
     fn loads_env() {
         let _g = ENV_MUTEX.lock().unwrap();
-        let vars = [
-            "STORE_ROOT",
-            "BIND_HTTP",
-            "BIND_WS",
-            "VERIFY_SIG",
-            "RELAYS_UPSTREAM",
-            "TOR_SOCKS",
-            "FILTER_AUTHORS",
-            "FILTER_KINDS",
-            "FILTER_TAG_T",
-            "FILTER_SINCE_MODE",
-        ];
-        for v in vars.iter() {
-            env::remove_var(v);
-        }
         let dir = tempdir().unwrap();
         let env_path = dir.path().join(".env");
         fs::write(
@@ -187,10 +197,6 @@ mod tests {
     #[test]
     fn tor_socks_parsed() {
         let _g = ENV_MUTEX.lock().unwrap();
-        let vars = ["STORE_ROOT", "BIND_HTTP", "BIND_WS", "TOR_SOCKS"];
-        for v in vars.iter() {
-            env::remove_var(v);
-        }
         let dir = tempdir().unwrap();
         let env_path = dir.path().join(".env");
         fs::write(
@@ -210,21 +216,6 @@ mod tests {
     #[test]
     fn defaults_when_optional_absent() {
         let _g = ENV_MUTEX.lock().unwrap();
-        let vars = [
-            "STORE_ROOT",
-            "BIND_HTTP",
-            "BIND_WS",
-            "VERIFY_SIG",
-            "RELAYS_UPSTREAM",
-            "TOR_SOCKS",
-            "FILTER_AUTHORS",
-            "FILTER_KINDS",
-            "FILTER_TAG_T",
-            "FILTER_SINCE_MODE",
-        ];
-        for v in vars.iter() {
-            env::remove_var(v);
-        }
         let dir = tempdir().unwrap();
         let env_path = dir.path().join(".env");
         fs::write(
@@ -248,17 +239,6 @@ mod tests {
     #[test]
     fn empty_filters_are_none() {
         let _g = ENV_MUTEX.lock().unwrap();
-        let vars = [
-            "STORE_ROOT",
-            "BIND_HTTP",
-            "BIND_WS",
-            "FILTER_AUTHORS",
-            "FILTER_KINDS",
-            "FILTER_TAG_T",
-        ];
-        for v in vars.iter() {
-            env::remove_var(v);
-        }
         let dir = tempdir().unwrap();
         let env_path = dir.path().join(".env");
         fs::write(
@@ -282,10 +262,6 @@ mod tests {
     #[test]
     fn missing_required_fields_error() {
         let _g = ENV_MUTEX.lock().unwrap();
-        let vars = ["STORE_ROOT", "BIND_HTTP", "BIND_WS"];
-        for v in vars.iter() {
-            env::remove_var(v);
-        }
         let dir = tempdir().unwrap();
         let env_path = dir.path().join(".env");
         fs::write(
@@ -299,10 +275,6 @@ mod tests {
     #[test]
     fn invalid_fixed_since_mode_defaults_to_zero() {
         let _g = ENV_MUTEX.lock().unwrap();
-        let vars = ["STORE_ROOT", "BIND_HTTP", "BIND_WS", "FILTER_SINCE_MODE"];
-        for v in vars.iter() {
-            env::remove_var(v);
-        }
         let dir = tempdir().unwrap();
         let env_path = dir.path().join(".env");
         fs::write(
@@ -317,5 +289,24 @@ mod tests {
         .unwrap();
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert_eq!(cfg.filter_since_mode, SinceMode::Fixed(0));
+    }
+
+    #[test]
+    fn unquoted_spaces_in_values_are_accepted() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let env_path = dir.path().join(".env");
+        fs::write(
+            &env_path,
+            concat!(
+                "STORE_ROOT=/tmp\n",
+                "BIND_HTTP=127.0.0.1:8080\n",
+                "BIND_WS=127.0.0.1:8081\n",
+                "RELAY_DESCRIPTION=First file-backed relay!\n",
+            ),
+        )
+        .unwrap();
+        let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
+        assert_eq!(cfg.bind_http, "127.0.0.1:8080");
     }
 }
