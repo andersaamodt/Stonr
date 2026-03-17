@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stonr Control</title>
+  <link rel="stylesheet" href="style.css?v=stonr-control-20260315cf">
+</head>
+<body class="stonr-booting">
+  <div class="boot-splash" aria-hidden="true">
+    <div class="boot-mark">
+      <svg viewBox="0 0 96 96" role="presentation" focusable="false" aria-hidden="true">
+        <rect x="10" y="10" width="76" height="76" rx="22"></rect>
+        <path d="M34 31h28l-7 10H44v14h15l-7 10H34z"></path>
+      </svg>
+    </div>
+  </div>
+  <div class="shell">
+    <aside class="rail">
+      <section class="nav-block">
+        <div class="section-head">
+          <h2>Stonr Relay</h2>
+        </div>
+        <div id="section-list" class="section-list" role="listbox" aria-label="Settings sections"></div>
+      </section>
+
+      <button id="open-settings" class="footer-btn icon-btn rail-settings" type="button" title="Control app settings" aria-label="Control app settings">
+        <img src="assets/settings-gear.svg" alt="Settings">
+      </button>
+    </aside>
+
+    <div id="shell-divider" class="shell-divider" role="separator" aria-orientation="vertical" aria-label="Resize sections"></div>
+
+    <main class="stage">
+      <header class="toolbar">
+        <p id="active-eyebrow" class="eyebrow">Overview</p>
+        <h2 id="active-title">Relay Runtime</h2>
+        <p id="active-subtitle" class="sub">Status, process control, and the effective relay configuration.</p>
+        <div class="toolbar-actions">
+          <button id="open-store-root" class="action icon-btn toolbar-icon" type="button" title="Open relay folder" aria-label="Open relay folder">
+            <img src="assets/folder-open.svg" alt="">
+          </button>
+          <span id="relay-pill" class="status-pill neutral">Relay: unknown</span>
+          <button id="relay-toggle" class="action primary" type="button" title="Start relay" aria-label="Start relay"></button>
+        </div>
+      </header>
+
+      <section class="runtime-panel">
+        <header class="runtime-head">
+          <h3>Runtime</h3>
+        </header>
+        <div id="runtime-grid" class="kv-grid"></div>
+      </section>
+
+      <section id="section-content" class="section-stack"></section>
+    </main>
+  </div>
+
+  <aside id="settings-drawer" class="drawer hidden" aria-label="Control app settings">
+    <section class="drawer-panel">
+      <header class="drawer-head">
+        <h3>Control App</h3>
+        <p class="sub">Desktop bridge state and the env file this console edits.</p>
+        <button id="close-settings" class="action mini" type="button">Close</button>
+      </header>
+
+      <section class="drawer-body">
+        <section class="drawer-section">
+          <h4>Bridge</h4>
+          <p id="bridge-copy" class="sub">Checking wizardry bridge.</p>
+        </section>
+
+        <section class="drawer-section env-path-section">
+          <h4>Env File</h4>
+          <label for="env-path">Path</label>
+          <input id="env-path" type="text" spellcheck="false" placeholder="/absolute/path/to/.env">
+        </section>
+
+        <section class="drawer-section">
+          <h4>Doctor</h4>
+          <pre id="doctor-output" class="mono">Waiting for backend.</pre>
+        </section>
+      </section>
+    </section>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="save-status" class="save-status" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="app.js?v=stonr-control-20260317ca"></script>
+</body>
+</html>

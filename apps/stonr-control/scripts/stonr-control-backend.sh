@@ -1,0 +1,731 @@
+#!/bin/sh
+
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
+APP_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)
+REPO_ROOT=$(CDPATH= cd -- "$APP_DIR/../.." && pwd -P)
+PREF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/stonr-control
+PREFS_FILE=$PREF_DIR/ui-prefs.env
+STONR_CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/stonr
+
+usage() {
+  cat <<'USAGE'
+Usage: stonr-control-backend.sh COMMAND [ARGS...]
+
+Commands:
+  choose-dir [INITIAL_PATH]
+  doctor [ENV_PATH]
+  get-ui-prefs
+  set-ui-pref KEY VALUE
+  load-config [ENV_PATH]
+  load-env [ENV_PATH]
+  count-events [ENV_PATH]
+  size-events [ENV_PATH]
+  purge-events [ENV_PATH]
+  query-events [ENV_PATH] [SEARCH] [LIMIT]
+  save-env [ENV_PATH] KEY VALUE
+  load-list [ENV_PATH] NAME
+  save-list [ENV_PATH] NAME BASE64_TEXT
+  open-store-root [ENV_PATH]
+  relay-status [ENV_PATH]
+  relay-start [ENV_PATH]
+  relay-stop [ENV_PATH]
+  relay-restart [ENV_PATH]
+  tail-log [ENV_PATH] [LINES]
+  verify [ENV_PATH] [SAMPLE]
+
+List NAME values:
+  pubkeys-allow
+  pubkeys-deny
+  file-hashes-deny
+USAGE
+}
+
+ensure_pref_dir() {
+  mkdir -p "$PREF_DIR"
+}
+
+pref_get() {
+  key=${1-}
+  [ -f "$PREFS_FILE" ] || return 1
+  awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); found = 1 } END { exit found ? 0 : 1 }' "$PREFS_FILE"
+}
+
+pref_set() {
+  key=${1-}
+  value=${2-}
+  ensure_pref_dir
+  set_kv_file "$PREFS_FILE" "$key" "$value"
+}
+
+default_env_path() {
+  default_path=$STONR_CONFIG_DIR/relay.env
+  if saved=$(pref_get env_path 2>/dev/null); then
+    if is_volatile_env_path "$saved"; then
+      migrate_env_path "$saved" "$default_path"
+    else
+      printf '%s\n' "$saved"
+    fi
+    return 0
+  fi
+  pref_set env_path "$default_path"
+  printf '%s\n' "$default_path"
+}
+
+resolve_env_path() {
+  hint=${1-}
+  if [ -n "$hint" ]; then
+    if is_volatile_env_path "$hint"; then
+      migrate_env_path "$hint" "$STONR_CONFIG_DIR/relay.env"
+    else
+      printf '%s\n' "$hint"
+    fi
+  else
+    default_env_path
+  fi
+}
+
+is_volatile_env_path() {
+  path=${1-}
+  case "$path" in
+    "$REPO_ROOT/.env"|"$APP_DIR/"*|*/Contents/Resources/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+migrate_env_path() {
+  old_path=${1-}
+  new_path=${2-}
+  mkdir -p "$(dirname "$new_path")"
+  if [ -f "$old_path" ] && [ ! -f "$new_path" ]; then
+    cp "$old_path" "$new_path"
+  fi
+  pref_set env_path "$new_path"
+  printf '%s\n' "$new_path"
+}
+
+env_get() {
+  file=${1-}
+  key=${2-}
+  [ -f "$file" ] || return 1
+  awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); found = 1 } END { exit found ? 0 : 1 }' "$file"
+}
+
+set_kv_file() {
+  file=${1-}
+  key=${2-}
+  value=${3-}
+  dir=$(dirname "$file")
+  lockdir=$dir/.lock.$(basename "$file")
+  mkdir -p "$dir"
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    sleep 0.05
+  done
+  trap 'rmdir "$lockdir" 2>/dev/null || :' EXIT HUP INT TERM
+  tmp=$(mktemp "$dir/.tmp.XXXXXX")
+  if [ -f "$file" ]; then
+    awk -v key="$key" -v value="$value" '
+      BEGIN { done = 0 }
+      $0 ~ ("^" key "=") {
+        print key "=" value
+        done = 1
+        next
+      }
+      { print }
+      END {
+        if (!done) {
+          print key "=" value
+        }
+      }
+    ' "$file" > "$tmp"
+  else
+    printf '%s=%s\n' "$key" "$value" > "$tmp"
+  fi
+  mv "$tmp" "$file"
+  rmdir "$lockdir" 2>/dev/null || :
+  trap - EXIT HUP INT TERM
+}
+
+sanitize_env_value() {
+  printf '%s' "${1-}" | tr '\r\n' '  ' | awk '
+    BEGIN { ORS = "" }
+    {
+      gsub(/[[:space:]]+/, " ")
+      sub(/^ /, "")
+      sub(/ $/, "")
+      print
+    }
+  '
+}
+
+ensure_env_file() {
+  env_path=${1-}
+  if [ -f "$env_path" ]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$env_path")"
+  store_root=$(default_store_root)
+  mkdir -p "$store_root/admin" "$store_root/runtime"
+  cat >"$env_path" <<EOF
+STORE_ROOT=$store_root
+BIND_HTTP=127.0.0.1:7777
+BIND_WS=127.0.0.1:7778
+VERIFY_SIG=0
+FILTER_PRIVATE_MESSAGES=1
+RELAYS_UPSTREAM=$(default_relays_upstream)
+FILE_HASH_DENYLIST_PATH=$store_root/admin/file-hashes.deny
+EOF
+}
+
+default_store_root() {
+  printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/stonr/relay"
+}
+
+default_relays_upstream() {
+  printf '%s\n' "wss://relay.damus.io,wss://nos.lol,wss://purplepag.es,wss://relay.primal.net,wss://relay.nostr.band,wss://relay.snort.social,wss://relay.nsec.app"
+}
+
+normalize_env_file() {
+  env_path=${1-}
+  ensure_env_file "$env_path"
+  if store_root=$(env_get "$env_path" STORE_ROOT 2>/dev/null); then
+    if [ -n "$store_root" ]; then
+      return 0
+    fi
+  fi
+  store_root=$(default_store_root)
+  mkdir -p "$store_root/admin" "$store_root/runtime"
+  set_kv_file "$env_path" STORE_ROOT "$store_root"
+}
+
+store_root_from_env() {
+  env_path=${1-}
+  if store_root=$(env_get "$env_path" STORE_ROOT 2>/dev/null); then
+    if [ -n "$store_root" ]; then
+      printf '%s\n' "$store_root"
+      return 0
+    fi
+  else
+    :
+  fi
+  printf '%s\n' "$(default_store_root)"
+}
+
+pid_path() {
+  env_path=${1-}
+  store_root=$(store_root_from_env "$env_path")
+  printf '%s\n' "$store_root/runtime/relay.pid"
+}
+
+log_path() {
+  env_path=${1-}
+  store_root=$(store_root_from_env "$env_path")
+  printf '%s\n' "$store_root/runtime/relay.log"
+}
+
+ensure_runtime_dirs() {
+  env_path=${1-}
+  normalize_env_file "$env_path"
+  store_root=$(store_root_from_env "$env_path")
+  mkdir -p "$store_root/admin" "$store_root/runtime"
+}
+
+choose_dir() {
+  initial=${1-}
+  if [ -n "$initial" ] && [ -d "$initial" ]; then
+    start_dir=$initial
+  else
+    start_dir=$(dirname "${initial:-$(default_store_root)}")
+    [ -d "$start_dir" ] || start_dir=$HOME
+  fi
+  if command -v osascript >/dev/null 2>&1; then
+    osascript <<EOF
+set startDir to POSIX file "$(printf '%s' "$start_dir" | sed "s/\"/\\\\\"/g")"
+tell application "System Events"
+  activate
+end tell
+set chosenFolder to choose folder with prompt "Choose relay store root" default location startDir
+POSIX path of chosenFolder
+EOF
+    return 0
+  fi
+  if command -v zenity >/dev/null 2>&1; then
+    zenity --file-selection --directory --filename "$start_dir/"
+    return 0
+  fi
+  if command -v kdialog >/dev/null 2>&1; then
+    kdialog --getexistingdirectory "$start_dir"
+    return 0
+  fi
+  printf '%s\n' "stonr-control-backend: no directory picker available" >&2
+  exit 1
+}
+
+relay_pid() {
+  env_path=${1-}
+  file=$(pid_path "$env_path")
+  [ -f "$file" ] || return 1
+  pid=$(tr -d ' \r\n' < "$file")
+  [ -n "$pid" ] || return 1
+  printf '%s\n' "$pid"
+}
+
+find_running_relay_pid() {
+  env_path=${1-}
+  ps ax -o pid=,command= | awk -v env_path="$env_path" '
+    index($0, "stonr") && index($0, "--env " env_path) && index($0, " serve") {
+      print $1
+      found = 1
+      exit 0
+    }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+relay_running() {
+  env_path=${1-}
+  if pid=$(relay_pid "$env_path" 2>/dev/null); then
+    if kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    rm -f "$(pid_path "$env_path")"
+  fi
+  if pid=$(find_running_relay_pid "$env_path" 2>/dev/null); then
+    printf '%s\n' "$pid" > "$(pid_path "$env_path")"
+    return 0
+  fi
+  return 1
+}
+
+resolve_stonr_bin() {
+  if [ -x "$REPO_ROOT/target/debug/stonr" ]; then
+    printf '%s\n' "$REPO_ROOT/target/debug/stonr"
+    return 0
+  fi
+  if command -v stonr >/dev/null 2>&1; then
+    command -v stonr
+    return 0
+  fi
+  printf '%s\n' "$REPO_ROOT/target/debug/stonr"
+}
+
+ensure_stonr_bin() {
+  bin=$(resolve_stonr_bin)
+  if [ -x "$bin" ]; then
+    printf '%s\n' "$bin"
+    return 0
+  fi
+  cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml"
+  resolve_stonr_bin
+}
+
+run_stonr() {
+  bin=$(ensure_stonr_bin)
+  "$bin" "$@"
+}
+
+status_kv() {
+  env_path=${1-}
+  status=stopped
+  running=0
+  pid=
+  if relay_running "$env_path"; then
+    status=running
+    running=1
+    pid=$(relay_pid "$env_path")
+  fi
+  printf '%s\n' "env_path=$env_path"
+  printf '%s\n' "store_root=$(store_root_from_env "$env_path")"
+  printf '%s\n' "pid_path=$(pid_path "$env_path")"
+  printf '%s\n' "log_path=$(log_path "$env_path")"
+  printf '%s\n' "status=$status"
+  printf '%s\n' "running=$running"
+  printf '%s\n' "pid=$pid"
+}
+
+decode_base64() {
+  if printf '' | base64 --decode >/dev/null 2>&1; then
+    base64 --decode
+    return 0
+  fi
+  if printf '' | base64 -D >/dev/null 2>&1; then
+    base64 -D
+    return 0
+  fi
+  if printf '' | base64 -d >/dev/null 2>&1; then
+    base64 -d
+    return 0
+  fi
+  printf '%s\n' "stonr-control-backend: base64 decoder not available" >&2
+  exit 1
+}
+
+list_path() {
+  env_path=${1-}
+  name=${2-}
+  store_root=$(store_root_from_env "$env_path")
+  case "$name" in
+    pubkeys-allow) printf '%s\n' "$store_root/admin/pubkeys.allow" ;;
+    pubkeys-deny) printf '%s\n' "$store_root/admin/pubkeys.deny" ;;
+    file-hashes-deny)
+      if path=$(env_get "$env_path" FILE_HASH_DENYLIST_PATH 2>/dev/null); then
+        printf '%s\n' "$path"
+      else
+        printf '%s\n' "$store_root/admin/file-hashes.deny"
+      fi
+      ;;
+    *)
+      printf '%s\n' "stonr-control-backend: unknown list name: $name" >&2
+      exit 2
+      ;;
+  esac
+}
+
+maybe_bind_hash_denylist_path() {
+  env_path=${1-}
+  name=${2-}
+  path=${3-}
+  if [ "$name" = "file-hashes-deny" ]; then
+    set_kv_file "$env_path" FILE_HASH_DENYLIST_PATH "$path"
+  fi
+}
+
+case "${1-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+esac
+
+cmd=${1-}
+[ -n "$cmd" ] || {
+  usage >&2
+  exit 2
+}
+shift
+
+case "$cmd" in
+  choose-dir)
+    choose_dir "${1-}"
+    ;;
+  get-ui-prefs)
+    ensure_pref_dir
+    [ -f "$PREFS_FILE" ] && cat "$PREFS_FILE"
+    ;;
+  set-ui-pref)
+    key=${1-}
+    value=${2-}
+    [ -n "$key" ] || {
+      printf '%s\n' "stonr-control-backend: set-ui-pref requires KEY" >&2
+      exit 2
+    }
+    pref_set "$key" "$value"
+    ;;
+  doctor)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    printf '%s\n' "repo_root=$REPO_ROOT"
+    printf '%s\n' "app_dir=$APP_DIR"
+    printf '%s\n' "env_path=$env_path"
+    printf '%s\n' "store_root=$(store_root_from_env "$env_path")"
+    printf '%s\n' "stonr_bin=$(resolve_stonr_bin)"
+    status_kv "$env_path"
+    ;;
+  load-config)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    run_stonr --env "$env_path" print-config
+    ;;
+  load-env)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    cat "$env_path"
+    ;;
+  count-events)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    root=$(store_root_from_env "$env_path")
+    if [ -d "$root/events" ]; then
+      find "$root/events" -type f | wc -l | awk '{print $1}'
+    else
+      printf '0\n'
+    fi
+    ;;
+  size-events)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    root=$(store_root_from_env "$env_path")
+    if [ -d "$root/events" ]; then
+      find "$root/events" -type f -exec stat -f '%z' {} \; | awk '{sum += $1} END {print sum + 0}'
+    else
+      printf '0\n'
+    fi
+    ;;
+  purge-events)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    run_stonr --env "$env_path" purge-events
+    ;;
+  query-events)
+    env_path=$(resolve_env_path "${1-}")
+    search=${2-}
+    limit=${3-50}
+    query_limit=$((limit * 2))
+    normalize_env_file "$env_path"
+    if [ -n "$search" ]; then
+      run_stonr --env "$env_path" query --search "$search" --limit "$query_limit" | python3 -c '
+import json, re, sys, time
+
+MAX_CONTENT = 220
+IMAGE_RE = re.compile(r"https?://\S+\.(?:png|jpe?g|gif|webp|avif)(?:\?\S*)?$", re.I)
+URL_RE = re.compile(r"https?://\S+")
+LIMIT = int(sys.argv[1])
+NOW = int(time.time())
+
+def image_url_from_text(text):
+    for match in URL_RE.findall(text or ""):
+        if IMAGE_RE.match(match.rstrip(".,);]")):
+            return match.rstrip(".,);]")
+    return None
+
+def image_url_from_tags(event):
+    for tag in event.get("tags") or []:
+        if not isinstance(tag, list):
+            continue
+        for value in tag[1:]:
+            if isinstance(value, str):
+                image = image_url_from_text(value)
+                if image:
+                    return image
+    return None
+
+def preview_text(event):
+    kind = event.get("kind")
+    content = str(event.get("content") or "").strip()
+    if kind == 1059:
+        return "Encrypted message payload"
+    if kind == 1063:
+        return "File metadata event"
+    if not content:
+        return "(empty content)"
+    if len(content) > MAX_CONTENT:
+        content = content[:MAX_CONTENT - 1].rstrip() + "…"
+    return content
+
+def summarize(event):
+    return {
+        "id": event.get("id", ""),
+        "pubkey": event.get("pubkey", ""),
+        "kind": event.get("kind"),
+        "created_at": event.get("created_at"),
+        "content": preview_text(event),
+        "image_url": image_url_from_text(str(event.get("content") or "")) or image_url_from_tags(event),
+    }
+
+events = json.load(sys.stdin)
+summaries = [summarize(event) for event in events]
+summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
+summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
+summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
+json.dump(summaries[:LIMIT], sys.stdout)
+' "$limit"
+    else
+      run_stonr --env "$env_path" query --limit "$query_limit" | python3 -c '
+import json, re, sys, time
+
+MAX_CONTENT = 220
+IMAGE_RE = re.compile(r"https?://\S+\.(?:png|jpe?g|gif|webp|avif)(?:\?\S*)?$", re.I)
+URL_RE = re.compile(r"https?://\S+")
+LIMIT = int(sys.argv[1])
+NOW = int(time.time())
+
+def image_url_from_text(text):
+    for match in URL_RE.findall(text or ""):
+        if IMAGE_RE.match(match.rstrip(".,);]")):
+            return match.rstrip(".,);]")
+    return None
+
+def image_url_from_tags(event):
+    for tag in event.get("tags") or []:
+        if not isinstance(tag, list):
+            continue
+        for value in tag[1:]:
+            if isinstance(value, str):
+                image = image_url_from_text(value)
+                if image:
+                    return image
+    return None
+
+def preview_text(event):
+    kind = event.get("kind")
+    content = str(event.get("content") or "").strip()
+    if kind == 1059:
+        return "Encrypted message payload"
+    if kind == 1063:
+        return "File metadata event"
+    if not content:
+        return "(empty content)"
+    if len(content) > MAX_CONTENT:
+        content = content[:MAX_CONTENT - 1].rstrip() + "…"
+    return content
+
+def summarize(event):
+    return {
+        "id": event.get("id", ""),
+        "pubkey": event.get("pubkey", ""),
+        "kind": event.get("kind"),
+        "created_at": event.get("created_at"),
+        "content": preview_text(event),
+        "image_url": image_url_from_text(str(event.get("content") or "")) or image_url_from_tags(event),
+    }
+
+events = json.load(sys.stdin)
+summaries = [summarize(event) for event in events]
+summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
+summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
+summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
+json.dump(summaries[:LIMIT], sys.stdout)
+' "$limit"
+    fi
+    ;;
+  save-env)
+    env_path=$(resolve_env_path "${1-}")
+    key=${2-}
+    value=${3-}
+    [ -n "$key" ] || {
+      printf '%s\n' "stonr-control-backend: save-env requires KEY" >&2
+      exit 2
+    }
+    normalize_env_file "$env_path"
+    value=$(sanitize_env_value "$value")
+    if [ "$key" = "STORE_ROOT" ] && [ -z "$value" ]; then
+      value=$(default_store_root)
+    fi
+    set_kv_file "$env_path" "$key" "$value"
+    ensure_runtime_dirs "$env_path"
+    ;;
+  load-list)
+    env_path=$(resolve_env_path "${1-}")
+    name=${2-}
+    [ -n "$name" ] || {
+      printf '%s\n' "stonr-control-backend: load-list requires NAME" >&2
+      exit 2
+    }
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    path=$(list_path "$env_path" "$name")
+    [ -f "$path" ] && cat "$path"
+    ;;
+  save-list)
+    env_path=$(resolve_env_path "${1-}")
+    name=${2-}
+    payload=${3-}
+    [ -n "$name" ] || {
+      printf '%s\n' "stonr-control-backend: save-list requires NAME" >&2
+      exit 2
+    }
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    path=$(list_path "$env_path" "$name")
+    mkdir -p "$(dirname "$path")"
+    printf '%s' "$payload" | decode_base64 > "$path"
+    maybe_bind_hash_denylist_path "$env_path" "$name" "$path"
+    ;;
+  open-store-root)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    root=$(store_root_from_env "$env_path")
+    mkdir -p "$root"
+    if command -v open >/dev/null 2>&1; then
+      open "$root"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$root"
+    else
+      printf '%s\n' "stonr-control-backend: no folder opener available" >&2
+      exit 1
+    fi
+    printf '%s\n' "$root"
+    ;;
+  relay-status)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    status_kv "$env_path"
+    ;;
+  relay-start)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    if relay_running "$env_path"; then
+      status_kv "$env_path"
+      exit 0
+    fi
+    bin=$(ensure_stonr_bin)
+    log_file=$(log_path "$env_path")
+    pid_file=$(pid_path "$env_path")
+    mkdir -p "$(dirname "$log_file")"
+    nohup "$bin" --env "$env_path" serve >>"$log_file" 2>&1 &
+    pid=$!
+    printf '%s\n' "$pid" > "$pid_file"
+    sleep 1
+    if relay_running "$env_path"; then
+      status_kv "$env_path"
+      exit 0
+    fi
+    rm -f "$pid_file"
+    printf '%s\n' "stonr-control-backend: relay failed to start" >&2
+    exit 1
+    ;;
+  relay-stop)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    if relay_running "$env_path"; then
+      pid=$(relay_pid "$env_path")
+      kill "$pid" 2>/dev/null || true
+      i=0
+      while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do
+        sleep 0.2
+        i=$((i + 1))
+      done
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    fi
+    rm -f "$(pid_path "$env_path")"
+    if relay_running "$env_path"; then
+      printf '%s\n' "stonr-control-backend: relay failed to stop" >&2
+      exit 1
+    fi
+    status_kv "$env_path"
+    ;;
+  relay-restart)
+    env_path=$(resolve_env_path "${1-}")
+    "$0" relay-stop "$env_path" >/dev/null
+    "$0" relay-start "$env_path"
+    ;;
+  tail-log)
+    env_path=$(resolve_env_path "${1-}")
+    lines=${2-200}
+    normalize_env_file "$env_path"
+    file=$(log_path "$env_path")
+    [ -f "$file" ] && tail -n "$lines" "$file"
+    ;;
+  verify)
+    env_path=$(resolve_env_path "${1-}")
+    sample=${2-100}
+    normalize_env_file "$env_path"
+    run_stonr --env "$env_path" verify --sample "$sample"
+    ;;
+  *)
+    printf '%s\n' "stonr-control-backend: unknown command: $cmd" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
