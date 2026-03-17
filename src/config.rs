@@ -27,6 +27,10 @@ pub struct Settings {
     pub filter_tag_t: Option<Vec<String>>,
     /// Strategy for determining the starting timestamp when mirroring.
     pub filter_since_mode: SinceMode,
+    /// Optional maximum number of stored events.
+    pub max_stored_events: Option<usize>,
+    /// Optional maximum total bytes for stored event files.
+    pub max_stored_event_bytes: Option<u64>,
 }
 
 /// Determines how the mirroring process derives the `since` value for subscriptions.
@@ -78,6 +82,12 @@ impl Settings {
         } else {
             SinceMode::Cursor
         };
+        let max_stored_events = env_value(&env, "MAX_STORED_EVENTS")
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|value| *value > 0);
+        let max_stored_event_bytes = env_value(&env, "MAX_STORED_EVENT_BYTES")
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|value| *value > 0);
         Ok(Self {
             store_root,
             bind_http,
@@ -89,6 +99,8 @@ impl Settings {
             filter_kinds,
             filter_tag_t,
             filter_since_mode,
+            max_stored_events,
+            max_stored_event_bytes,
         })
     }
 }
@@ -184,6 +196,8 @@ mod tests {
             &vec![String::from("essay")]
         );
         assert_eq!(cfg.filter_since_mode, SinceMode::Fixed(1700000000));
+        assert_eq!(cfg.max_stored_events, None);
+        assert_eq!(cfg.max_stored_event_bytes, None);
     }
 
     #[test]
@@ -234,6 +248,8 @@ mod tests {
         assert!(cfg.filter_kinds.is_none());
         assert!(cfg.filter_tag_t.is_none());
         assert_eq!(cfg.filter_since_mode, SinceMode::Cursor);
+        assert!(cfg.max_stored_events.is_none());
+        assert!(cfg.max_stored_event_bytes.is_none());
     }
 
     #[test]
@@ -289,6 +305,27 @@ mod tests {
         .unwrap();
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert_eq!(cfg.filter_since_mode, SinceMode::Fixed(0));
+    }
+
+    #[test]
+    fn retention_limits_parse() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let env_path = dir.path().join(".env");
+        fs::write(
+            &env_path,
+            concat!(
+                "STORE_ROOT=/tmp\n",
+                "BIND_HTTP=127.0.0.1:8080\n",
+                "BIND_WS=127.0.0.1:8081\n",
+                "MAX_STORED_EVENTS=12\n",
+                "MAX_STORED_EVENT_BYTES=1048576\n",
+            ),
+        )
+        .unwrap();
+        let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
+        assert_eq!(cfg.max_stored_events, Some(12));
+        assert_eq!(cfg.max_stored_event_bytes, Some(1_048_576));
     }
 
     #[test]

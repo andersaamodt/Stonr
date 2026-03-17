@@ -21,12 +21,24 @@ use std::os::unix::fs as unix_fs;
 pub struct Store {
     root: PathBuf,
     verify_sig: bool,
+    max_stored_events: Option<usize>,
+    max_stored_event_bytes: Option<u64>,
 }
 
 impl Store {
     /// Create a new store rooted at `root`.
-    pub fn new(root: PathBuf, verify_sig: bool) -> Self {
-        Self { root, verify_sig }
+    pub fn new(
+        root: PathBuf,
+        verify_sig: bool,
+        max_stored_events: Option<usize>,
+        max_stored_event_bytes: Option<u64>,
+    ) -> Self {
+        Self {
+            root,
+            verify_sig,
+            max_stored_events,
+            max_stored_event_bytes,
+        }
     }
 
     /// Ensure the on-disk directory structure exists.
@@ -95,7 +107,8 @@ impl Store {
 
         // Update lookup indexes and create mirror symlinks.
         self.index_event(ev)?;
-        self.write_mirror_links(ev)
+        self.write_mirror_links(ev)?;
+        self.enforce_retention().map(|_| ())
     }
 
     /// Verify Schnorr signatures for a random sample of stored events.
@@ -120,6 +133,48 @@ impl Store {
 
     /// Rebuild all indexes and latest pointers from the `events/` tree.
     pub fn reindex(&self) -> Result<()> {
+        self.rebuild_metadata()
+    }
+
+    /// Apply configured retention limits immediately.
+    pub fn enforce_retention(&self) -> Result<usize> {
+        if self.max_stored_events.is_none() && self.max_stored_event_bytes.is_none() {
+            return Ok(0);
+        }
+        let mut records = self.load_event_records()?;
+        let mut total_bytes: u64 = records.iter().map(|record| record.size_bytes).sum();
+        let mut total_events = records.len();
+        let mut removed = 0usize;
+        records.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        for record in &records {
+            let over_events = self
+                .max_stored_events
+                .map(|limit| total_events > limit)
+                .unwrap_or(false);
+            let over_bytes = self
+                .max_stored_event_bytes
+                .map(|limit| total_bytes > limit)
+                .unwrap_or(false);
+            if !over_events && !over_bytes {
+                break;
+            }
+            fs::remove_file(&record.path)?;
+            total_events = total_events.saturating_sub(1);
+            total_bytes = total_bytes.saturating_sub(record.size_bytes);
+            removed += 1;
+        }
+        if removed > 0 {
+            self.rebuild_metadata()?;
+        }
+        Ok(removed)
+    }
+
+    fn rebuild_metadata(&self) -> Result<()> {
         let index_dir = self.root.join("index");
         if index_dir.exists() {
             fs::remove_dir_all(&index_dir)?;
@@ -128,22 +183,64 @@ impl Store {
         if latest_dir.exists() {
             fs::remove_dir_all(&latest_dir)?;
         }
+        let mirror_dir = self.root.join("mirror");
+        if mirror_dir.exists() {
+            fs::remove_dir_all(&mirror_dir)?;
+        }
+        let log_dir = self.root.join("log");
+        if log_dir.exists() {
+            fs::remove_dir_all(&log_dir)?;
+        }
         // recreate directory structure for indexes and latest
         fs::create_dir_all(self.root.join("index/by-author"))?;
         fs::create_dir_all(self.root.join("index/by-kind"))?;
         fs::create_dir_all(self.root.join("index/by-tag/d"))?;
         fs::create_dir_all(self.root.join("index/by-tag/t"))?;
         fs::create_dir_all(self.root.join("latest"))?;
+        fs::create_dir_all(self.root.join("mirror/authors"))?;
+        fs::create_dir_all(self.root.join("mirror/kinds"))?;
+        fs::create_dir_all(self.root.join("log"))?;
 
+        let mut records = self.load_event_records()?;
+        records.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let log_path = self.root.join("log/events.ndjson");
+        let mut log_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(log_path)?;
+        for record in records {
+            self.index_event(&record.event)?;
+            self.write_mirror_links(&record.event)?;
+            serde_json::to_writer(&mut log_file, &record.event)?;
+            log_file.write_all(b"\n")?;
+        }
+        Ok(())
+    }
+
+    fn load_event_records(&self) -> Result<Vec<StoredEventRecord>> {
+        let mut records = vec![];
         for entry in walkdir::WalkDir::new(self.root.join("events")) {
             let entry = entry?;
             if entry.file_type().is_file() {
-                let data = fs::read_to_string(entry.path())?;
+                let path = entry.into_path();
+                let data = fs::read_to_string(&path)?;
                 let ev: Event = serde_json::from_str(&data)?;
-                self.index_event(&ev)?;
+                let size_bytes = fs::metadata(&path)?.len();
+                records.push(StoredEventRecord {
+                    id: ev.id.clone(),
+                    created_at: ev.created_at,
+                    size_bytes,
+                    path,
+                    event: ev,
+                });
             }
         }
-        Ok(())
+        Ok(records)
     }
 
     /// Update text-file indexes and latest pointers for an event.
@@ -312,6 +409,14 @@ impl Store {
         }
         Ok(events)
     }
+}
+
+struct StoredEventRecord {
+    id: String,
+    created_at: u64,
+    size_bytes: u64,
+    path: PathBuf,
+    event: Event,
 }
 
 /// Read newline-separated IDs from a text file.
