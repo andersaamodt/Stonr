@@ -302,25 +302,48 @@ relay_running() {
   return 1
 }
 
+resolve_repo_root() {
+  conf_path=$REPO_ROOT/wizardry.workspace.conf
+  if [ -f "$conf_path" ]; then
+    root=$(
+      awk -F= '$1 == "root" { print substr($0, index($0, "=") + 1); exit }' "$conf_path"
+    )
+    if [ -n "${root:-}" ] && [ -f "$root/Cargo.toml" ]; then
+      printf '%s\n' "$root"
+      return 0
+    fi
+  fi
+  printf '%s\n' "$REPO_ROOT"
+}
+
 resolve_stonr_bin() {
-  if [ -x "$REPO_ROOT/target/debug/stonr" ]; then
-    printf '%s\n' "$REPO_ROOT/target/debug/stonr"
+  repo_root=$(resolve_repo_root)
+  if [ -x "$repo_root/target/debug/stonr" ]; then
+    printf '%s\n' "$repo_root/target/debug/stonr"
     return 0
   fi
   if command -v stonr >/dev/null 2>&1; then
     command -v stonr
     return 0
   fi
-  printf '%s\n' "$REPO_ROOT/target/debug/stonr"
+  if [ "$repo_root" != "$REPO_ROOT" ] && [ -x "$REPO_ROOT/target/debug/stonr" ]; then
+    printf '%s\n' "$REPO_ROOT/target/debug/stonr"
+    return 0
+  fi
+  printf '%s\n' "$repo_root/target/debug/stonr"
 }
 
 ensure_stonr_bin() {
+  repo_root=$(resolve_repo_root)
   bin=$(resolve_stonr_bin)
   if [ -x "$bin" ]; then
     printf '%s\n' "$bin"
     return 0
   fi
-  cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml"
+  if ! cargo build --quiet --manifest-path "$repo_root/Cargo.toml"; then
+    printf '%s\n' "stonr-control-backend: failed to build stonr binary" >&2
+    exit 1
+  fi
   resolve_stonr_bin
 }
 
@@ -430,7 +453,7 @@ case "$cmd" in
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
     ensure_runtime_dirs "$env_path"
-    printf '%s\n' "repo_root=$REPO_ROOT"
+    printf '%s\n' "repo_root=$(resolve_repo_root)"
     printf '%s\n' "app_dir=$APP_DIR"
     printf '%s\n' "env_path=$env_path"
     printf '%s\n' "store_root=$(store_root_from_env "$env_path")"
@@ -480,7 +503,8 @@ case "$cmd" in
     query_limit=$((limit * 2))
     normalize_env_file "$env_path"
     if [ -n "$search" ]; then
-      run_stonr --env "$env_path" query --search "$search" --limit "$query_limit" | python3 -c '
+      query_json=$(run_stonr --env "$env_path" query --search "$search" --limit "$query_limit")
+      printf '%s' "$query_json" | python3 -c '
 import json, re, sys, time
 
 MAX_CONTENT = 220
@@ -537,7 +561,8 @@ summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
 json.dump(summaries[:LIMIT], sys.stdout)
 ' "$limit"
     else
-      run_stonr --env "$env_path" query --limit "$query_limit" | python3 -c '
+      query_json=$(run_stonr --env "$env_path" query --limit "$query_limit")
+      printf '%s' "$query_json" | python3 -c '
 import json, re, sys, time
 
 MAX_CONTENT = 220

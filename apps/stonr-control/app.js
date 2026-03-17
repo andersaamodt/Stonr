@@ -529,6 +529,26 @@
     return String(result.stdout || '');
   }
 
+  function summarizeBackendError(error, fallback) {
+    var message = String((error && error.message) || fallback || 'Command failed').trim();
+    if (!message) {
+      return fallback || 'Command failed';
+    }
+    if (message.indexOf('stonr-control-backend:') === 0) {
+      return message.replace(/^stonr-control-backend:\s*/, '').trim();
+    }
+    if (message.indexOf('Traceback ') >= 0) {
+      message = message.split(/\nTraceback /, 1)[0].trim();
+    }
+    message = message.split('\n').find(function (line) {
+      return String(line || '').trim();
+    }) || message;
+    if (/failed to run custom build command/.test(message)) {
+      return 'Failed to build local stonr binary.';
+    }
+    return message;
+  }
+
   function parseKv(blob) {
     var out = {};
     String(blob || '').split('\n').forEach(function (line) {
@@ -638,7 +658,7 @@
       hydrateAfterBoot();
     } catch (error) {
       console.error(error);
-      toast(error.message || 'Failed to load relay state', 'bad');
+      toast(summarizeBackendError(error, 'Failed to load relay state'), 'bad');
       renderRuntimeFallback();
       renderActiveSection();
       revealBootUi();
@@ -1405,7 +1425,7 @@
         }
       }).catch(function (error) {
         console.error(error);
-        toast(error.message || 'Failed to load events', 'bad');
+        toast(summarizeBackendError(error, 'Failed to load events'), 'bad');
       });
     }, 220);
   }
@@ -1444,7 +1464,7 @@
         state.events = [];
         state.eventsTotal = 0;
         state.eventsBytes = 0;
-        state.eventsError = error.message || 'Failed to load events.';
+        state.eventsError = summarizeBackendError(error, 'Failed to load events');
         state.eventsLoadedOnce = true;
       } else {
         state.eventsError = '';
