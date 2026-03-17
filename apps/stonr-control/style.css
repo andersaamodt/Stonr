@@ -740,6 +740,13 @@ h4 {
   background: var(--line);
 }
 
+.section-note {
+  margin: -0.08rem 0 0.12rem 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .field-disabled {
   opacity: 0.54;
 }

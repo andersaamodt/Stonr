@@ -162,6 +162,7 @@
         groupField('Store Retention'),
         numberField('MAX_STORED_EVENT_BYTES', 'policy.max_stored_event_bytes', 'Max stored event size', '', null, null, 'When stored event files exceed this total size, it deletes the oldest stored events first. Leave blank for unlimited.'),
         numberField('MAX_STORED_EVENTS', 'policy.max_stored_events', 'Max stored events', '', null, null, 'When this relay stores more events than this, it deletes the oldest stored events first. Leave blank for unlimited.'),
+        noteField('When either limit is reached, the oldest stored events are deleted first and the newest events are kept.'),
         groupField('Rate Limits'),
         numberField('RATE_LIMIT_WINDOW_SECS', 'policy.rate_limit_window_secs', 'Rate-limit window', '', null, null, 'Time window used for the read, write, count, and upload limits below.'),
         numberField('MAX_QUERIES_PER_WINDOW', 'policy.max_queries_per_window', 'Reads per window', '', null, null, 'How many read queries one actor can make per rate-limit window.'),
@@ -852,6 +853,9 @@
     if (field.type === 'group') {
       return renderGroupField(field);
     }
+    if (field.type === 'note') {
+      return renderNoteField(field);
+    }
     var wrap = document.createElement('div');
     wrap.className = 'field' + (field.type === 'bool' ? ' checkbox-field' : '');
     if (sectionId === 'nips') {
@@ -1054,6 +1058,13 @@
     group.className = 'field-group';
     appendNipText(group, field.label);
     return group;
+  }
+
+  function renderNoteField(field) {
+    var note = document.createElement('p');
+    note.className = 'section-note';
+    note.textContent = field.text;
+    return note;
   }
 
   function displayValue(field) {
@@ -1834,6 +1845,10 @@
 
   function groupField(label) {
     return { type: 'group', label: label };
+  }
+
+  function noteField(text) {
+    return { type: 'note', text: text };
   }
 
   function getPath(source, path) {
