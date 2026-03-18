@@ -13,9 +13,9 @@ use tokio_tungstenite::{client_async, connect_async, tungstenite::Message, WebSo
 use url::Url;
 
 use crate::{
-    config::{Settings, SinceMode},
-    event::Event,
-    storage::Store,
+    config::{MirrorMode, Settings, SinceMode},
+    event::{Event, Tag},
+    storage::{Query, Store},
 };
 
 fn is_private_message_kind(kind: u32) -> bool {
@@ -27,11 +27,27 @@ pub async fn run(cfg: Settings, store: Store) {
     for relay in cfg.relays_upstream.clone() {
         let cfg_clone = cfg.clone();
         let store_clone = store.clone();
-        tokio::spawn(async move {
-            if let Err(e) = mirror_relay(relay, cfg_clone, store_clone).await {
-                eprintln!("mirror error: {e}");
+        match cfg.mirror_mode {
+            MirrorMode::Broad => {
+                tokio::spawn(async move { mirror_relay_forever(relay, cfg_clone, store_clone).await });
             }
-        });
+            MirrorMode::Site => {
+                let posts_relay = relay.clone();
+                let posts_cfg = cfg_clone.clone();
+                let posts_store = store_clone.clone();
+                tokio::spawn(async move {
+                    mirror_site_posts_forever(posts_relay, posts_cfg, posts_store).await;
+                });
+                if cfg.mirror_site_include_comments {
+                    let comments_relay = relay.clone();
+                    let comments_cfg = cfg_clone.clone();
+                    let comments_store = store_clone.clone();
+                    tokio::spawn(async move {
+                        mirror_site_comments_forever(comments_relay, comments_cfg, comments_store).await;
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -46,7 +62,16 @@ pub async fn run(cfg: Settings, store: Store) {
 ///    updating the latest timestamp seen.
 /// 4. After receiving `EOSE`, write the cursor so the next run resumes from the
 ///    newest event.
-async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> {
+async fn mirror_relay_forever(relay: String, cfg: Settings, store: Store) {
+    loop {
+        if let Err(e) = mirror_relay_once(relay.clone(), cfg.clone(), store.clone()).await {
+            eprintln!("mirror error: {e}");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
+async fn mirror_relay_once(relay: String, cfg: Settings, store: Store) -> Result<()> {
     // Determine the starting timestamp either from a stored cursor or a fixed
     // configuration value.
     let since = match cfg.filter_since_mode {
@@ -73,6 +98,12 @@ async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> 
             Value::Array(t.into_iter().map(Value::String).collect()),
         );
     }
+    if let Some(a) = cfg.filter_tag_a.clone() {
+        filter.insert(
+            "#a".into(),
+            Value::Array(a.into_iter().map(Value::String).collect()),
+        );
+    }
     if since > 0 {
         filter.insert("since".into(), Value::Number(since.into()));
     }
@@ -80,30 +111,143 @@ async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> 
     // Open the WebSocket (optionally through Tor) and send the subscription.
     let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
         let ws = connect_ws_via_proxy(&relay, proxy).await?;
-        mirror_stream(ws, req, since, cfg.filter_private_messages, &store).await?
+        mirror_stream(ws, vec![req], since, &cfg.store_root, &relay, cfg.filter_private_messages, &store, true).await?
     } else {
         let (ws, _) = connect_async(&relay).await?;
-        mirror_stream(ws, req, since, cfg.filter_private_messages, &store).await?
+        mirror_stream(ws, vec![req], since, &cfg.store_root, &relay, cfg.filter_private_messages, &store, true).await?
     };
     // Persist the cursor so the next run resumes from where we left off.
     write_cursor(&cfg.store_root, &relay, latest)?;
     Ok(())
 }
 
+#[cfg(test)]
+async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> {
+    mirror_relay_once(relay, cfg, store).await
+}
+
+async fn mirror_site_posts_forever(relay: String, cfg: Settings, store: Store) {
+    loop {
+        if let Err(e) = mirror_site_posts_once(relay.clone(), cfg.clone(), store.clone()).await {
+            eprintln!("site mirror post error: {e}");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
+async fn mirror_site_posts_once(relay: String, cfg: Settings, store: Store) -> Result<()> {
+    let author = match cfg.mirror_site_author.clone() {
+        Some(author) if !author.is_empty() => author,
+        _ => return Ok(()),
+    };
+    let since = match cfg.filter_since_mode {
+        SinceMode::Cursor => read_cursor(&cfg.store_root, &format!("{relay}::site-posts")).unwrap_or(0),
+        SinceMode::Fixed(ts) => ts,
+    };
+    let mut filter = serde_json::Map::new();
+    filter.insert("authors".into(), Value::Array(vec![Value::String(author)]));
+    filter.insert("kinds".into(), Value::Array(vec![Value::Number(30023u32.into())]));
+    if since > 0 {
+        filter.insert("since".into(), Value::Number(since.into()));
+    }
+    let req = json!(["REQ", "site-posts", Value::Object(filter)]);
+    let cursor_key = format!("{relay}::site-posts");
+    let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
+        let ws = connect_ws_via_proxy(&relay, proxy).await?;
+        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, true).await?
+    } else {
+        let (ws, _) = connect_async(&relay).await?;
+        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, true).await?
+    };
+    write_cursor(&cfg.store_root, &cursor_key, latest)?;
+    Ok(())
+}
+
+async fn mirror_site_comments_forever(relay: String, cfg: Settings, store: Store) {
+    loop {
+        if let Err(e) = mirror_site_comments_once(relay.clone(), cfg.clone(), store.clone()).await {
+            eprintln!("site mirror comment error: {e}");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
+}
+
+async fn mirror_site_comments_once(relay: String, cfg: Settings, store: Store) -> Result<()> {
+    let author = match cfg.mirror_site_author.clone() {
+        Some(author) if !author.is_empty() => author,
+        _ => return Ok(()),
+    };
+    let post_events = store.query(Query {
+        authors: Some(vec![author.clone()]),
+        kinds: Some(vec![30023]),
+        d: None,
+        t: None,
+        tags: vec![],
+        since: None,
+        until: None,
+        limit: Some(5000),
+    })?;
+    let mut addresses = vec![];
+    for ev in post_events {
+        if let Some(d_tag) = ev.tags.iter().find_map(|Tag(fields)| match fields.as_slice() {
+            [tag, value, ..] if tag == "d" => Some(value.clone()),
+            _ => None,
+        }) {
+            addresses.push(format!("30023:{}:{}", ev.pubkey, d_tag));
+        }
+    }
+    addresses.sort();
+    addresses.dedup();
+    if addresses.is_empty() {
+        return Ok(());
+    }
+    let since = match cfg.filter_since_mode {
+        SinceMode::Cursor => read_cursor(&cfg.store_root, &format!("{relay}::site-comments")).unwrap_or(0),
+        SinceMode::Fixed(ts) => ts,
+    };
+    let mut filter = serde_json::Map::new();
+    filter.insert("kinds".into(), Value::Array(vec![Value::Number(1u32.into())]));
+    filter.insert(
+        "#a".into(),
+        Value::Array(addresses.into_iter().map(Value::String).collect()),
+    );
+    if since > 0 {
+        filter.insert("since".into(), Value::Number(since.into()));
+    }
+    let req = json!(["REQ", "site-comments", Value::Object(filter)]);
+    let cursor_key = format!("{relay}::site-comments");
+    let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
+        let ws = connect_ws_via_proxy(&relay, proxy).await?;
+        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, false).await?
+    } else {
+        let (ws, _) = connect_async(&relay).await?;
+        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, false).await?
+    };
+    write_cursor(&cfg.store_root, &cursor_key, latest)?;
+    Ok(())
+}
+
 async fn mirror_stream<S>(
     mut ws: WebSocketStream<S>,
-    req: Value,
+    reqs: Vec<Value>,
     since: u64,
+    store_root: &PathBuf,
+    cursor_key: &str,
     filter_private_messages: bool,
     store: &Store,
+    keep_running_after_eose: bool,
 ) -> Result<u64>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    ws.send(Message::Text(req.to_string())).await?;
+    for req in reqs {
+        ws.send(Message::Text(req.to_string())).await?;
+    }
     let mut latest = since;
     while let Some(msg) = ws.next().await {
-        match msg? {
+        match msg {
+            Err(_) => break,
+            Ok(msg) => match msg {
             Message::Text(txt) => {
                 if let Ok(val) = serde_json::from_str::<Value>(&txt) {
                     if let Some(arr) = val.as_array() {
@@ -116,10 +260,12 @@ where
                                     }
                                     if let Err(e) = store.ingest(&ev) {
                                         eprintln!("ingest error: {e}");
+                                    } else {
+                                        let _ = write_cursor(store_root, cursor_key, latest);
                                     }
                                 }
                             }
-                            Some("EOSE") => break,
+                            Some("EOSE") if !keep_running_after_eose => break,
                             _ => {}
                         }
                     }
@@ -127,7 +273,7 @@ where
             }
             Message::Close(_) => break,
             _ => {}
-        }
+        }}
     }
     Ok(latest)
 }
@@ -198,11 +344,33 @@ fn write_cursor(root: &PathBuf, relay: &str, ts: u64) -> Result<()> {
 mod tests {
     use super::*;
     use crate::{
-        config::{Settings, SinceMode},
+        config::{MirrorMode, Settings, SinceMode},
         event::{Event, Tag},
     };
     use tempfile::TempDir;
     use tokio_tungstenite::{accept_async, tungstenite::Message as TMsg};
+
+    fn base_settings(root: &std::path::Path) -> Settings {
+        Settings {
+            store_root: root.to_path_buf(),
+            bind_http: String::new(),
+            bind_ws: String::new(),
+            verify_sig: false,
+            filter_private_messages: false,
+            relays_upstream: vec![],
+            tor_socks: None,
+            filter_authors: None,
+            filter_kinds: None,
+            filter_tag_t: None,
+            filter_tag_a: None,
+            filter_since_mode: SinceMode::Fixed(0),
+            mirror_mode: MirrorMode::Broad,
+            mirror_site_author: None,
+            mirror_site_include_comments: true,
+            max_stored_events: None,
+            max_stored_event_bytes: None,
+        }
+    }
 
     #[tokio::test]
     async fn mirror_ingests_and_updates_cursor() {
@@ -249,21 +417,8 @@ mod tests {
         });
 
         let relay_url = format!("ws://{}", addr);
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: false,
-            filter_private_messages: false,
-            relays_upstream: vec![relay_url.clone()],
-            tor_socks: None,
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Fixed(0),
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
         mirror_relay(relay_url, cfg.clone(), store.clone())
             .await
             .unwrap();
@@ -320,21 +475,12 @@ mod tests {
                 .unwrap();
         });
 
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: "127.0.0.1:0".into(),
-            bind_ws: "127.0.0.1:0".into(),
-            verify_sig: false,
-            filter_private_messages: true,
-            relays_upstream: vec![format!("ws://{}", ws_addr)],
-            tor_socks: None,
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Cursor,
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.bind_http = "127.0.0.1:0".into();
+        cfg.bind_ws = "127.0.0.1:0".into();
+        cfg.filter_private_messages = true;
+        cfg.relays_upstream = vec![format!("ws://{}", ws_addr)];
+        cfg.filter_since_mode = SinceMode::Cursor;
         super::run(cfg, store.clone()).await;
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         server.await.unwrap();
@@ -376,21 +522,9 @@ mod tests {
                 .unwrap();
         });
 
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: false,
-            filter_private_messages: false,
-            relays_upstream: vec![relay_url.clone()],
-            tor_socks: None,
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Cursor,
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        cfg.filter_since_mode = SinceMode::Cursor;
         mirror_relay(relay_url.clone(), cfg, store.clone())
             .await
             .unwrap();
@@ -479,21 +613,9 @@ mod tests {
 
         let proxy = spawn_socks_proxy(addr).await;
         let relay_url = format!("ws://{}", addr);
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: false,
-            filter_private_messages: false,
-            relays_upstream: vec![relay_url.clone()],
-            tor_socks: Some(proxy.to_string()),
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Fixed(0),
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        cfg.tor_socks = Some(proxy.to_string());
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
         assert!(dir.path().join("events/aa/11/aa11.json").exists());
@@ -523,21 +645,12 @@ mod tests {
                 .unwrap();
         });
         let relay_url = format!("ws://{}", addr);
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: false,
-            filter_private_messages: false,
-            relays_upstream: vec![relay_url.clone()],
-            tor_socks: None,
-            filter_authors: Some(vec!["a1".into()]),
-            filter_kinds: Some(vec![1]),
-            filter_tag_t: Some(vec!["tag1".into()]),
-            filter_since_mode: SinceMode::Fixed(5),
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        cfg.filter_authors = Some(vec!["a1".into()]);
+        cfg.filter_kinds = Some(vec![1]);
+        cfg.filter_tag_t = Some(vec!["tag1".into()]);
+        cfg.filter_since_mode = SinceMode::Fixed(5);
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
     }
@@ -576,21 +689,9 @@ mod tests {
                 .unwrap();
         });
         let relay_url = format!("ws://{}", addr);
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: false,
-            filter_private_messages: false,
-            relays_upstream: vec![relay_url.clone()],
-            tor_socks: None,
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Cursor,
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        cfg.filter_since_mode = SinceMode::Cursor;
         mirror_relay(relay_url.clone(), cfg, store.clone())
             .await
             .unwrap();
@@ -631,21 +732,8 @@ mod tests {
                 .unwrap();
         });
         let relay_url = format!("ws://{}", addr);
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: false,
-            filter_private_messages: false,
-            relays_upstream: vec![relay_url.clone()],
-            tor_socks: None,
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Fixed(0),
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
         assert!(dir.path().join("events/aa/11/aa11.json").exists());
@@ -684,21 +772,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
         store.init().unwrap();
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: false,
-            filter_private_messages: false,
-            relays_upstream: vec!["ws://127.0.0.1:1".into()],
-            tor_socks: None,
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Fixed(0),
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec!["ws://127.0.0.1:1".into()];
         super::run(cfg, store).await;
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -729,21 +804,9 @@ mod tests {
                 .unwrap();
         });
         let relay_url = format!("ws://{}", addr);
-        let cfg = Settings {
-            store_root: dir.path().to_path_buf(),
-            bind_http: String::new(),
-            bind_ws: String::new(),
-            verify_sig: true,
-            filter_private_messages: false,
-            relays_upstream: vec![relay_url.clone()],
-            tor_socks: None,
-            filter_authors: None,
-            filter_kinds: None,
-            filter_tag_t: None,
-            filter_since_mode: SinceMode::Fixed(0),
-            max_stored_events: None,
-            max_stored_event_bytes: None,
-        };
+        let mut cfg = base_settings(dir.path());
+        cfg.verify_sig = true;
+        cfg.relays_upstream = vec![relay_url.clone()];
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
         assert!(!dir.path().join("events/ba/d0/bad.json").exists());

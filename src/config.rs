@@ -28,8 +28,16 @@ pub struct Settings {
     pub filter_kinds: Option<Vec<u32>>,
     /// Optional `#t` tag filters for mirroring.
     pub filter_tag_t: Option<Vec<String>>,
+    /// Optional `#a` tag filters for mirroring.
+    pub filter_tag_a: Option<Vec<String>>,
     /// Strategy for determining the starting timestamp when mirroring.
     pub filter_since_mode: SinceMode,
+    /// High-level mirror behavior.
+    pub mirror_mode: MirrorMode,
+    /// In site mirror mode, the site author's pubkey.
+    pub mirror_site_author: Option<String>,
+    /// In site mirror mode, whether to mirror kind 1 comments that reference imported posts.
+    pub mirror_site_include_comments: bool,
     /// Optional maximum number of stored events.
     pub max_stored_events: Option<usize>,
     /// Optional maximum total bytes for stored event files.
@@ -43,6 +51,13 @@ pub enum SinceMode {
     Cursor,
     /// Start from a fixed Unix timestamp.
     Fixed(u64),
+}
+
+/// High-level mirroring behavior.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum MirrorMode {
+    Broad,
+    Site,
 }
 
 impl Settings {
@@ -80,12 +95,29 @@ impl Settings {
                 Some(v)
             }
         });
+        let filter_tag_a = env_value(&env, "FILTER_TAG_A").and_then(|s| {
+            let v = csv_strings(s);
+            if v.is_empty() {
+                None
+            } else {
+                Some(v)
+            }
+        });
         let since_str = env_value(&env, "FILTER_SINCE_MODE").unwrap_or("cursor");
         let filter_since_mode = if let Some(rest) = since_str.strip_prefix("fixed:") {
             SinceMode::Fixed(rest.parse().unwrap_or(0))
         } else {
             SinceMode::Cursor
         };
+        let mirror_mode = match env_value(&env, "MIRROR_MODE").unwrap_or("broad") {
+            "site" => MirrorMode::Site,
+            _ => MirrorMode::Broad,
+        };
+        let mirror_site_author = env_value(&env, "MIRROR_SITE_AUTHOR")
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let mirror_site_include_comments =
+            env_value(&env, "MIRROR_SITE_INCLUDE_COMMENTS").unwrap_or("1") == "1";
         let max_stored_events = env_value(&env, "MAX_STORED_EVENTS")
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|value| *value > 0);
@@ -103,7 +135,11 @@ impl Settings {
             filter_authors,
             filter_kinds,
             filter_tag_t,
+            filter_tag_a,
             filter_since_mode,
+            mirror_mode,
+            mirror_site_author,
+            mirror_site_include_comments,
             max_stored_events,
             max_stored_event_bytes,
         })
@@ -181,6 +217,7 @@ mod tests {
                 "FILTER_AUTHORS=npub1\n",
                 "FILTER_KINDS=1,30023\n",
                 "FILTER_TAG_T=essay\n",
+                "FILTER_TAG_A=30023:pubkey:slug\n",
                 "FILTER_SINCE_MODE=fixed:1700000000\n"
             ),
         )
@@ -201,7 +238,14 @@ mod tests {
             cfg.filter_tag_t.as_ref().unwrap(),
             &vec![String::from("essay")]
         );
+        assert_eq!(
+            cfg.filter_tag_a.as_ref().unwrap(),
+            &vec![String::from("30023:pubkey:slug")]
+        );
         assert_eq!(cfg.filter_since_mode, SinceMode::Fixed(1700000000));
+        assert_eq!(cfg.mirror_mode, MirrorMode::Broad);
+        assert!(cfg.mirror_site_author.is_none());
+        assert!(cfg.mirror_site_include_comments);
         assert_eq!(cfg.max_stored_events, None);
         assert_eq!(cfg.max_stored_event_bytes, None);
     }
@@ -254,7 +298,11 @@ mod tests {
         assert!(cfg.filter_authors.is_none());
         assert!(cfg.filter_kinds.is_none());
         assert!(cfg.filter_tag_t.is_none());
+        assert!(cfg.filter_tag_a.is_none());
         assert_eq!(cfg.filter_since_mode, SinceMode::Cursor);
+        assert_eq!(cfg.mirror_mode, MirrorMode::Broad);
+        assert!(cfg.mirror_site_author.is_none());
+        assert!(cfg.mirror_site_include_comments);
         assert!(cfg.max_stored_events.is_none());
         assert!(cfg.max_stored_event_bytes.is_none());
     }
@@ -273,6 +321,7 @@ mod tests {
                 "FILTER_AUTHORS=\n",
                 "FILTER_KINDS=\n",
                 "FILTER_TAG_T=\n",
+                "FILTER_TAG_A=\n",
             ),
         )
         .unwrap();
@@ -280,6 +329,7 @@ mod tests {
         assert!(cfg.filter_authors.is_none());
         assert!(cfg.filter_kinds.is_none());
         assert!(cfg.filter_tag_t.is_none());
+        assert!(cfg.filter_tag_a.is_none());
     }
 
     #[test]
@@ -371,5 +421,28 @@ mod tests {
         .unwrap();
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert!(!cfg.filter_private_messages);
+    }
+
+    #[test]
+    fn site_mirror_mode_parses() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let env_path = dir.path().join(".env");
+        fs::write(
+            &env_path,
+            concat!(
+                "STORE_ROOT=/tmp\n",
+                "BIND_HTTP=127.0.0.1:8080\n",
+                "BIND_WS=127.0.0.1:8081\n",
+                "MIRROR_MODE=site\n",
+                "MIRROR_SITE_AUTHOR=abcdef\n",
+                "MIRROR_SITE_INCLUDE_COMMENTS=0\n"
+            ),
+        )
+        .unwrap();
+        let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
+        assert_eq!(cfg.mirror_mode, MirrorMode::Site);
+        assert_eq!(cfg.mirror_site_author.as_deref(), Some("abcdef"));
+        assert!(!cfg.mirror_site_include_comments);
     }
 }

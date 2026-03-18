@@ -13,6 +13,7 @@ use hex;
 use rand::{seq::SliceRandom, thread_rng};
 use secp256k1::{schnorr::Signature, Message, Secp256k1, XOnlyPublicKey};
 use serde_json::{to_writer, Value};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 use crate::event::{Event, Tag};
@@ -121,6 +122,9 @@ impl Store {
         self.write_mirror_links(ev)?;
         let size_bytes = fs::metadata(&path)?.len();
         self.bump_stats_cache(size_bytes)?;
+        if self.max_stored_events.is_some() || self.max_stored_event_bytes.is_some() {
+            self.enforce_retention_locked()?;
+        }
         Ok(())
     }
 
@@ -153,6 +157,10 @@ impl Store {
     /// Apply configured retention limits immediately.
     pub fn enforce_retention(&self) -> Result<usize> {
         let _lock = self.mutation_lock()?;
+        self.enforce_retention_locked()
+    }
+
+    fn enforce_retention_locked(&self) -> Result<usize> {
         if self.max_stored_events.is_none() && self.max_stored_event_bytes.is_none() {
             return Ok(0);
         }
@@ -185,6 +193,8 @@ impl Store {
         }
         if removed > 0 {
             self.rewrite_event_log(records.into_iter().skip(removed))?;
+            self.rebuild_metadata()?;
+        } else {
             self.write_stats_cache(total_events, total_bytes)?;
         }
         Ok(removed)
@@ -374,7 +384,7 @@ impl Store {
                 match fields[0].as_str() {
                     "d" => {
                         // `#d` tags also update a latest pointer for replaceable events.
-                        self.append_index("index/by-tag/d", &fields[1], &ev.id)?;
+                        self.append_tag_index("d", &fields[1], &ev.id)?;
                         let latest = self
                             .root
                             .join("latest")
@@ -386,9 +396,11 @@ impl Store {
                     }
                     "t" => {
                         // Topic (`#t`) tags get their own index directory.
-                        self.append_index("index/by-tag/t", &fields[1], &ev.id)?;
+                        self.append_tag_index("t", &fields[1], &ev.id)?;
                     }
-                    _ => {}
+                    other => {
+                        self.append_tag_index(other, &fields[1], &ev.id)?;
+                    }
                 }
             }
         }
@@ -438,6 +450,23 @@ impl Store {
         Ok(())
     }
 
+    fn append_tag_index(&self, tag_key: &str, tag_value: &str, id: &str) -> Result<()> {
+        let path = self
+            .root
+            .join("index/by-tag")
+            .join(tag_key)
+            .join(format!("{}.txt", hashed_index_name(tag_value)));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        writeln!(f, "{}", id)?;
+        Ok(())
+    }
+
     /// Compute the canonical path for an event ID.
     fn event_path(&self, id: &str) -> PathBuf {
         let sub1 = &id[0..2];
@@ -476,12 +505,30 @@ impl Store {
             sets.push(self.load_ids("index/by-kind", &keys)?);
         }
         if let Some(d) = q.d {
-            let path = self.root.join("index/by-tag/d").join(format!("{}.txt", d));
+            let path = self
+                .root
+                .join("index/by-tag/d")
+                .join(format!("{}.txt", hashed_index_name(&d)));
             sets.push(read_ids(&path)?);
         }
         if let Some(t) = q.t {
-            let path = self.root.join("index/by-tag/t").join(format!("{}.txt", t));
+            let path = self
+                .root
+                .join("index/by-tag/t")
+                .join(format!("{}.txt", hashed_index_name(&t)));
             sets.push(read_ids(&path)?);
+        }
+        for (tag, values) in q.tags {
+            let mut ids = std::collections::HashSet::new();
+            for value in values {
+                let path = self
+                    .root
+                    .join("index/by-tag")
+                    .join(&tag)
+                    .join(format!("{}.txt", hashed_index_name(&value)));
+                ids.extend(read_ids(&path)?);
+            }
+            sets.push(ids);
         }
         if sets.is_empty() {
             return Ok(vec![]);
@@ -565,6 +612,7 @@ pub struct Query {
     pub kinds: Option<Vec<u32>>,
     pub d: Option<String>,
     pub t: Option<String>,
+    pub tags: Vec<(String, Vec<String>)>,
     pub since: Option<u64>,
     pub until: Option<u64>,
     pub limit: Option<usize>,
@@ -597,6 +645,32 @@ impl Query {
             .and_then(|arr| arr.get(0))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let tags = val
+            .as_object()
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(key, value)| {
+                        let tag_key = key.strip_prefix('#')?;
+                        if tag_key == "d" || tag_key == "t" {
+                            return None;
+                        }
+                        let values = value
+                            .as_array()
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if values.is_empty() {
+                            None
+                        } else {
+                            Some((tag_key.to_string(), values))
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let since = val.get("since").and_then(|v| v.as_u64());
         let until = val.get("until").and_then(|v| v.as_u64());
         let limit = val
@@ -608,11 +682,18 @@ impl Query {
             kinds,
             d,
             t,
+            tags,
             since,
             until,
             limit,
         }
     }
+}
+
+fn hashed_index_name(value: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(value.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 /// Recompute the Nostr event hash from its fields.
@@ -733,6 +814,7 @@ mod tests {
                 kinds: Some(vec![30023]),
                 d: Some("s2".into()),
                 t: None,
+                tags: vec![],
                 since: None,
                 until: None,
                 limit: Some(10),
@@ -775,12 +857,18 @@ mod tests {
             sig: String::new(),
         };
         store.ingest(&ev).unwrap();
-        let tag_path = dir.path().join("index/by-tag/t/tag1.txt");
+        let tag_path = dir
+            .path()
+            .join(format!("index/by-tag/t/{}.txt", super::hashed_index_name("tag1")));
         let contents = fs::read_to_string(&tag_path).unwrap();
         assert_eq!(contents.trim(), "aa11");
         fs::remove_file(tag_path).unwrap();
         store.reindex().unwrap();
-        let rebuilt = fs::read_to_string(dir.path().join("index/by-tag/t/tag1.txt")).unwrap();
+        let rebuilt = fs::read_to_string(
+            dir.path()
+                .join(format!("index/by-tag/t/{}.txt", super::hashed_index_name("tag1"))),
+        )
+        .unwrap();
         assert_eq!(rebuilt.trim(), "aa11");
     }
 
@@ -802,6 +890,7 @@ mod tests {
                 kinds: Some(vec![30023]),
                 d: Some("slug".into()),
                 t: None,
+                tags: vec![],
                 since: None,
                 until: None,
                 limit: None,
@@ -856,6 +945,7 @@ mod tests {
                 kinds: Some(vec![1]),
                 d: None,
                 t: None,
+                tags: vec![],
                 since: Some(15),
                 until: Some(25),
                 limit: Some(1),
@@ -876,6 +966,7 @@ mod tests {
                 kinds: None,
                 d: None,
                 t: None,
+                tags: vec![],
                 since: None,
                 until: None,
                 limit: None,
@@ -960,6 +1051,7 @@ mod tests {
                 kinds: Some(vec![1]),
                 d: None,
                 t: None,
+                tags: vec![],
                 since: None,
                 until: None,
                 limit: Some(10),
