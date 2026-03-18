@@ -36,6 +36,14 @@ pub struct Settings {
     pub enable_search: bool,
     /// Enable upstream mirroring when relays are configured.
     pub enable_mirroring: bool,
+    /// Allow only these event kinds when set.
+    pub allowed_kinds: Option<Vec<u32>>,
+    /// Reject these event kinds when set.
+    pub blocked_kinds: Option<Vec<u32>>,
+    /// Allow only these author pubkeys when set.
+    pub allowed_pubkeys: Option<Vec<String>>,
+    /// Reject these author pubkeys when set.
+    pub blocked_pubkeys: Option<Vec<String>>,
     /// Enable NIP-42 relay authentication.
     pub enable_nip42: bool,
     /// Require authenticated sessions for read/query access.
@@ -88,6 +96,22 @@ pub struct Settings {
     pub max_stored_events: Option<usize>,
     /// Optional maximum total bytes for stored event files.
     pub max_stored_event_bytes: Option<u64>,
+    /// Optional maximum number of events returned by a single read query.
+    pub max_limit: Option<usize>,
+    /// Optional maximum serialized event size accepted for ingest.
+    pub max_event_bytes: Option<usize>,
+    /// Optional maximum accepted event age in seconds.
+    pub max_event_age_secs: Option<u64>,
+    /// Optional maximum future skew accepted for event timestamps.
+    pub max_event_future_secs: Option<u64>,
+    /// Optional rate-limit window in seconds.
+    pub rate_limit_window_secs: Option<u64>,
+    /// Optional maximum read queries per actor within one rate-limit window.
+    pub max_queries_per_window: Option<usize>,
+    /// Optional maximum COUNT queries per actor within one rate-limit window.
+    pub max_counts_per_window: Option<usize>,
+    /// Optional maximum publishes per actor within one rate-limit window.
+    pub max_publishes_per_window: Option<usize>,
 }
 
 /// Determines how the mirroring process derives the `since` value for subscriptions.
@@ -127,6 +151,10 @@ impl Settings {
         let enable_tag_queries = env_value(&env, "ENABLE_TAG_QUERIES").unwrap_or("1") == "1";
         let enable_search = env_value(&env, "ENABLE_SEARCH").unwrap_or("1") == "1";
         let enable_mirroring = env_value(&env, "ENABLE_MIRRORING").unwrap_or("1") == "1";
+        let allowed_kinds = env_value(&env, "ALLOW_KINDS").and_then(csv_u32_opt);
+        let blocked_kinds = env_value(&env, "DENY_KINDS").and_then(csv_u32_opt);
+        let allowed_pubkeys = env_value(&env, "ALLOW_PUBKEYS").and_then(csv_strings_opt);
+        let blocked_pubkeys = env_value(&env, "DENY_PUBKEYS").and_then(csv_strings_opt);
         let enable_nip42 = env_value(&env, "ENABLE_NIP42").unwrap_or("0") == "1";
         let require_auth_for_query = env_value(&env, "REQUIRE_AUTH_FOR_QUERY").unwrap_or("0") == "1";
         let require_auth_for_count = env_value(&env, "REQUIRE_AUTH_FOR_COUNT").unwrap_or("0") == "1";
@@ -200,6 +228,30 @@ impl Settings {
         let max_stored_event_bytes = env_value(&env, "MAX_STORED_EVENT_BYTES")
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|value| *value > 0);
+        let max_limit = env_value(&env, "MAX_LIMIT")
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|value| *value > 0);
+        let max_event_bytes = env_value(&env, "MAX_EVENT_BYTES")
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|value| *value > 0);
+        let max_event_age_secs = env_value(&env, "MAX_EVENT_AGE_SECS")
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|value| *value > 0);
+        let max_event_future_secs = env_value(&env, "MAX_EVENT_FUTURE_SECS")
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|value| *value > 0);
+        let rate_limit_window_secs = env_value(&env, "RATE_LIMIT_WINDOW_SECS")
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|value| *value > 0);
+        let max_queries_per_window = env_value(&env, "MAX_QUERIES_PER_WINDOW")
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|value| *value > 0);
+        let max_counts_per_window = env_value(&env, "MAX_COUNTS_PER_WINDOW")
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|value| *value > 0);
+        let max_publishes_per_window = env_value(&env, "MAX_PUBLISHES_PER_WINDOW")
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|value| *value > 0);
         Ok(Self {
             store_root,
             bind_http,
@@ -215,6 +267,10 @@ impl Settings {
             enable_tag_queries,
             enable_search,
             enable_mirroring,
+            allowed_kinds,
+            blocked_kinds,
+            allowed_pubkeys,
+            blocked_pubkeys,
             enable_nip42,
             require_auth_for_query,
             require_auth_for_count,
@@ -241,6 +297,14 @@ impl Settings {
             mirror_site_include_comments,
             max_stored_events,
             max_stored_event_bytes,
+            max_limit,
+            max_event_bytes,
+            max_event_age_secs,
+            max_event_future_secs,
+            rate_limit_window_secs,
+            max_queries_per_window,
+            max_counts_per_window,
+            max_publishes_per_window,
         })
     }
 
@@ -344,6 +408,24 @@ pub fn csv_u32(input: impl AsRef<str>) -> Vec<u32> {
     s.split(',').filter_map(|s| s.trim().parse().ok()).collect()
 }
 
+fn csv_strings_opt(input: &str) -> Option<Vec<String>> {
+    let values = csv_strings(input);
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
+fn csv_u32_opt(input: &str) -> Option<Vec<u32>> {
+    let values = csv_u32(input);
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,13 +446,25 @@ mod tests {
                 "BIND_HTTP=127.0.0.1:8080\n",
                 "BIND_WS=127.0.0.1:8081\n",
                 "VERIFY_SIG=1\n",
+                "ALLOW_KINDS=1,30023\n",
+                "DENY_KINDS=4,1059\n",
+                "ALLOW_PUBKEYS=npub1,npub2\n",
+                "DENY_PUBKEYS=npub3\n",
                 "RELAYS_UPSTREAM=ws://r1,ws://r2\n",
                 "TOR_SOCKS=\n",
                 "FILTER_AUTHORS=npub1\n",
                 "FILTER_KINDS=1,30023\n",
                 "FILTER_TAG_T=essay\n",
                 "FILTER_TAG_A=30023:pubkey:slug\n",
-                "FILTER_SINCE_MODE=fixed:1700000000\n"
+                "FILTER_SINCE_MODE=fixed:1700000000\n",
+                "MAX_LIMIT=1000\n",
+                "MAX_EVENT_BYTES=262144\n",
+                "MAX_EVENT_AGE_SECS=31536000\n",
+                "MAX_EVENT_FUTURE_SECS=900\n",
+                "RATE_LIMIT_WINDOW_SECS=60\n",
+                "MAX_QUERIES_PER_WINDOW=120\n",
+                "MAX_COUNTS_PER_WINDOW=120\n",
+                "MAX_PUBLISHES_PER_WINDOW=60\n",
             ),
         )
         .unwrap();
@@ -389,6 +483,16 @@ mod tests {
         assert!(cfg.enable_tag_queries);
         assert!(cfg.enable_search);
         assert!(cfg.enable_mirroring);
+        assert_eq!(cfg.allowed_kinds.as_ref().unwrap(), &vec![1, 30023]);
+        assert_eq!(cfg.blocked_kinds.as_ref().unwrap(), &vec![4, 1059]);
+        assert_eq!(
+            cfg.allowed_pubkeys.as_ref().unwrap(),
+            &vec![String::from("npub1"), String::from("npub2")]
+        );
+        assert_eq!(
+            cfg.blocked_pubkeys.as_ref().unwrap(),
+            &vec![String::from("npub3")]
+        );
         assert!(!cfg.enable_nip42);
         assert!(!cfg.require_auth_for_query);
         assert!(!cfg.require_auth_for_count);
@@ -423,6 +527,14 @@ mod tests {
         assert!(cfg.mirror_site_include_comments);
         assert_eq!(cfg.max_stored_events, None);
         assert_eq!(cfg.max_stored_event_bytes, None);
+        assert_eq!(cfg.max_limit, Some(1000));
+        assert_eq!(cfg.max_event_bytes, Some(262144));
+        assert_eq!(cfg.max_event_age_secs, Some(31_536_000));
+        assert_eq!(cfg.max_event_future_secs, Some(900));
+        assert_eq!(cfg.rate_limit_window_secs, Some(60));
+        assert_eq!(cfg.max_queries_per_window, Some(120));
+        assert_eq!(cfg.max_counts_per_window, Some(120));
+        assert_eq!(cfg.max_publishes_per_window, Some(60));
     }
 
     #[test]
@@ -479,6 +591,10 @@ mod tests {
         assert!(cfg.enable_tag_queries);
         assert!(cfg.enable_search);
         assert!(cfg.enable_mirroring);
+        assert!(cfg.allowed_kinds.is_none());
+        assert!(cfg.blocked_kinds.is_none());
+        assert!(cfg.allowed_pubkeys.is_none());
+        assert!(cfg.blocked_pubkeys.is_none());
         assert!(!cfg.enable_nip42);
         assert!(!cfg.require_auth_for_query);
         assert!(!cfg.require_auth_for_count);
@@ -503,6 +619,14 @@ mod tests {
         assert!(cfg.mirror_site_include_comments);
         assert!(cfg.max_stored_events.is_none());
         assert!(cfg.max_stored_event_bytes.is_none());
+        assert!(cfg.max_limit.is_none());
+        assert!(cfg.max_event_bytes.is_none());
+        assert!(cfg.max_event_age_secs.is_none());
+        assert!(cfg.max_event_future_secs.is_none());
+        assert!(cfg.rate_limit_window_secs.is_none());
+        assert!(cfg.max_queries_per_window.is_none());
+        assert!(cfg.max_counts_per_window.is_none());
+        assert!(cfg.max_publishes_per_window.is_none());
     }
 
     #[test]

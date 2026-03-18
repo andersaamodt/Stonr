@@ -5,8 +5,9 @@
 mod config;
 mod auth;
 mod event;
-mod server;
 mod mirror;
+mod policy;
+mod server;
 mod storage;
 mod ws;
 
@@ -14,6 +15,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use clap::{Parser, Subcommand};
 use config::Settings;
+use policy::{apply_query_policy, current_unix_ts, validate_event};
 use serde_json::Value;
 use storage::Store;
 use tokio::sync::broadcast;
@@ -167,6 +169,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             for f in files {
                 let data = std::fs::read_to_string(&f)?;
                 let ev: event::Event = serde_json::from_str(&data)?;
+                validate_event(&cfg, &ev, current_unix_ts())?;
                 store.ingest_with_policy(&ev, cfg.delete_enabled(), cfg.expiration_enabled())?;
             }
         }
@@ -185,7 +188,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             limit,
             count,
         } => {
-            let q = cli_query(QueryArgs {
+            let q = apply_query_policy(
+                &cfg,
+                cli_query(QueryArgs {
                 authors,
                 kinds,
                 d,
@@ -194,7 +199,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 since,
                 until,
                 limit,
-            });
+                }),
+            );
             let events = store.query_with_policy(q, cfg.delete_enabled(), cfg.expiration_enabled())?;
             if count {
                 println!("{}", events.len());

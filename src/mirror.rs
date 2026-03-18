@@ -3,7 +3,6 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Result};
@@ -23,12 +22,9 @@ use url::Url;
 use crate::{
     config::{MirrorMode, Settings, SinceMode},
     event::{Event, Tag},
+    policy::{current_unix_ts, validate_event},
     storage::{Query, Store},
 };
-
-fn is_private_message_kind(kind: u32) -> bool {
-    matches!(kind, 4 | 13 | 14 | 15 | 1059)
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MirrorStatus {
@@ -211,7 +207,7 @@ async fn mirror_relay_once(
                 cursor_key: &relay,
                 relay: &relay,
                 scope: "broad",
-                filter_private_messages: cfg.filter_private_messages,
+                settings: &cfg,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
@@ -231,7 +227,7 @@ async fn mirror_relay_once(
                 cursor_key: &relay,
                 relay: &relay,
                 scope: "broad",
-                filter_private_messages: cfg.filter_private_messages,
+                settings: &cfg,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
@@ -315,7 +311,7 @@ async fn mirror_site_posts_once(
                 cursor_key: &cursor_key,
                 relay: &relay,
                 scope: "site-posts",
-                filter_private_messages: cfg.filter_private_messages,
+                settings: &cfg,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
@@ -335,7 +331,7 @@ async fn mirror_site_posts_once(
                 cursor_key: &cursor_key,
                 relay: &relay,
                 scope: "site-posts",
-                filter_private_messages: cfg.filter_private_messages,
+                settings: &cfg,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
@@ -444,7 +440,7 @@ async fn mirror_site_comments_once(
                 cursor_key: &cursor_key,
                 relay: &relay,
                 scope: "site-comments",
-                filter_private_messages: cfg.filter_private_messages,
+                settings: &cfg,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: false,
@@ -464,7 +460,7 @@ async fn mirror_site_comments_once(
                 cursor_key: &cursor_key,
                 relay: &relay,
                 scope: "site-comments",
-                filter_private_messages: cfg.filter_private_messages,
+                settings: &cfg,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: false,
@@ -482,7 +478,7 @@ struct MirrorStreamOptions<'a> {
     cursor_key: &'a str,
     relay: &'a str,
     scope: &'a str,
-    filter_private_messages: bool,
+    settings: &'a Settings,
     delete_enabled: bool,
     expiration_enabled: bool,
     keep_running_after_eose: bool,
@@ -513,8 +509,12 @@ where
                             Some("EVENT") if arr.len() >= 3 => {
                                 if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone()) {
                                     latest = latest.max(ev.created_at);
-                                    if options.filter_private_messages
-                                        && is_private_message_kind(ev.kind)
+                                    if validate_event(
+                                        options.settings,
+                                        &ev,
+                                        current_unix_ts(),
+                                    )
+                                    .is_err()
                                     {
                                         let _ = write_mirror_success(
                                             options.store_root,
@@ -752,13 +752,6 @@ fn write_mirror_error(
     })
 }
 
-fn current_unix_ts() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -790,6 +783,10 @@ mod tests {
             enable_tag_queries: true,
             enable_search: true,
             enable_mirroring: true,
+            allowed_kinds: None,
+            blocked_kinds: None,
+            allowed_pubkeys: None,
+            blocked_pubkeys: None,
             enable_nip42: false,
             require_auth_for_query: false,
             require_auth_for_count: false,
@@ -816,6 +813,14 @@ mod tests {
             mirror_site_include_comments: true,
             max_stored_events: None,
             max_stored_event_bytes: None,
+            max_limit: None,
+            max_event_bytes: None,
+            max_event_age_secs: None,
+            max_event_future_secs: None,
+            rate_limit_window_secs: None,
+            max_queries_per_window: None,
+            max_counts_per_window: None,
+            max_publishes_per_window: None,
         }
     }
 
@@ -934,6 +939,46 @@ mod tests {
 
         assert!(!dir.path().join("events/aa/11/aa11.json").exists());
         assert!(dir.path().join("events/bb/22/bb22.json").exists());
+    }
+
+    #[tokio::test]
+    async fn mirror_skips_blocked_authors() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let ws_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ws_addr = ws_listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = ws_listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await;
+            let blocked = Event {
+                id: "aa11".into(),
+                pubkey: "blocked".into(),
+                kind: 1,
+                created_at: 1,
+                tags: vec![],
+                content: "hello".into(),
+                sig: String::new(),
+            };
+            ws.send(TMsg::Text(json!(["EVENT", "mirror", blocked]).to_string()))
+                .await
+                .unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "mirror"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.blocked_pubkeys = Some(vec!["blocked".into()]);
+        cfg.relays_upstream = vec![format!("ws://{}", ws_addr)];
+        cfg.filter_since_mode = SinceMode::Cursor;
+        super::run(cfg, store.clone(), test_events_tx()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        server.await.unwrap();
+
+        assert!(!dir.path().join("events/aa/11/aa11.json").exists());
     }
     #[tokio::test]
     async fn mirror_resumes_from_cursor() {

@@ -10,6 +10,7 @@ use std::{
 use anyhow::Result;
 use axum::{
     extract::{
+        ConnectInfo,
         ws::{Message, WebSocket},
         State, WebSocketUpgrade,
     },
@@ -25,6 +26,10 @@ use crate::{
     auth::{verify_auth_event, SessionAuth},
     config::Settings,
     event::{Event, Tag},
+    policy::{
+        apply_query_policy, client_actor_label, current_unix_ts, enforce_rate_limit,
+        validate_event, RateLimitAction,
+    },
     storage::{event_hash, Query, Store},
 };
 
@@ -51,18 +56,23 @@ pub async fn serve_ws(
             settings,
             events_tx,
         }));
-    axum::serve(listener, app.into_make_service())
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(shutdown)
         .await?;
     Ok(())
 }
 
 /// Handle the HTTP upgrade and spawn the connection processor.
-async fn handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    ws.on_upgrade(|socket| async move { process(socket, state).await })
+async fn handler(
+    ws: WebSocketUpgrade,
+    connect: Option<ConnectInfo<SocketAddr>>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let peer_addr = connect.map(|info| info.0);
+    ws.on_upgrade(move |socket| async move { process(socket, state, peer_addr).await })
 }
 
-async fn process(socket: WebSocket, state: Arc<AppState>) {
+async fn process(socket: WebSocket, state: Arc<AppState>, peer_addr: Option<SocketAddr>) {
     let (mut writer, mut reader) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
     let writer_task = tokio::spawn(async move {
@@ -85,7 +95,7 @@ async fn process(socket: WebSocket, state: Arc<AppState>) {
         tokio::select! {
             incoming = reader.next() => {
                 match incoming {
-                    Some(Ok(Message::Text(txt))) => handle_text(&txt, &state, &out_tx, &mut subs, &mut auth).await,
+                    Some(Ok(Message::Text(txt))) => handle_text(&txt, &state, &out_tx, &mut subs, &mut auth, peer_addr).await,
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                     _ => {}
                 }
@@ -116,6 +126,7 @@ async fn handle_text(
     out_tx: &mpsc::UnboundedSender<String>,
     subs: &mut HashMap<String, Vec<Query>>,
     auth: &mut SessionAuth,
+    peer_addr: Option<SocketAddr>,
 ) {
     let val = match serde_json::from_str::<Value>(txt) {
         Ok(val) => val,
@@ -128,7 +139,12 @@ async fn handle_text(
     match arr.first().and_then(|v| v.as_str()) {
         Some("REQ") if arr.len() >= 3 => {
             let sub = arr.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let filters = arr.iter().skip(2).map(Query::from_value).collect::<Vec<_>>();
+            let filters = arr
+                .iter()
+                .skip(2)
+                .map(Query::from_value)
+                .map(|query| apply_query_policy(&state.settings, query))
+                .collect::<Vec<_>>();
             if !state.settings.query_enabled() {
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "read access disabled"]));
                 return;
@@ -148,6 +164,16 @@ async fn handle_text(
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
                 return;
             }
+            let actor = client_actor_label(peer_addr, auth.actor_pubkey());
+            if let Err(error) = enforce_rate_limit(
+                &state.settings,
+                RateLimitAction::Query,
+                &actor,
+                current_unix_ts(),
+            ) {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, format!("rate-limited: {error}")]));
+                return;
+            }
             let snapshot = snapshot_events(&state.store, &state.settings, &filters).unwrap_or_default();
             for event in snapshot {
                 send_json(out_tx, serde_json::json!(["EVENT", sub, event]));
@@ -159,7 +185,12 @@ async fn handle_text(
         }
         Some("COUNT") if arr.len() >= 3 => {
             let sub = arr.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let filters = arr.iter().skip(2).map(Query::from_value).collect::<Vec<_>>();
+            let filters = arr
+                .iter()
+                .skip(2)
+                .map(Query::from_value)
+                .map(|query| apply_query_policy(&state.settings, query))
+                .collect::<Vec<_>>();
             if !state.settings.query_enabled() || !state.settings.count_enabled() {
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "count queries disabled"]));
                 return;
@@ -177,6 +208,16 @@ async fn handle_text(
             }
             if filters.iter().any(|query| query.search.is_some()) && !state.settings.search_enabled() {
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
+                return;
+            }
+            let actor = client_actor_label(peer_addr, auth.actor_pubkey());
+            if let Err(error) = enforce_rate_limit(
+                &state.settings,
+                RateLimitAction::Count,
+                &actor,
+                current_unix_ts(),
+            ) {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, format!("rate-limited: {error}")]));
                 return;
             }
             let count = snapshot_events(&state.store, &state.settings, &filters)
@@ -201,6 +242,7 @@ async fn handle_text(
             }
             match serde_json::from_value::<Event>(arr[1].clone()) {
                 Ok(event) => {
+                    let actor = client_actor_label(peer_addr, auth.actor_pubkey());
                     if state.settings.publish_auth_required() && !auth.is_authenticated() {
                         if state.settings.nip42_enabled() {
                             send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
@@ -221,6 +263,15 @@ async fn handle_text(
                             send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
                         }
                         send_json(out_tx, serde_json::json!(["OK", event.id, false, msg]));
+                        return;
+                    }
+                    if let Err(error) = enforce_rate_limit(
+                        &state.settings,
+                        RateLimitAction::Publish,
+                        &actor,
+                        current_unix_ts(),
+                    ) {
+                        send_json(out_tx, serde_json::json!(["OK", event.id, false, format!("rate-limited: {error}")]));
                         return;
                     }
                     let result = publish_event(state, &event);
@@ -274,6 +325,7 @@ fn publish_event(state: &AppState, event: &Event) -> Result<()> {
     if calc_id != event.id {
         anyhow::bail!("id mismatch");
     }
+    validate_event(&state.settings, event, current_unix_ts())?;
     if state.store.ingest_with_policy(
         event,
         state.settings.delete_enabled(),
@@ -377,15 +429,6 @@ fn send_json(out_tx: &mpsc::UnboundedSender<String>, value: Value) {
     let _ = out_tx.send(value.to_string());
 }
 
-fn current_unix_ts() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 #[cfg(test)]
 #[allow(clippy::single_match)]
 mod tests {
@@ -411,6 +454,10 @@ mod tests {
             enable_tag_queries: true,
             enable_search: true,
             enable_mirroring: true,
+            allowed_kinds: None,
+            blocked_kinds: None,
+            allowed_pubkeys: None,
+            blocked_pubkeys: None,
             enable_nip42: false,
             require_auth_for_query: false,
             require_auth_for_count: false,
@@ -437,6 +484,14 @@ mod tests {
             mirror_site_include_comments: true,
             max_stored_events: None,
             max_stored_event_bytes: None,
+            max_limit: None,
+            max_event_bytes: None,
+            max_event_age_secs: None,
+            max_event_future_secs: None,
+            rate_limit_window_secs: None,
+            max_queries_per_window: None,
+            max_counts_per_window: None,
+            max_publishes_per_window: None,
         }
     }
 
@@ -1284,6 +1339,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ws_event_rejects_blocked_author() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.blocked_pubkeys = Some(vec!["p9".into()]);
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let event = hashed_event("p9", 1, 42, vec![], "hello world");
+        let publish = serde_json::json!(["EVENT", event]);
+        ws_stream
+            .send(TungMessage::Text(publish.to_string()))
+            .await
+            .unwrap();
+        let text = next_text(&mut ws_stream).await;
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value[0], "OK");
+        assert_eq!(value[2], false);
+        assert!(value[3].as_str().unwrap().contains("author is blocked"));
+        handle.abort();
+    }
+
+    #[tokio::test]
     async fn ws_sends_auth_challenge_when_nip42_enabled() {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
@@ -1344,6 +1437,42 @@ mod tests {
         }
         let closed = saw_closed.expect("expected CLOSED after unauthenticated REQ");
         assert_eq!(closed[2], "auth-required: relay login required");
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_req_rate_limits_reads() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        store
+            .ingest(&hashed_event("p1", 1, 1, vec![], "hello"))
+            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.rate_limit_window_secs = Some(60);
+        settings.max_queries_per_window = Some(1);
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState { store, settings, events_tx }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move { server.await.unwrap(); });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let req = serde_json::json!(["REQ", "sub1", {"authors": ["p1"], "kinds": [1]}]);
+        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+        let _ = next_text(&mut ws_stream).await;
+        let _ = next_text(&mut ws_stream).await;
+
+        let req = serde_json::json!(["REQ", "sub2", {"authors": ["p1"], "kinds": [1]}]);
+        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+        let text = next_text(&mut ws_stream).await;
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value[0], "CLOSED");
+        assert!(value[2].as_str().unwrap().contains("rate-limited"));
         handle.abort();
     }
 

@@ -36,6 +36,10 @@ impl SessionAuth {
     pub(crate) fn contains_pubkey(&self, pubkey: &str) -> bool {
         self.pubkeys.contains(pubkey)
     }
+
+    pub(crate) fn actor_pubkey(&self) -> Option<&str> {
+        self.pubkeys.iter().min().map(String::as_str)
+    }
 }
 
 pub(crate) fn verify_auth_event(

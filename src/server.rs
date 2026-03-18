@@ -3,7 +3,7 @@
 use anyhow::Result;
 use axum::{
     body::Body,
-    extract::{Query as AxumQuery, State},
+    extract::{ConnectInfo, Query as AxumQuery, State},
     http::header,
     routing::get,
     Json, Router,
@@ -14,6 +14,7 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 use crate::{
     config::Settings,
     mirror::{read_statuses, MirrorStatus},
+    policy::{apply_query_policy, client_actor_label, current_unix_ts, enforce_rate_limit, RateLimitAction},
     storage::{Query, Store},
 };
 
@@ -76,7 +77,7 @@ pub async fn serve_http(
         .route("/query", get(query))
         .route("/count", get(count))
         .with_state(Arc::new(AppState { store, settings }));
-    axum::serve(listener, app.into_make_service())
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(shutdown)
         .await?;
     Ok(())
@@ -264,6 +265,7 @@ fn params_to_query(params: QueryParams) -> Query {
 /// Parse query parameters and return matching events as NDJSON.
 async fn query(
     State(state): State<Arc<AppState>>,
+    connect: Option<ConnectInfo<SocketAddr>>,
     AxumQuery(params): AxumQuery<QueryParams>,
 ) -> axum::response::Response {
     if !state.settings.query_enabled() {
@@ -278,8 +280,20 @@ async fn query(
             .body(Body::from("relay auth required over websocket"))
             .unwrap();
     }
+    let actor = client_actor_label(connect.map(|info| info.0), None);
+    if let Err(error) = enforce_rate_limit(
+        &state.settings,
+        RateLimitAction::Query,
+        &actor,
+        current_unix_ts(),
+    ) {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::TOO_MANY_REQUESTS)
+            .body(Body::from(error.to_string()))
+            .unwrap();
+    }
     // Translate URL parameters into a `Query` structure shared with the WS API.
-    let q = params_to_query(params);
+    let q = apply_query_policy(&state.settings, params_to_query(params));
     if q.has_tag_filters() && !state.settings.tag_queries_enabled() {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::FORBIDDEN)
@@ -315,6 +329,7 @@ async fn query(
 /// Parse query parameters and return only the number of matching events.
 async fn count(
     State(state): State<Arc<AppState>>,
+    connect: Option<ConnectInfo<SocketAddr>>,
     AxumQuery(params): AxumQuery<QueryParams>,
 ) -> axum::response::Response {
     if !state.settings.query_enabled() || !state.settings.count_enabled() {
@@ -329,7 +344,19 @@ async fn count(
             .body(Body::from("relay auth required over websocket"))
             .unwrap();
     }
-    let q = params_to_query(params);
+    let actor = client_actor_label(connect.map(|info| info.0), None);
+    if let Err(error) = enforce_rate_limit(
+        &state.settings,
+        RateLimitAction::Count,
+        &actor,
+        current_unix_ts(),
+    ) {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::TOO_MANY_REQUESTS)
+            .body(Body::from(error.to_string()))
+            .unwrap();
+    }
+    let q = apply_query_policy(&state.settings, params_to_query(params));
     if q.has_tag_filters() && !state.settings.tag_queries_enabled() {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::FORBIDDEN)
@@ -404,6 +431,10 @@ mod tests {
             enable_tag_queries: true,
             enable_search: true,
             enable_mirroring: true,
+            allowed_kinds: None,
+            blocked_kinds: None,
+            allowed_pubkeys: None,
+            blocked_pubkeys: None,
             enable_nip42: false,
             require_auth_for_query: false,
             require_auth_for_count: false,
@@ -430,6 +461,14 @@ mod tests {
             mirror_site_include_comments: true,
             max_stored_events: None,
             max_stored_event_bytes: None,
+            max_limit: None,
+            max_event_bytes: None,
+            max_event_age_secs: None,
+            max_event_future_secs: None,
+            rate_limit_window_secs: None,
+            max_queries_per_window: None,
+            max_counts_per_window: None,
+            max_publishes_per_window: None,
         }
     }
 
@@ -626,6 +665,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn query_endpoint_applies_max_limit_cap() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        for event in [
+            Event {
+                id: "aa11".into(),
+                pubkey: "p1".into(),
+                kind: 1,
+                created_at: 1,
+                tags: vec![],
+                content: String::new(),
+                sig: String::new(),
+            },
+            Event {
+                id: "bb22".into(),
+                pubkey: "p1".into(),
+                kind: 1,
+                created_at: 2,
+                tags: vec![],
+                content: String::new(),
+                sig: String::new(),
+            },
+        ] {
+            store.ingest(&event).unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.max_limit = Some(1);
+        let app = Router::new()
+            .route("/query", get(super::query))
+            .with_state(Arc::new(AppState { store, settings }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/query?authors=p1", addr);
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+        let lines: Vec<_> = body.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("bb22"));
+        handle.abort();
+    }
+
+    #[tokio::test]
     async fn count_endpoint_filters() {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
@@ -674,6 +760,44 @@ mod tests {
         let url = format!("http://{}/count?authors=p1&kinds=1", addr);
         let body: super::CountResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body.count, 2);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn query_endpoint_rate_limits_reads() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        store
+            .ingest(&Event {
+                id: "aa11".into(),
+                pubkey: "p1".into(),
+                kind: 1,
+                created_at: 1,
+                tags: vec![],
+                content: String::new(),
+                sig: String::new(),
+            })
+            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.rate_limit_window_secs = Some(60);
+        settings.max_queries_per_window = Some(1);
+        let app = Router::new()
+            .route("/query", get(super::query))
+            .with_state(Arc::new(AppState { store, settings }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/query?authors=p1", addr);
+        let first = reqwest::get(&url).await.unwrap();
+        assert_eq!(first.status(), reqwest::StatusCode::OK);
+        let second = reqwest::get(&url).await.unwrap();
+        assert_eq!(second.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+        assert!(second.text().await.unwrap().contains("rate limit exceeded"));
         handle.abort();
     }
 
