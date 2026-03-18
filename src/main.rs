@@ -3,6 +3,7 @@
 //! relays, and signature verification.
 
 mod config;
+mod auth;
 mod event;
 mod server;
 mod mirror;

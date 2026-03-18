@@ -22,6 +22,7 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
+    auth::{verify_auth_event, SessionAuth},
     config::Settings,
     event::{Event, Tag},
     storage::{event_hash, Query, Store},
@@ -74,12 +75,17 @@ async fn process(socket: WebSocket, state: Arc<AppState>) {
 
     let mut subs: HashMap<String, Vec<Query>> = HashMap::new();
     let mut live_rx = state.events_tx.subscribe();
+    let mut auth = SessionAuth::new();
+
+    if state.settings.nip42_enabled() {
+        send_json(&out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+    }
 
     loop {
         tokio::select! {
             incoming = reader.next() => {
                 match incoming {
-                    Some(Ok(Message::Text(txt))) => handle_text(&txt, &state, &out_tx, &mut subs).await,
+                    Some(Ok(Message::Text(txt))) => handle_text(&txt, &state, &out_tx, &mut subs, &mut auth).await,
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                     _ => {}
                 }
@@ -109,6 +115,7 @@ async fn handle_text(
     state: &Arc<AppState>,
     out_tx: &mpsc::UnboundedSender<String>,
     subs: &mut HashMap<String, Vec<Query>>,
+    auth: &mut SessionAuth,
 ) {
     let val = match serde_json::from_str::<Value>(txt) {
         Ok(val) => val,
@@ -124,6 +131,13 @@ async fn handle_text(
             let filters = arr.iter().skip(2).map(Query::from_value).collect::<Vec<_>>();
             if !state.settings.query_enabled() {
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "read access disabled"]));
+                return;
+            }
+            if state.settings.query_auth_required() && !auth.is_authenticated() {
+                if state.settings.nip42_enabled() {
+                    send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                }
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "auth-required: relay login required"]));
                 return;
             }
             if filters.iter().any(Query::has_tag_filters) && !state.settings.tag_queries_enabled() {
@@ -148,6 +162,13 @@ async fn handle_text(
             let filters = arr.iter().skip(2).map(Query::from_value).collect::<Vec<_>>();
             if !state.settings.query_enabled() || !state.settings.count_enabled() {
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "count queries disabled"]));
+                return;
+            }
+            if state.settings.count_auth_required() && !auth.is_authenticated() {
+                if state.settings.nip42_enabled() {
+                    send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                }
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "auth-required: relay login required"]));
                 return;
             }
             if filters.iter().any(Query::has_tag_filters) && !state.settings.tag_queries_enabled() {
@@ -180,6 +201,28 @@ async fn handle_text(
             }
             match serde_json::from_value::<Event>(arr[1].clone()) {
                 Ok(event) => {
+                    if state.settings.publish_auth_required() && !auth.is_authenticated() {
+                        if state.settings.nip42_enabled() {
+                            send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                        }
+                        send_json(out_tx, serde_json::json!(["OK", event.id, false, "auth-required: relay login required"]));
+                        return;
+                    }
+                    if state.settings.nip42_enabled()
+                        && state.settings.auth_must_match_event_pubkey
+                        && !auth.contains_pubkey(&event.pubkey)
+                    {
+                        let msg = if auth.is_authenticated() {
+                            "restricted: authenticated pubkey does not match event pubkey"
+                        } else {
+                            "auth-required: relay login required"
+                        };
+                        if !auth.is_authenticated() {
+                            send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                        }
+                        send_json(out_tx, serde_json::json!(["OK", event.id, false, msg]));
+                        return;
+                    }
                     let result = publish_event(state, &event);
                     match result {
                         Ok(()) => send_json(out_tx, serde_json::json!(["OK", event.id, true, "stored"])),
@@ -188,6 +231,37 @@ async fn handle_text(
                 }
                 Err(error) => {
                     send_json(out_tx, serde_json::json!(["NOTICE", format!("invalid EVENT payload: {error}")]));
+                }
+            }
+        }
+        Some("AUTH") if arr.len() >= 2 => {
+            match serde_json::from_value::<Event>(arr[1].clone()) {
+                Ok(event) => {
+                    if !state.settings.nip42_enabled() {
+                        send_json(
+                            out_tx,
+                            serde_json::json!(["OK", event.id, false, "restricted: relay authentication disabled"]),
+                        );
+                        return;
+                    }
+                    match verify_auth_event(
+                        &event,
+                        auth.challenge(),
+                        &state.settings.bind_ws,
+                        state.settings.auth_max_age_secs,
+                        current_unix_ts(),
+                    ) {
+                        Ok(()) => {
+                            auth.authenticate(event.pubkey.clone());
+                            send_json(out_tx, serde_json::json!(["OK", event.id, true, "authenticated"]));
+                        }
+                        Err(error) => {
+                            send_json(out_tx, serde_json::json!(["OK", event.id, false, format!("invalid: {error}")]));
+                        }
+                    }
+                }
+                Err(error) => {
+                    send_json(out_tx, serde_json::json!(["NOTICE", format!("invalid AUTH payload: {error}")]));
                 }
             }
         }
@@ -303,6 +377,15 @@ fn send_json(out_tx: &mpsc::UnboundedSender<String>, value: Value) {
     let _ = out_tx.send(value.to_string());
 }
 
+fn current_unix_ts() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 #[cfg(test)]
 #[allow(clippy::single_match)]
 mod tests {
@@ -328,9 +411,16 @@ mod tests {
             enable_tag_queries: true,
             enable_search: true,
             enable_mirroring: true,
+            enable_nip42: false,
+            require_auth_for_query: false,
+            require_auth_for_count: false,
+            require_auth_for_publish: false,
+            auth_must_match_event_pubkey: false,
+            auth_max_age_secs: 600,
             support_nip11: true,
             support_nip09: true,
             support_nip12: true,
+            support_nip42: true,
             support_nip40: true,
             support_nip45: true,
             support_nip50: true,
@@ -378,6 +468,41 @@ mod tests {
         };
         event.id = hex::encode(event_hash(&event).unwrap());
         event
+    }
+
+    fn signed_auth_event(bind_ws: &str, challenge: &str, pubkey_bytes: [u8; 32]) -> Event {
+        use secp256k1::{Keypair, Message, Secp256k1};
+
+        let secp = Secp256k1::new();
+        let kp = Keypair::from_seckey_slice(&secp, &pubkey_bytes).unwrap();
+        let pubkey = hex::encode(kp.x_only_public_key().0.serialize());
+        let mut event = Event {
+            id: String::new(),
+            pubkey,
+            kind: 22242,
+            created_at: current_unix_ts(),
+            tags: vec![
+                Tag(vec!["relay".into(), format!("ws://{bind_ws}/")]),
+                Tag(vec!["challenge".into(), challenge.into()]),
+            ],
+            content: String::new(),
+            sig: String::new(),
+        };
+        event.id = hex::encode(event_hash(&event).unwrap());
+        let hash = hex::decode(&event.id).unwrap();
+        let msg = Message::from_digest_slice(&hash).unwrap();
+        let sig = secp.sign_schnorr_no_aux_rand(&msg, &kp);
+        event.sig = hex::encode(sig.as_ref());
+        event
+    }
+
+    async fn next_text(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>) -> String {
+        loop {
+            match ws.next().await.unwrap().unwrap() {
+                TungMessage::Text(text) => return text,
+                _ => {}
+            }
+        }
     }
 
     #[test]
@@ -1155,6 +1280,166 @@ mod tests {
         assert_eq!(value[0], "OK");
         assert_eq!(value[2], false);
         assert_eq!(value[3], "publish disabled");
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_sends_auth_challenge_when_nip42_enabled() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_nip42 = true;
+        settings.bind_ws = addr.to_string();
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState { store, settings, events_tx }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move { server.await.unwrap(); });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let text = next_text(&mut ws_stream).await;
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value[0], "AUTH");
+        assert!(value[1].as_str().unwrap().len() >= 16);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_req_requires_auth_when_enabled() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_nip42 = true;
+        settings.require_auth_for_query = true;
+        settings.bind_ws = addr.to_string();
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState { store, settings, events_tx }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move { server.await.unwrap(); });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let _ = next_text(&mut ws_stream).await;
+        let req = serde_json::json!(["REQ", "sub", {"limit": 1}]);
+        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+
+        let mut saw_closed = None;
+        for _ in 0..3 {
+            let text = next_text(&mut ws_stream).await;
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            if value[0] == "CLOSED" {
+                saw_closed = Some(value);
+                break;
+            }
+        }
+        let closed = saw_closed.expect("expected CLOSED after unauthenticated REQ");
+        assert_eq!(closed[2], "auth-required: relay login required");
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_auth_then_req_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        store
+            .ingest(&hashed_event("p1", 1, 1, vec![], "hello"))
+            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_nip42 = true;
+        settings.require_auth_for_query = true;
+        settings.bind_ws = addr.to_string();
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState { store, settings, events_tx }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move { server.await.unwrap(); });
+
+        let bind_ws = addr.to_string();
+        let url = format!("ws://{}/", bind_ws);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let auth_prompt = next_text(&mut ws_stream).await;
+        let auth_prompt_value: serde_json::Value = serde_json::from_str(&auth_prompt).unwrap();
+        let challenge = auth_prompt_value[1].as_str().unwrap().to_string();
+        let auth_event = signed_auth_event(&bind_ws, &challenge, [9u8; 32]);
+        let auth_msg = serde_json::json!(["AUTH", auth_event]);
+        ws_stream.send(TungMessage::Text(auth_msg.to_string())).await.unwrap();
+        let ok_text = next_text(&mut ws_stream).await;
+        let ok_value: serde_json::Value = serde_json::from_str(&ok_text).unwrap();
+        assert_eq!(ok_value[0], "OK");
+        assert_eq!(ok_value[2], true);
+
+        let req = serde_json::json!(["REQ", "sub", {"authors": ["p1"], "kinds": [1]}]);
+        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+
+        let mut saw_event = false;
+        let mut saw_eose = false;
+        for _ in 0..4 {
+            let text = next_text(&mut ws_stream).await;
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            if value[0] == "EVENT" {
+                saw_event = true;
+            }
+            if value[0] == "EOSE" {
+                saw_eose = true;
+                break;
+            }
+        }
+        assert!(saw_event);
+        assert!(saw_eose);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_publish_can_require_matching_authenticated_pubkey() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_nip42 = true;
+        settings.auth_must_match_event_pubkey = true;
+        settings.bind_ws = addr.to_string();
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState { store, settings, events_tx }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move { server.await.unwrap(); });
+
+        let bind_ws = addr.to_string();
+        let url = format!("ws://{}/", bind_ws);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let auth_prompt = next_text(&mut ws_stream).await;
+        let auth_prompt_value: serde_json::Value = serde_json::from_str(&auth_prompt).unwrap();
+        let challenge = auth_prompt_value[1].as_str().unwrap().to_string();
+        let auth_event = signed_auth_event(&bind_ws, &challenge, [9u8; 32]);
+        let auth_msg = serde_json::json!(["AUTH", auth_event]);
+        ws_stream.send(TungMessage::Text(auth_msg.to_string())).await.unwrap();
+        let _ = next_text(&mut ws_stream).await;
+
+        let event = hashed_event("other-pubkey", 1, 42, vec![], "hello world");
+        let publish = serde_json::json!(["EVENT", event]);
+        ws_stream.send(TungMessage::Text(publish.to_string())).await.unwrap();
+        let text = next_text(&mut ws_stream).await;
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value[0], "OK");
+        assert_eq!(value[2], false);
+        assert_eq!(value[3], "restricted: authenticated pubkey does not match event pubkey");
         handle.abort();
     }
 }

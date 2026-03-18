@@ -169,6 +169,9 @@ async fn relay_info(
     if state.settings.expiration_enabled() {
         supported_nips.push(40);
     }
+    if state.settings.nip42_enabled() {
+        supported_nips.push(42);
+    }
     if state.settings.count_enabled() {
         supported_nips.push(45);
     }
@@ -269,6 +272,12 @@ async fn query(
             .body(Body::from("read access disabled"))
             .unwrap();
     }
+    if state.settings.query_auth_required() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("relay auth required over websocket"))
+            .unwrap();
+    }
     // Translate URL parameters into a `Query` structure shared with the WS API.
     let q = params_to_query(params);
     if q.has_tag_filters() && !state.settings.tag_queries_enabled() {
@@ -312,6 +321,12 @@ async fn count(
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::FORBIDDEN)
             .body(Body::from("count queries disabled"))
+            .unwrap();
+    }
+    if state.settings.count_auth_required() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("relay auth required over websocket"))
             .unwrap();
     }
     let q = params_to_query(params);
@@ -389,9 +404,16 @@ mod tests {
             enable_tag_queries: true,
             enable_search: true,
             enable_mirroring: true,
+            enable_nip42: false,
+            require_auth_for_query: false,
+            require_auth_for_count: false,
+            require_auth_for_publish: false,
+            auth_must_match_event_pubkey: false,
+            auth_max_age_secs: 600,
             support_nip11: true,
             support_nip09: true,
             support_nip12: true,
+            support_nip42: true,
             support_nip40: true,
             support_nip45: true,
             support_nip50: true,

@@ -36,12 +36,26 @@ pub struct Settings {
     pub enable_search: bool,
     /// Enable upstream mirroring when relays are configured.
     pub enable_mirroring: bool,
+    /// Enable NIP-42 relay authentication.
+    pub enable_nip42: bool,
+    /// Require authenticated sessions for read/query access.
+    pub require_auth_for_query: bool,
+    /// Require authenticated sessions for COUNT access.
+    pub require_auth_for_count: bool,
+    /// Require authenticated sessions for EVENT publish.
+    pub require_auth_for_publish: bool,
+    /// When publishing with relay auth, require the session pubkey to match the event pubkey.
+    pub auth_must_match_event_pubkey: bool,
+    /// Maximum acceptable AUTH event age in seconds.
+    pub auth_max_age_secs: u64,
     /// Master switch for NIP-11.
     pub support_nip11: bool,
     /// Master switch for NIP-09 delete handling.
     pub support_nip09: bool,
     /// Master switch for NIP-12.
     pub support_nip12: bool,
+    /// Master switch for NIP-42 relay authentication.
+    pub support_nip42: bool,
     /// Master switch for NIP-40 expiration handling.
     pub support_nip40: bool,
     /// Master switch for NIP-45.
@@ -113,9 +127,20 @@ impl Settings {
         let enable_tag_queries = env_value(&env, "ENABLE_TAG_QUERIES").unwrap_or("1") == "1";
         let enable_search = env_value(&env, "ENABLE_SEARCH").unwrap_or("1") == "1";
         let enable_mirroring = env_value(&env, "ENABLE_MIRRORING").unwrap_or("1") == "1";
+        let enable_nip42 = env_value(&env, "ENABLE_NIP42").unwrap_or("0") == "1";
+        let require_auth_for_query = env_value(&env, "REQUIRE_AUTH_FOR_QUERY").unwrap_or("0") == "1";
+        let require_auth_for_count = env_value(&env, "REQUIRE_AUTH_FOR_COUNT").unwrap_or("0") == "1";
+        let require_auth_for_publish =
+            env_value(&env, "REQUIRE_AUTH_FOR_PUBLISH").unwrap_or("0") == "1";
+        let auth_must_match_event_pubkey =
+            env_value(&env, "AUTH_MUST_MATCH_EVENT_PUBKEY").unwrap_or("0") == "1";
+        let auth_max_age_secs = env_value(&env, "AUTH_MAX_AGE_SECS")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(600);
         let support_nip11 = env_value(&env, "SUPPORT_NIP11").unwrap_or("1") == "1";
         let support_nip09 = env_value(&env, "SUPPORT_NIP09").unwrap_or("1") == "1";
         let support_nip12 = env_value(&env, "SUPPORT_NIP12").unwrap_or("1") == "1";
+        let support_nip42 = env_value(&env, "SUPPORT_NIP42").unwrap_or("1") == "1";
         let support_nip40 = env_value(&env, "SUPPORT_NIP40").unwrap_or("1") == "1";
         let support_nip45 = env_value(&env, "SUPPORT_NIP45").unwrap_or("1") == "1";
         let support_nip50 = env_value(&env, "SUPPORT_NIP50").unwrap_or("1") == "1";
@@ -190,9 +215,16 @@ impl Settings {
             enable_tag_queries,
             enable_search,
             enable_mirroring,
+            enable_nip42,
+            require_auth_for_query,
+            require_auth_for_count,
+            require_auth_for_publish,
+            auth_must_match_event_pubkey,
+            auth_max_age_secs,
             support_nip11,
             support_nip09,
             support_nip12,
+            support_nip42,
             support_nip40,
             support_nip45,
             support_nip50,
@@ -214,6 +246,10 @@ impl Settings {
 
     pub fn relay_info_enabled(&self) -> bool {
         self.enable_nip11 && self.support_nip11
+    }
+
+    pub fn nip42_enabled(&self) -> bool {
+        self.enable_nip42 && self.support_nip42
     }
 
     pub fn delete_enabled(&self) -> bool {
@@ -246,6 +282,19 @@ impl Settings {
 
     pub fn search_enabled(&self) -> bool {
         self.enable_search && self.support_nip50
+    }
+
+    pub fn query_auth_required(&self) -> bool {
+        self.nip42_enabled() && self.require_auth_for_query
+    }
+
+    pub fn count_auth_required(&self) -> bool {
+        self.nip42_enabled() && self.require_auth_for_count
+    }
+
+    pub fn publish_auth_required(&self) -> bool {
+        self.nip42_enabled()
+            && (self.require_auth_for_publish || self.auth_must_match_event_pubkey)
     }
 }
 
@@ -340,9 +389,16 @@ mod tests {
         assert!(cfg.enable_tag_queries);
         assert!(cfg.enable_search);
         assert!(cfg.enable_mirroring);
+        assert!(!cfg.enable_nip42);
+        assert!(!cfg.require_auth_for_query);
+        assert!(!cfg.require_auth_for_count);
+        assert!(!cfg.require_auth_for_publish);
+        assert!(!cfg.auth_must_match_event_pubkey);
+        assert_eq!(cfg.auth_max_age_secs, 600);
         assert!(cfg.support_nip11);
         assert!(cfg.support_nip09);
         assert!(cfg.support_nip12);
+        assert!(cfg.support_nip42);
         assert!(cfg.support_nip40);
         assert!(cfg.support_nip45);
         assert!(cfg.support_nip50);
@@ -423,9 +479,16 @@ mod tests {
         assert!(cfg.enable_tag_queries);
         assert!(cfg.enable_search);
         assert!(cfg.enable_mirroring);
+        assert!(!cfg.enable_nip42);
+        assert!(!cfg.require_auth_for_query);
+        assert!(!cfg.require_auth_for_count);
+        assert!(!cfg.require_auth_for_publish);
+        assert!(!cfg.auth_must_match_event_pubkey);
+        assert_eq!(cfg.auth_max_age_secs, 600);
         assert!(cfg.support_nip11);
         assert!(cfg.support_nip09);
         assert!(cfg.support_nip12);
+        assert!(cfg.support_nip42);
         assert!(cfg.support_nip40);
         assert!(cfg.support_nip45);
         assert!(cfg.support_nip50);
@@ -602,9 +665,16 @@ mod tests {
                 "ENABLE_TAG_QUERIES=0\n",
                 "ENABLE_SEARCH=0\n",
                 "ENABLE_MIRRORING=0\n",
+                "ENABLE_NIP42=1\n",
+                "REQUIRE_AUTH_FOR_QUERY=1\n",
+                "REQUIRE_AUTH_FOR_COUNT=1\n",
+                "REQUIRE_AUTH_FOR_PUBLISH=1\n",
+                "AUTH_MUST_MATCH_EVENT_PUBKEY=1\n",
+                "AUTH_MAX_AGE_SECS=42\n",
                 "SUPPORT_NIP11=0\n",
                 "SUPPORT_NIP09=0\n",
                 "SUPPORT_NIP12=0\n",
+                "SUPPORT_NIP42=0\n",
                 "SUPPORT_NIP40=0\n",
                 "SUPPORT_NIP45=0\n",
                 "SUPPORT_NIP50=0\n",
@@ -623,5 +693,10 @@ mod tests {
         assert!(!cfg.tag_queries_enabled());
         assert!(!cfg.search_enabled());
         assert!(!cfg.enable_mirroring);
+        assert!(!cfg.nip42_enabled());
+        assert!(!cfg.query_auth_required());
+        assert!(!cfg.count_auth_required());
+        assert!(!cfg.publish_auth_required());
+        assert_eq!(cfg.auth_max_age_secs, 42);
     }
 }

@@ -985,6 +985,10 @@ fn verify_event(ev: &Event) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn verify_signed_event(ev: &Event) -> Result<()> {
+    verify_event(ev)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
