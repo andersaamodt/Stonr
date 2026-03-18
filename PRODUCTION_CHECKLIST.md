@@ -22,6 +22,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Live WebSocket subscription fanout for newly published events
 - [x] Live WebSocket subscription fanout for mirrored upstream events
 - [x] Empty-filter queries return recent stored events instead of an empty set
+- [x] Max read result cap enforced across HTTP, WebSocket, and CLI queries
 - [x] Relay-side text search over stored event content
 - [x] NIP-11 relay info reflects configured name/description and active basic relay capabilities
 
@@ -42,6 +43,9 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Retention cap by total stored event bytes
 - [x] Oldest-first pruning
 - [x] Private-message filtering for known encrypted private-message kinds
+- [x] Author and kind allow/deny lists enforced on publish, mirror ingest, and CLI ingest
+- [x] Event-size, oldest-event, and future-skew safety checks enforced on publish, mirror ingest, and CLI ingest
+- [x] File-backed read/count/publish rate limits enforced on HTTP and WebSocket client surfaces
 - [x] Stats cache refresh from the real event tree
 - [ ] Clear operator warnings/metrics when retention is not meeting expectations
 - [ ] Backup/restore documentation and tested operational workflow
@@ -66,7 +70,6 @@ This checklist tracks the real backend state, not just what the desktop app expo
 
 ## Remaining Production Blockers
 
-- [ ] Backend enforcement for the remaining desktop-exposed moderation and file/blob policy toggles
 - [ ] Backend file/blob policy enforcement for all desktop-exposed controls
 - [ ] Consistent capability advertisement across the remaining unimplemented relay/file/auth surfaces
 - [ ] Structured production logging
