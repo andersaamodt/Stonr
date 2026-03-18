@@ -8,6 +8,8 @@ This checklist tracks the real backend state, not just what the desktop app expo
 
 - [x] File-backed event storage with on-disk indexes and reindexing
 - [x] Relay capability toggles enforced for profile, query, publish, live subscriptions, count, tag filters, search, and mirroring
+- [x] Delete tombstones enforced across ingest/query paths (`NIP-09`)
+- [x] Expiration filtering enforced across ingest/query paths (`NIP-40`)
 - [x] HTTP `/healthz`
 - [x] HTTP `/query`
 - [x] HTTP `/count`
@@ -62,10 +64,8 @@ This checklist tracks the real backend state, not just what the desktop app expo
 
 ## Remaining Production Blockers
 
-- [ ] Backend enforcement for the remaining desktop-exposed auth, moderation, delete, expiration, and file/blob policy toggles
+- [ ] Backend enforcement for the remaining desktop-exposed auth, moderation, and file/blob policy toggles
 - [ ] End-to-end relay authentication (`NIP-42`) instead of UI-only controls
-- [ ] Backend delete handling (`NIP-09`) instead of UI-only controls
-- [ ] Backend expiration handling (`NIP-40`) instead of UI-only controls
 - [ ] Backend file/blob policy enforcement for all desktop-exposed controls
 - [ ] Consistent capability advertisement across the remaining unimplemented relay/file/auth surfaces
 - [ ] Structured production logging and operator health endpoints
