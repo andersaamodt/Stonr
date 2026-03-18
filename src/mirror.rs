@@ -7,10 +7,9 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
 use tokio_socks::tcp::Socks5Stream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::{client_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{client_async, connect_async, tungstenite::Message, WebSocketStream};
 use url::Url;
 
 use crate::{
@@ -75,11 +74,29 @@ async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> 
     }
     let req = json!(["REQ", "mirror", Value::Object(filter)]);
     // Open the WebSocket (optionally through Tor) and send the subscription.
-    let mut ws = connect_ws(&relay, cfg.tor_socks.as_deref()).await?;
+    let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
+        let ws = connect_ws_via_proxy(&relay, proxy).await?;
+        mirror_stream(ws, req, since, &store).await?
+    } else {
+        let (ws, _) = connect_async(&relay).await?;
+        mirror_stream(ws, req, since, &store).await?
+    };
+    // Persist the cursor so the next run resumes from where we left off.
+    write_cursor(&cfg.store_root, &relay, latest)?;
+    Ok(())
+}
+
+async fn mirror_stream<S>(
+    mut ws: WebSocketStream<S>,
+    req: Value,
+    since: u64,
+    store: &Store,
+) -> Result<u64>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     ws.send(Message::Text(req.to_string())).await?;
     let mut latest = since;
-    // Consume messages until EOSE, persisting each event and tracking the
-    // newest timestamp seen.
     while let Some(msg) = ws.next().await {
         match msg? {
             Message::Text(txt) => {
@@ -104,20 +121,17 @@ async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> 
             _ => {}
         }
     }
-    // Persist the cursor so the next run resumes from where we left off.
-    write_cursor(&cfg.store_root, &relay, latest)?;
-    Ok(())
+    Ok(latest)
 }
 
-/// Establish a WebSocket connection, optionally via a SOCKS5 proxy.
+/// Establish a WebSocket connection via a SOCKS5 proxy.
 ///
-/// The underlying TCP stream may either be a direct `TcpStream` or a
-/// `Socks5Stream` when routing through Tor. To hide this difference the stream
-/// is boxed as a `dyn AsyncReadWrite`, allowing the caller to treat both cases
-/// uniformly. Any network or handshake errors bubble up to the caller.
-async fn connect_ws(
+/// The underlying stream is boxed as a trait object because `Socks5Stream`
+/// has a different concrete type from the direct `TcpStream`/TLS path used by
+/// `connect_async`. Any network or handshake errors bubble up to the caller.
+async fn connect_ws_via_proxy(
     relay: &str,
-    tor_socks: Option<&str>,
+    tor_socks: &str,
 ) -> Result<WebSocketStream<Box<dyn AsyncReadWrite + Unpin + Send>>> {
     let url = Url::parse(relay)?;
     let host = url.host_str().ok_or_else(|| anyhow!("missing host"))?;
@@ -125,11 +139,8 @@ async fn connect_ws(
         .port_or_known_default()
         .ok_or_else(|| anyhow!("missing port"))?;
     let req = relay.into_client_request()?;
-    let stream: Box<dyn AsyncReadWrite + Unpin + Send> = if let Some(proxy) = tor_socks {
-        Box::new(Socks5Stream::connect(proxy, (host, port)).await?)
-    } else {
-        Box::new(TcpStream::connect((host, port)).await?)
-    };
+    let stream: Box<dyn AsyncReadWrite + Unpin + Send> =
+        Box::new(Socks5Stream::connect(tor_socks, (host, port)).await?);
     let (ws, _) = client_async(req, stream).await?;
     Ok(ws)
 }
@@ -572,12 +583,22 @@ mod tests {
 
     #[tokio::test]
     async fn connect_ws_invalid_url_errors() {
-        assert!(super::connect_ws("not a url", None).await.is_err());
+        assert!(Url::parse("not a url").is_err());
+        assert!(
+            super::connect_ws_via_proxy("not a url", "127.0.0.1:9050")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn connect_ws_unreachable_host_errors() {
-        assert!(super::connect_ws("ws://127.0.0.1:1", None).await.is_err());
+        assert!(connect_async("ws://127.0.0.1:1").await.is_err());
+        assert!(
+            super::connect_ws_via_proxy("ws://127.0.0.1:1", "127.0.0.1:9")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

@@ -9,7 +9,7 @@ mod mirror;
 mod storage;
 mod ws;
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use clap::{Parser, Subcommand};
 use config::Settings;
@@ -89,9 +89,19 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::Serve => {
             // Initialize storage then start HTTP and WS servers.
             store.init()?;
-            store.enforce_retention()?;
             let http_addr: SocketAddr = cfg.bind_http.parse()?;
             let ws_addr: SocketAddr = cfg.bind_ws.parse()?;
+            if cfg.max_stored_events.is_some() || cfg.max_stored_event_bytes.is_some() {
+                let retention_store = store.clone();
+                tokio::spawn(async move {
+                    loop {
+                        if let Err(error) = retention_store.enforce_retention() {
+                            eprintln!("retention warning: {error}");
+                        }
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    }
+                });
+            }
             // If upstream relays are configured, start mirroring in the background.
             if !cfg.relays_upstream.is_empty() {
                 let store_clone = store.clone();
@@ -276,6 +286,40 @@ mod tests {
 
         let handle = task::spawn(run(Cli {
             env: env_str.clone(),
+            command: Commands::Serve,
+        }));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let url = format!("http://127.0.0.1:{}/healthz", http_port);
+        let resp = reqwest::get(url).await.unwrap();
+        assert!(resp.status().is_success());
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn run_serve_starts_without_blocking_on_retention_scan() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_port = http_listener.local_addr().unwrap().port();
+        drop(http_listener);
+        let ws_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ws_port = ws_listener.local_addr().unwrap().port();
+        drop(ws_listener);
+        let store_root = dir.path().join("store");
+        fs::create_dir_all(store_root.join("events/aa/bb")).unwrap();
+        fs::write(store_root.join("events/aa/bb/bad.json"), [0xff, 0xfe, 0xfd]).unwrap();
+        let env_path = dir.path().join(".env");
+        let content = format!(
+            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:{}\nBIND_WS=127.0.0.1:{}\nVERIFY_SIG=0\nRELAYS_UPSTREAM=\nMAX_STORED_EVENT_BYTES=1\n",
+            store_root.to_str().unwrap(),
+            http_port,
+            ws_port
+        );
+        fs::write(&env_path, content).unwrap();
+        let env_str = env_path.to_str().unwrap().to_string();
+
+        let handle = task::spawn(run(Cli {
+            env: env_str,
             command: Commands::Serve,
         }));
         tokio::time::sleep(Duration::from_millis(200)).await;

@@ -114,7 +114,7 @@ impl Store {
         // Update lookup indexes and create mirror symlinks.
         self.index_event(ev)?;
         self.write_mirror_links(ev)?;
-        self.enforce_retention().map(|_| ())
+        Ok(())
     }
 
     /// Verify Schnorr signatures for a random sample of stored events.
@@ -234,16 +234,22 @@ impl Store {
             let entry = entry?;
             if entry.file_type().is_file() {
                 let path = entry.into_path();
-                let data = fs::read_to_string(&path)?;
-                let ev: Event = serde_json::from_str(&data)?;
                 let size_bytes = fs::metadata(&path)?.len();
-                records.push(StoredEventRecord {
-                    id: ev.id.clone(),
-                    created_at: ev.created_at,
-                    size_bytes,
-                    path,
-                    event: ev,
-                });
+                let data = match fs::read_to_string(&path) {
+                    Ok(data) => data,
+                    Err(error) => {
+                        eprintln!("storage warning: skipping unreadable event file {}: {error}", path.display());
+                        continue;
+                    }
+                };
+                let ev: Event = match serde_json::from_str(&data) {
+                    Ok(event) => event,
+                    Err(error) => {
+                        eprintln!("storage warning: skipping malformed event file {}: {error}", path.display());
+                        continue;
+                    }
+                };
+                records.push(StoredEventRecord { id: ev.id.clone(), created_at: ev.created_at, size_bytes, path, event: ev });
             }
         }
         Ok(records)
@@ -845,5 +851,23 @@ mod tests {
         assert!(!store.event_path("aa11").exists());
         assert!(store.event_path("bb22").exists());
         assert!(store.event_path("cc33").exists());
+    }
+
+    #[test]
+    fn enforce_retention_skips_corrupt_event_files() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(dir.path().to_path_buf(), false, Some(10), None);
+        store.init().unwrap();
+
+        let good = sample_event("aa11", "p1", 1, None, 10);
+        store.ingest(&good).unwrap();
+
+        let bad_path = store.event_path("bb22");
+        fs::create_dir_all(bad_path.parent().unwrap()).unwrap();
+        fs::write(&bad_path, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let removed = store.enforce_retention().unwrap();
+        assert_eq!(removed, 0);
+        assert!(store.event_path("aa11").exists());
     }
 }
