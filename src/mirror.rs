@@ -1,12 +1,15 @@
 //! Upstream relay mirroring for importing events into the local store.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::broadcast,
+};
 use tokio_socks::tcp::Socks5Stream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{client_async, connect_async, tungstenite::Message, WebSocketStream};
@@ -23,27 +26,39 @@ fn is_private_message_kind(kind: u32) -> bool {
 }
 
 /// Spawn a mirroring task for each configured upstream relay.
-pub async fn run(cfg: Settings, store: Store) {
+pub async fn run(cfg: Settings, store: Store, events_tx: broadcast::Sender<Event>) {
     for relay in cfg.relays_upstream.clone() {
         let cfg_clone = cfg.clone();
         let store_clone = store.clone();
+        let relay_events_tx = events_tx.clone();
         match cfg.mirror_mode {
             MirrorMode::Broad => {
-                tokio::spawn(async move { mirror_relay_forever(relay, cfg_clone, store_clone).await });
+                tokio::spawn(async move {
+                    mirror_relay_forever(relay, cfg_clone, store_clone, relay_events_tx).await;
+                });
             }
             MirrorMode::Site => {
                 let posts_relay = relay.clone();
                 let posts_cfg = cfg_clone.clone();
                 let posts_store = store_clone.clone();
+                let posts_events_tx = relay_events_tx.clone();
                 tokio::spawn(async move {
-                    mirror_site_posts_forever(posts_relay, posts_cfg, posts_store).await;
+                    mirror_site_posts_forever(posts_relay, posts_cfg, posts_store, posts_events_tx)
+                        .await;
                 });
                 if cfg.mirror_site_include_comments {
                     let comments_relay = relay.clone();
                     let comments_cfg = cfg_clone.clone();
                     let comments_store = store_clone.clone();
+                    let comments_events_tx = relay_events_tx.clone();
                     tokio::spawn(async move {
-                        mirror_site_comments_forever(comments_relay, comments_cfg, comments_store).await;
+                        mirror_site_comments_forever(
+                            comments_relay,
+                            comments_cfg,
+                            comments_store,
+                            comments_events_tx,
+                        )
+                        .await;
                     });
                 }
             }
@@ -62,16 +77,26 @@ pub async fn run(cfg: Settings, store: Store) {
 ///    updating the latest timestamp seen.
 /// 4. After receiving `EOSE`, write the cursor so the next run resumes from the
 ///    newest event.
-async fn mirror_relay_forever(relay: String, cfg: Settings, store: Store) {
+async fn mirror_relay_forever(
+    relay: String,
+    cfg: Settings,
+    store: Store,
+    events_tx: broadcast::Sender<Event>,
+) {
     loop {
-        if let Err(e) = mirror_relay_once(relay.clone(), cfg.clone(), store.clone()).await {
+        if let Err(e) = mirror_relay_once(relay.clone(), cfg.clone(), store.clone(), events_tx.clone()).await {
             eprintln!("mirror error: {e}");
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
 
-async fn mirror_relay_once(relay: String, cfg: Settings, store: Store) -> Result<()> {
+async fn mirror_relay_once(
+    relay: String,
+    cfg: Settings,
+    store: Store,
+    events_tx: broadcast::Sender<Event>,
+) -> Result<()> {
     // Determine the starting timestamp either from a stored cursor or a fixed
     // configuration value.
     let since = match cfg.filter_since_mode {
@@ -111,10 +136,36 @@ async fn mirror_relay_once(relay: String, cfg: Settings, store: Store) -> Result
     // Open the WebSocket (optionally through Tor) and send the subscription.
     let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
         let ws = connect_ws_via_proxy(&relay, proxy).await?;
-        mirror_stream(ws, vec![req], since, &cfg.store_root, &relay, cfg.filter_private_messages, &store, true).await?
+        mirror_stream(
+            ws,
+            vec![req],
+            &store,
+            &events_tx,
+            MirrorStreamOptions {
+                since,
+                store_root: &cfg.store_root,
+                cursor_key: &relay,
+                filter_private_messages: cfg.filter_private_messages,
+                keep_running_after_eose: true,
+            },
+        )
+        .await?
     } else {
         let (ws, _) = connect_async(&relay).await?;
-        mirror_stream(ws, vec![req], since, &cfg.store_root, &relay, cfg.filter_private_messages, &store, true).await?
+        mirror_stream(
+            ws,
+            vec![req],
+            &store,
+            &events_tx,
+            MirrorStreamOptions {
+                since,
+                store_root: &cfg.store_root,
+                cursor_key: &relay,
+                filter_private_messages: cfg.filter_private_messages,
+                keep_running_after_eose: true,
+            },
+        )
+        .await?
     };
     // Persist the cursor so the next run resumes from where we left off.
     write_cursor(&cfg.store_root, &relay, latest)?;
@@ -123,19 +174,37 @@ async fn mirror_relay_once(relay: String, cfg: Settings, store: Store) -> Result
 
 #[cfg(test)]
 async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> {
-    mirror_relay_once(relay, cfg, store).await
+    let (events_tx, _) = broadcast::channel(256);
+    mirror_relay_once(relay, cfg, store, events_tx).await
 }
 
-async fn mirror_site_posts_forever(relay: String, cfg: Settings, store: Store) {
+async fn mirror_site_posts_forever(
+    relay: String,
+    cfg: Settings,
+    store: Store,
+    events_tx: broadcast::Sender<Event>,
+) {
     loop {
-        if let Err(e) = mirror_site_posts_once(relay.clone(), cfg.clone(), store.clone()).await {
+        if let Err(e) = mirror_site_posts_once(
+            relay.clone(),
+            cfg.clone(),
+            store.clone(),
+            events_tx.clone(),
+        )
+        .await
+        {
             eprintln!("site mirror post error: {e}");
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
 
-async fn mirror_site_posts_once(relay: String, cfg: Settings, store: Store) -> Result<()> {
+async fn mirror_site_posts_once(
+    relay: String,
+    cfg: Settings,
+    store: Store,
+    events_tx: broadcast::Sender<Event>,
+) -> Result<()> {
     let author = match cfg.mirror_site_author.clone() {
         Some(author) if !author.is_empty() => author,
         _ => return Ok(()),
@@ -154,25 +223,68 @@ async fn mirror_site_posts_once(relay: String, cfg: Settings, store: Store) -> R
     let cursor_key = format!("{relay}::site-posts");
     let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
         let ws = connect_ws_via_proxy(&relay, proxy).await?;
-        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, true).await?
+        mirror_stream(
+            ws,
+            vec![req],
+            &store,
+            &events_tx,
+            MirrorStreamOptions {
+                since,
+                store_root: &cfg.store_root,
+                cursor_key: &cursor_key,
+                filter_private_messages: cfg.filter_private_messages,
+                keep_running_after_eose: true,
+            },
+        )
+        .await?
     } else {
         let (ws, _) = connect_async(&relay).await?;
-        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, true).await?
+        mirror_stream(
+            ws,
+            vec![req],
+            &store,
+            &events_tx,
+            MirrorStreamOptions {
+                since,
+                store_root: &cfg.store_root,
+                cursor_key: &cursor_key,
+                filter_private_messages: cfg.filter_private_messages,
+                keep_running_after_eose: true,
+            },
+        )
+        .await?
     };
     write_cursor(&cfg.store_root, &cursor_key, latest)?;
     Ok(())
 }
 
-async fn mirror_site_comments_forever(relay: String, cfg: Settings, store: Store) {
+async fn mirror_site_comments_forever(
+    relay: String,
+    cfg: Settings,
+    store: Store,
+    events_tx: broadcast::Sender<Event>,
+) {
     loop {
-        if let Err(e) = mirror_site_comments_once(relay.clone(), cfg.clone(), store.clone()).await {
+        if let Err(e) = mirror_site_comments_once(
+            relay.clone(),
+            cfg.clone(),
+            store.clone(),
+            events_tx.clone(),
+        )
+        .await
+        {
             eprintln!("site mirror comment error: {e}");
         }
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     }
 }
 
-async fn mirror_site_comments_once(relay: String, cfg: Settings, store: Store) -> Result<()> {
+async fn mirror_site_comments_once(
+    relay: String,
+    cfg: Settings,
+    store: Store,
+    events_tx: broadcast::Sender<Event>,
+) -> Result<()> {
     let author = match cfg.mirror_site_author.clone() {
         Some(author) if !author.is_empty() => author,
         _ => return Ok(()),
@@ -218,24 +330,55 @@ async fn mirror_site_comments_once(relay: String, cfg: Settings, store: Store) -
     let cursor_key = format!("{relay}::site-comments");
     let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
         let ws = connect_ws_via_proxy(&relay, proxy).await?;
-        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, false).await?
+        mirror_stream(
+            ws,
+            vec![req],
+            &store,
+            &events_tx,
+            MirrorStreamOptions {
+                since,
+                store_root: &cfg.store_root,
+                cursor_key: &cursor_key,
+                filter_private_messages: cfg.filter_private_messages,
+                keep_running_after_eose: false,
+            },
+        )
+        .await?
     } else {
         let (ws, _) = connect_async(&relay).await?;
-        mirror_stream(ws, vec![req], since, &cfg.store_root, &cursor_key, cfg.filter_private_messages, &store, false).await?
+        mirror_stream(
+            ws,
+            vec![req],
+            &store,
+            &events_tx,
+            MirrorStreamOptions {
+                since,
+                store_root: &cfg.store_root,
+                cursor_key: &cursor_key,
+                filter_private_messages: cfg.filter_private_messages,
+                keep_running_after_eose: false,
+            },
+        )
+        .await?
     };
     write_cursor(&cfg.store_root, &cursor_key, latest)?;
     Ok(())
 }
 
+struct MirrorStreamOptions<'a> {
+    since: u64,
+    store_root: &'a Path,
+    cursor_key: &'a str,
+    filter_private_messages: bool,
+    keep_running_after_eose: bool,
+}
+
 async fn mirror_stream<S>(
     mut ws: WebSocketStream<S>,
     reqs: Vec<Value>,
-    since: u64,
-    store_root: &PathBuf,
-    cursor_key: &str,
-    filter_private_messages: bool,
     store: &Store,
-    keep_running_after_eose: bool,
+    events_tx: &broadcast::Sender<Event>,
+    options: MirrorStreamOptions<'_>,
 ) -> Result<u64>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -243,7 +386,7 @@ where
     for req in reqs {
         ws.send(Message::Text(req.to_string())).await?;
     }
-    let mut latest = since;
+    let mut latest = options.since;
     while let Some(msg) = ws.next().await {
         match msg {
             Err(_) => break,
@@ -251,21 +394,25 @@ where
             Message::Text(txt) => {
                 if let Ok(val) = serde_json::from_str::<Value>(&txt) {
                     if let Some(arr) = val.as_array() {
-                        match arr.get(0).and_then(|v| v.as_str()) {
+                        match arr.first().and_then(|v| v.as_str()) {
                             Some("EVENT") if arr.len() >= 3 => {
                                 if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone()) {
                                     latest = latest.max(ev.created_at);
-                                    if filter_private_messages && is_private_message_kind(ev.kind) {
+                                    if options.filter_private_messages
+                                        && is_private_message_kind(ev.kind)
+                                    {
                                         continue;
                                     }
                                     if let Err(e) = store.ingest(&ev) {
                                         eprintln!("ingest error: {e}");
                                     } else {
-                                        let _ = write_cursor(store_root, cursor_key, latest);
+                                        let _ = events_tx.send(ev.clone());
+                                        let _ =
+                                            write_cursor(options.store_root, options.cursor_key, latest);
                                     }
                                 }
                             }
-                            Some("EOSE") if !keep_running_after_eose => break,
+                            Some("EOSE") if !options.keep_running_after_eose => break,
                             _ => {}
                         }
                     }
@@ -312,7 +459,7 @@ impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
 ///
 /// Each upstream relay gets a SHA1-hashed filename under `cursor/` so that
 /// timestamps persist across runs without leaking the relay URL itself.
-fn cursor_path(root: &PathBuf, relay: &str) -> PathBuf {
+fn cursor_path(root: &Path, relay: &str) -> PathBuf {
     let mut hasher = Sha1::new();
     hasher.update(relay.as_bytes());
     let hash = hex::encode(hasher.finalize());
@@ -322,7 +469,7 @@ fn cursor_path(root: &PathBuf, relay: &str) -> PathBuf {
 /// Read the last seen timestamp for a relay.
 ///
 /// Returns `None` if no cursor file exists or if the contents fail to parse.
-fn read_cursor(root: &PathBuf, relay: &str) -> Option<u64> {
+fn read_cursor(root: &Path, relay: &str) -> Option<u64> {
     let path = cursor_path(root, relay);
     std::fs::read_to_string(path).ok()?.parse().ok()
 }
@@ -331,7 +478,7 @@ fn read_cursor(root: &PathBuf, relay: &str) -> Option<u64> {
 ///
 /// Any I/O error while creating directories or writing the file is returned
 /// to the caller.
-fn write_cursor(root: &PathBuf, relay: &str, ts: u64) -> Result<()> {
+fn write_cursor(root: &Path, relay: &str, ts: u64) -> Result<()> {
     let path = cursor_path(root, relay);
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p)?;
@@ -349,6 +496,11 @@ mod tests {
     };
     use tempfile::TempDir;
     use tokio_tungstenite::{accept_async, tungstenite::Message as TMsg};
+
+    fn test_events_tx() -> broadcast::Sender<Event> {
+        let (events_tx, _) = broadcast::channel(256);
+        events_tx
+    }
 
     fn base_settings(root: &std::path::Path) -> Settings {
         Settings {
@@ -481,7 +633,7 @@ mod tests {
         cfg.filter_private_messages = true;
         cfg.relays_upstream = vec![format!("ws://{}", ws_addr)];
         cfg.filter_since_mode = SinceMode::Cursor;
-        super::run(cfg, store.clone()).await;
+        super::run(cfg, store.clone(), test_events_tx()).await;
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         server.await.unwrap();
 
@@ -497,7 +649,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let relay_url = format!("ws://{}", addr);
-        super::write_cursor(&dir.path().to_path_buf(), &relay_url, 5).unwrap();
+        super::write_cursor(dir.path(), &relay_url, 5).unwrap();
 
         let ev = Event {
             id: "aa11".into(),
@@ -531,7 +683,7 @@ mod tests {
         server.abort();
         assert!(dir.path().join("events/aa/11/aa11.json").exists());
         assert_eq!(
-            super::read_cursor(&dir.path().to_path_buf(), &relay_url),
+            super::read_cursor(dir.path(), &relay_url),
             Some(6)
         );
     }
@@ -774,7 +926,7 @@ mod tests {
         store.init().unwrap();
         let mut cfg = base_settings(dir.path());
         cfg.relays_upstream = vec!["ws://127.0.0.1:1".into()];
-        super::run(cfg, store).await;
+        super::run(cfg, store, test_events_tx()).await;
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 

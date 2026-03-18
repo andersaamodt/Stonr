@@ -20,6 +20,12 @@ struct Health {
     status: String,
 }
 
+/// Response body for the `/count` endpoint.
+#[derive(Serialize, Deserialize)]
+struct CountResponse {
+    count: usize,
+}
+
 /// Start an HTTP server exposing `/healthz`, `/query`, and relay info.
 pub async fn serve_http(
     addr: SocketAddr,
@@ -31,6 +37,7 @@ pub async fn serve_http(
         .route("/", get(relay_info))
         .route("/healthz", get(healthz))
         .route("/query", get(query))
+        .route("/count", get(count))
         .with_state(Arc::new(store));
     axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown)
@@ -150,7 +157,19 @@ async fn query(
         .unwrap()
 }
 
+/// Parse query parameters and return only the number of matching events.
+async fn count(
+    State(store): State<Arc<Store>>,
+    AxumQuery(params): AxumQuery<QueryParams>,
+) -> Json<CountResponse> {
+    let q = params_to_query(params);
+    Json(CountResponse {
+        count: store.query(q).map(|events| events.len()).unwrap_or(0),
+    })
+}
+
 #[cfg(test)]
+#[allow(clippy::single_match)]
 mod tests {
     use super::*;
     use crate::event::Event;
@@ -260,6 +279,58 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("cc33"));
         assert!(lines[1].contains("bb22"));
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn count_endpoint_filters() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        for event in [
+            Event {
+                id: "aa11".into(),
+                pubkey: "p1".into(),
+                kind: 1,
+                created_at: 1,
+                tags: vec![],
+                content: String::new(),
+                sig: String::new(),
+            },
+            Event {
+                id: "bb22".into(),
+                pubkey: "p1".into(),
+                kind: 1,
+                created_at: 2,
+                tags: vec![],
+                content: String::new(),
+                sig: String::new(),
+            },
+            Event {
+                id: "cc33".into(),
+                pubkey: "p2".into(),
+                kind: 1,
+                created_at: 3,
+                tags: vec![],
+                content: String::new(),
+                sig: String::new(),
+            },
+        ] {
+            store.ingest(&event).unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/count", get(super::count))
+            .with_state(Arc::new(store));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/count?authors=p1&kinds=1", addr);
+        let body: super::CountResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
+        assert_eq!(body.count, 2);
         handle.abort();
     }
 

@@ -9,7 +9,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use hex;
 use rand::{seq::SliceRandom, thread_rng};
 use secp256k1::{schnorr::Signature, Message, Secp256k1, XOnlyPublicKey};
 use serde_json::{to_writer, Value};
@@ -495,6 +494,9 @@ impl Store {
     /// resulting ID sets, and then reading each matching event from disk. Time
     /// bounds and limits are applied after the intersection.
     pub fn query(&self, q: Query) -> Result<Vec<Event>> {
+        let since = q.since;
+        let until = q.until;
+        let limit = q.limit;
         // Collect ID sets for each filter category and intersect them below.
         let mut sets: Vec<std::collections::HashSet<String>> = vec![];
         if let Some(authors) = q.authors {
@@ -531,7 +533,8 @@ impl Store {
             sets.push(ids);
         }
         if sets.is_empty() {
-            return Ok(vec![]);
+            let events = self.load_all_events()?;
+            return Ok(self.filter_sort_and_limit(events, since, until, limit));
         }
         let mut iter = sets.into_iter();
         // Start with the first ID set and intersect each subsequent one.
@@ -541,18 +544,50 @@ impl Store {
         }
 
         // Load matching events and apply time-based filters.
-        let mut events: Vec<Event> = ids
+        let events: Vec<Event> = ids
             .into_iter()
             .filter_map(|id| {
                 let path = self.event_path(&id);
                 let data = fs::read_to_string(path).ok()?;
                 serde_json::from_str(&data).ok()
             })
-            .filter(|ev: &Event| {
-                (q.since.map_or(true, |s| ev.created_at >= s))
-                    && (q.until.map_or(true, |u| ev.created_at <= u))
-            })
             .collect();
+        Ok(self.filter_sort_and_limit(events, since, until, limit))
+    }
+
+    fn load_all_events(&self) -> Result<Vec<Event>> {
+        let mut events = Vec::new();
+        for entry in walkdir::WalkDir::new(self.root.join("events")) {
+            let entry = entry?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.into_path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let data = match fs::read_to_string(&path) {
+                Ok(data) => data,
+                Err(_) => continue,
+            };
+            if let Ok(event) = serde_json::from_str(&data) {
+                events.push(event);
+            }
+        }
+        Ok(events)
+    }
+
+    fn filter_sort_and_limit(
+        &self,
+        mut events: Vec<Event>,
+        since: Option<u64>,
+        until: Option<u64>,
+        limit: Option<usize>,
+    ) -> Vec<Event> {
+        events.retain(|ev: &Event| {
+            (since.is_none_or(|s| ev.created_at >= s))
+                && (until.is_none_or(|u| ev.created_at <= u))
+        });
         // Sort newest-first so replaceable events keep the most recent version.
         events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
         // Drop older replaceable events sharing the same author, kind, and `#d` tag.
@@ -572,10 +607,10 @@ impl Store {
                 true
             }
         });
-        if let Some(limit) = q.limit {
+        if let Some(limit) = limit {
             events.truncate(limit);
         }
-        Ok(events)
+        events
     }
 }
 
@@ -607,6 +642,7 @@ fn read_ids(path: &Path) -> Result<std::collections::HashSet<String>> {
 }
 
 /// Query parameters accepted by both HTTP and WebSocket interfaces.
+#[derive(Clone, Debug)]
 pub struct Query {
     pub authors: Option<Vec<String>>,
     pub kinds: Option<Vec<u32>>,
@@ -636,13 +672,13 @@ impl Query {
         let d = val
             .get("#d")
             .and_then(|v| v.as_array())
-            .and_then(|arr| arr.get(0))
+            .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         let t = val
             .get("#t")
             .and_then(|v| v.as_array())
-            .and_then(|arr| arr.get(0))
+            .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         let tags = val
@@ -688,6 +724,7 @@ impl Query {
             limit,
         }
     }
+
 }
 
 fn hashed_index_name(value: &str) -> String {
@@ -786,11 +823,11 @@ mod tests {
         store.init().unwrap();
         let ev = sample_event("abcd", "pub", 30023, Some("slug"), 42);
         store.ingest(&ev).unwrap();
-        let author_link = dir.path().join(format!("mirror/authors/pub/42-abcd.json"));
+        let author_link = dir.path().join("mirror/authors/pub/42-abcd.json");
         assert!(author_link.exists());
         let target = fs::read_link(&author_link).unwrap();
         assert!(target.to_str().unwrap().ends_with("events/ab/cd/abcd.json"));
-        let kind_link = dir.path().join(format!("mirror/kinds/30023/42-abcd.json"));
+        let kind_link = dir.path().join("mirror/kinds/30023/42-abcd.json");
         assert!(kind_link.exists());
         let target2 = fs::read_link(kind_link).unwrap();
         assert!(target2

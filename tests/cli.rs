@@ -25,7 +25,7 @@ fn signed_event_json() -> serde_json::Value {
     let arr = serde_json::json!([0, pubkey, created_at, kind, tags, ""]);
     let data = serde_json::to_vec(&arr).unwrap();
     let hash = Sha256::digest(&data);
-    let id = hex::encode(&hash);
+    let id = hex::encode(hash);
     let msg = Message::from_digest_slice(&hash).unwrap();
     let sig = secp.sign_schnorr_no_aux_rand(&msg, &kp);
     serde_json::json!({
@@ -165,7 +165,56 @@ fn cli_help_lists_commands() {
         .stdout
         .clone();
     let text = String::from_utf8(output).unwrap();
-    for cmd in ["init", "ingest", "serve", "reindex", "prune-retention", "verify"] {
+    for cmd in ["init", "ingest", "serve", "reindex", "query", "prune-retention", "verify"] {
         assert!(text.contains(cmd));
     }
+}
+
+#[test]
+fn query_cli_filters_and_counts() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", &env_path, "init"])
+        .assert()
+        .success();
+
+    for (path_name, mut event, kind, created_at) in [
+        ("a.json", signed_event_json(), 1u64, 1u64),
+        ("b.json", signed_event_json(), 1u64, 2u64),
+        ("c.json", signed_event_json(), 2u64, 3u64),
+    ] {
+        event["kind"] = serde_json::Value::Number(kind.into());
+        event["created_at"] = serde_json::Value::Number(created_at.into());
+        let arr = serde_json::json!([
+            0,
+            event["pubkey"].as_str().unwrap(),
+            created_at,
+            kind,
+            [],
+            ""
+        ]);
+        let data = serde_json::to_vec(&arr).unwrap();
+        let hash = Sha256::digest(&data);
+        event["id"] = serde_json::Value::String(hex::encode(hash));
+        let path = dir.path().join(path_name);
+        fs::write(&path, serde_json::to_string(&event).unwrap()).unwrap();
+        Command::cargo_bin("stonr")
+            .unwrap()
+            .args(["--env", &env_path, "ingest", path.to_str().unwrap()])
+            .assert()
+            .success();
+    }
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", &env_path, "query", "--kinds", "1", "--count"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(output).unwrap().trim(), "2");
 }

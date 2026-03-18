@@ -13,7 +13,9 @@ use std::{net::SocketAddr, time::Duration};
 
 use clap::{Parser, Subcommand};
 use config::Settings;
+use serde_json::Value;
 use storage::Store;
+use tokio::sync::broadcast;
 
 /// Command line interface entry point.
 #[derive(Parser)]
@@ -40,6 +42,33 @@ enum Commands {
     },
     /// Rebuild indexes and latest pointers from existing events.
     Reindex,
+    /// Query stored events from the local file-backed store.
+    Query {
+        /// Comma-separated author pubkeys.
+        #[arg(long)]
+        authors: Option<String>,
+        /// Comma-separated kind numbers.
+        #[arg(long)]
+        kinds: Option<String>,
+        /// Exact `#d` value to match.
+        #[arg(long)]
+        d: Option<String>,
+        /// Exact `#t` value to match.
+        #[arg(long)]
+        t: Option<String>,
+        /// Minimum `created_at` timestamp.
+        #[arg(long)]
+        since: Option<u64>,
+        /// Maximum `created_at` timestamp.
+        #[arg(long)]
+        until: Option<u64>,
+        /// Maximum number of events to return.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Print only the match count.
+        #[arg(long)]
+        count: bool,
+    },
     /// Print the effective parsed configuration as JSON.
     PrintConfig,
     /// Apply store retention limits immediately.
@@ -53,6 +82,58 @@ enum Commands {
         #[arg(long, default_value_t = 1000)]
         sample: usize,
     },
+}
+
+fn cli_query(
+    authors: Option<String>,
+    kinds: Option<String>,
+    d: Option<String>,
+    t: Option<String>,
+    since: Option<u64>,
+    until: Option<u64>,
+    limit: Option<usize>,
+) -> storage::Query {
+    let mut obj = serde_json::Map::new();
+    if let Some(authors) = authors {
+        obj.insert(
+            "authors".into(),
+            Value::Array(
+                authors
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(|value| Value::String(value.to_string()))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(kinds) = kinds {
+        obj.insert(
+            "kinds".into(),
+            Value::Array(
+                kinds
+                    .split(',')
+                    .filter_map(|value| value.parse::<u32>().ok())
+                    .map(|value| Value::Number(value.into()))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(d) = d {
+        obj.insert("#d".into(), Value::Array(vec![Value::String(d)]));
+    }
+    if let Some(t) = t {
+        obj.insert("#t".into(), Value::Array(vec![Value::String(t)]));
+    }
+    if let Some(since) = since {
+        obj.insert("since".into(), Value::Number(since.into()));
+    }
+    if let Some(until) = until {
+        obj.insert("until".into(), Value::Number(until.into()));
+    }
+    if let Some(limit) = limit {
+        obj.insert("limit".into(), Value::Number((limit as u64).into()));
+    }
+    storage::Query::from_value(&Value::Object(obj))
 }
 
 /// Execute the selected CLI subcommand.
@@ -81,6 +162,26 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             // Rebuild indexes and latest pointers from existing events.
             store.reindex()?;
         }
+        Commands::Query {
+            authors,
+            kinds,
+            d,
+            t,
+            since,
+            until,
+            limit,
+            count,
+        } => {
+            let q = cli_query(authors, kinds, d, t, since, until, limit);
+            let events = store.query(q)?;
+            if count {
+                println!("{}", events.len());
+            } else {
+                for event in events {
+                    println!("{}", serde_json::to_string(&event)?);
+                }
+            }
+        }
         Commands::PrintConfig => {
             println!("{}", serde_json::to_string(&cfg)?);
         }
@@ -97,6 +198,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             store.init()?;
             let http_addr: SocketAddr = cfg.bind_http.parse()?;
             let ws_addr: SocketAddr = cfg.bind_ws.parse()?;
+            let (events_tx, _) = broadcast::channel(1024);
             let stats_store = store.clone();
             tokio::spawn(async move {
                 if let Err(error) = stats_store.refresh_stats_cache() {
@@ -118,13 +220,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             if !cfg.relays_upstream.is_empty() {
                 let store_clone = store.clone();
                 let cfg_clone = cfg.clone();
-                tokio::spawn(async move { mirror::run(cfg_clone, store_clone).await });
+                let mirror_events_tx = events_tx.clone();
+                tokio::spawn(async move { mirror::run(cfg_clone, store_clone, mirror_events_tx).await });
             }
             let store_http = store.clone();
             let store_ws = store.clone();
             tokio::try_join!(
                 server::serve_http(http_addr, store_http, std::future::pending()),
-                ws::serve_ws(ws_addr, store_ws, std::future::pending())
+                ws::serve_ws(ws_addr, store_ws, events_tx, std::future::pending())
             )?;
         }
         Commands::Verify { sample } => {
@@ -143,6 +246,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use crate::event::Event;
