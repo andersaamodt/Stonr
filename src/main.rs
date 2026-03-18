@@ -91,6 +91,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             store.init()?;
             let http_addr: SocketAddr = cfg.bind_http.parse()?;
             let ws_addr: SocketAddr = cfg.bind_ws.parse()?;
+            let stats_store = store.clone();
+            tokio::spawn(async move {
+                if let Err(error) = stats_store.refresh_stats_cache() {
+                    eprintln!("stats warning: {error}");
+                }
+            });
             if cfg.max_stored_events.is_some() || cfg.max_stored_event_bytes.is_some() {
                 let retention_store = store.clone();
                 tokio::spawn(async move {

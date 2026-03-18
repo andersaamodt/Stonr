@@ -61,6 +61,30 @@ fn count_events_uses_event_log() {
 }
 
 #[test]
+fn count_events_prefers_runtime_cache() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let store_root = dir.path().join("store");
+    fs::create_dir_all(store_root.join("runtime")).unwrap();
+    fs::write(store_root.join("runtime/events-count.cache"), "224180\n").unwrap();
+
+    let output = run_backend(&["count-events", &env_path]);
+    assert_eq!(output.trim(), "224180");
+}
+
+#[test]
+fn size_events_prefers_runtime_cache() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let store_root = dir.path().join("store");
+    fs::create_dir_all(store_root.join("runtime")).unwrap();
+    fs::write(store_root.join("runtime/events-bytes.cache"), "1258291200\n").unwrap();
+
+    let output = run_backend(&["size-events", &env_path]);
+    assert_eq!(output.trim(), "1258291200");
+}
+
+#[test]
 fn query_events_hides_private_messages_when_filter_enabled() {
     let dir = TempDir::new().unwrap();
     let env_path = write_env(&dir);

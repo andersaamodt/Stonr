@@ -56,6 +56,7 @@ impl Store {
     /// - `latest/` – pointers for replaceable events (`kind` + `#d`)
     /// - `mirror/` – symlink trees for author and kind scans
     /// - `cursor/` – last mirrored timestamps per upstream relay
+    /// - `runtime/` – cached counts/bytes and pid/log files managed by tooling
     pub fn init(&self) -> Result<()> {
         let dirs = [
             "events",
@@ -68,6 +69,7 @@ impl Store {
             "mirror/authors",
             "mirror/kinds",
             "cursor",
+            "runtime",
         ];
         for d in dirs {
             fs::create_dir_all(self.root.join(d))?;
@@ -114,6 +116,8 @@ impl Store {
         // Update lookup indexes and create mirror symlinks.
         self.index_event(ev)?;
         self.write_mirror_links(ev)?;
+        let size_bytes = fs::metadata(&path)?.len();
+        self.bump_stats_cache(size_bytes)?;
         Ok(())
     }
 
@@ -180,6 +184,35 @@ impl Store {
         Ok(removed)
     }
 
+    pub fn refresh_stats_cache(&self) -> Result<(usize, u64)> {
+        let mut total_events = 0usize;
+        let mut total_bytes = 0u64;
+        for entry in walkdir::WalkDir::new(self.root.join("events")) {
+            let entry = entry?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            match fs::metadata(path) {
+                Ok(meta) => {
+                    total_events += 1;
+                    total_bytes += meta.len();
+                }
+                Err(error) => {
+                    eprintln!(
+                        "storage warning: skipping event stat for {}: {error}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        self.write_stats_cache(total_events, total_bytes)?;
+        Ok((total_events, total_bytes))
+    }
+
     fn rebuild_metadata(&self) -> Result<()> {
         let index_dir = self.root.join("index");
         if index_dir.exists() {
@@ -219,12 +252,43 @@ impl Store {
             .write(true)
             .truncate(true)
             .open(log_path)?;
+        let total_events = records.len();
+        let total_bytes: u64 = records.iter().map(|record| record.size_bytes).sum();
         for record in records {
             self.index_event(&record.event)?;
             self.write_mirror_links(&record.event)?;
             serde_json::to_writer(&mut log_file, &record.event)?;
             log_file.write_all(b"\n")?;
         }
+        self.write_stats_cache(total_events, total_bytes)?;
+        Ok(())
+    }
+
+    fn bump_stats_cache(&self, added_bytes: u64) -> Result<()> {
+        let count_path = self.root.join("runtime/events-count.cache");
+        let bytes_path = self.root.join("runtime/events-bytes.cache");
+        let count = fs::read_to_string(&count_path)
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok());
+        let bytes = fs::read_to_string(&bytes_path)
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok());
+        if let (Some(count), Some(bytes)) = (count, bytes) {
+            self.write_stats_cache(count.saturating_add(1), bytes.saturating_add(added_bytes))?;
+        }
+        Ok(())
+    }
+
+    fn write_stats_cache(&self, total_events: usize, total_bytes: u64) -> Result<()> {
+        fs::create_dir_all(self.root.join("runtime"))?;
+        fs::write(
+            self.root.join("runtime/events-count.cache"),
+            total_events.to_string(),
+        )?;
+        fs::write(
+            self.root.join("runtime/events-bytes.cache"),
+            total_bytes.to_string(),
+        )?;
         Ok(())
     }
 
@@ -869,5 +933,28 @@ mod tests {
         let removed = store.enforce_retention().unwrap();
         assert_eq!(removed, 0);
         assert!(store.event_path("aa11").exists());
+    }
+
+    #[test]
+    fn refresh_stats_cache_counts_json_event_files_only() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let ev1 = sample_event("aa11", "p1", 1, None, 10);
+        let ev2 = sample_event("bb22", "p2", 1, None, 20);
+        store.ingest(&ev1).unwrap();
+        store.ingest(&ev2).unwrap();
+        fs::write(dir.path().join("events/.DS_Store"), [0xff, 0xfe]).unwrap();
+
+        let (count, bytes) = store.refresh_stats_cache().unwrap();
+        assert_eq!(count, 2);
+        assert!(bytes > 0);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("runtime/events-count.cache"))
+                .unwrap()
+                .trim(),
+            "2"
+        );
     }
 }

@@ -243,6 +243,12 @@ event_size_cache_path() {
   printf '%s\n' "$store_root/runtime/events-bytes.cache"
 }
 
+event_count_cache_path() {
+  env_path=${1-}
+  store_root=$(store_root_from_env "$env_path")
+  printf '%s\n' "$store_root/runtime/events-count.cache"
+}
+
 retention_apply_lockdir() {
   env_path=${1-}
   store_root=$(store_root_from_env "$env_path")
@@ -637,11 +643,19 @@ case "$cmd" in
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
     root=$(store_root_from_env "$env_path")
+    count_cache=$(event_count_cache_path "$env_path")
     event_log=$(event_log_path "$env_path")
-    if [ -f "$event_log" ]; then
-      wc -l < "$event_log" | awk '{print $1}'
+    mkdir -p "$(dirname "$count_cache")"
+    if [ -f "$count_cache" ]; then
+      cat "$count_cache"
+    elif [ -f "$event_log" ] && ! find "$root/events" -type f -name '*.json' -print -quit 2>/dev/null | grep -q .; then
+      count=$(wc -l < "$event_log" | awk '{print $1}')
+      printf '%s\n' "$count" > "$count_cache"
+      printf '%s\n' "$count"
     elif [ -d "$root/events" ]; then
-      find "$root/events" -type f | wc -l | awk '{print $1}'
+      count=$(find "$root/events" -type f -name '*.json' | wc -l | awk '{print $1}')
+      printf '%s\n' "$count" > "$count_cache"
+      printf '%s\n' "$count"
     else
       printf '0\n'
     fi
@@ -652,19 +666,19 @@ case "$cmd" in
     root=$(store_root_from_env "$env_path")
     cache_path=$(event_size_cache_path "$env_path")
     event_log=$(event_log_path "$env_path")
+    mkdir -p "$(dirname "$cache_path")"
     if [ -d "$root/events" ]; then
-      if [ -f "$cache_path" ] && { [ ! -f "$event_log" ] || [ ! "$event_log" -nt "$cache_path" ]; }; then
+      if [ -f "$cache_path" ]; then
         cat "$cache_path"
       else
-        refresh_event_size_cache "$root/events" "$cache_path"
-        if [ -f "$cache_path" ]; then
-          cat "$cache_path"
-        elif [ -f "$event_log" ]; then
-          stat -f '%z' "$event_log"
-        else
-          printf '0\n'
-        fi
+        bytes=$(du -sk "$root/events" | awk '{print $1 * 1024}')
+        printf '%s\n' "$bytes" > "$cache_path"
+        printf '%s\n' "$bytes"
       fi
+    elif [ -f "$event_log" ]; then
+      bytes=$(stat -f '%z' "$event_log")
+      printf '%s\n' "$bytes" > "$cache_path"
+      printf '%s\n' "$bytes"
     else
       printf '0\n'
     fi
