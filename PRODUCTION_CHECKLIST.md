@@ -72,7 +72,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 
 - [ ] Backend file/blob policy enforcement for all desktop-exposed controls
 - [ ] Consistent capability advertisement across the remaining unimplemented relay/file/auth surfaces
-- [ ] Structured production logging
+- [x] Structured production logging
 - [ ] Load/performance testing on large stores and long-running mirror sessions
 
 ## Explicitly Not Planned Right Now
