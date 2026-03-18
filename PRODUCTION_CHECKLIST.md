@@ -7,6 +7,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 ## Core Relay Surface
 
 - [x] File-backed event storage with on-disk indexes and reindexing
+- [x] Relay capability toggles enforced for profile, query, publish, live subscriptions, count, tag filters, search, and mirroring
 - [x] HTTP `/healthz`
 - [x] HTTP `/query`
 - [x] HTTP `/count`
@@ -17,6 +18,8 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Live WebSocket subscription fanout for newly published events
 - [x] Live WebSocket subscription fanout for mirrored upstream events
 - [x] Empty-filter queries return recent stored events instead of an empty set
+- [x] Relay-side text search over stored event content
+- [x] NIP-11 relay info reflects configured name/description and active basic relay capabilities
 
 ## Mirroring
 
@@ -59,13 +62,12 @@ This checklist tracks the real backend state, not just what the desktop app expo
 
 ## Remaining Production Blockers
 
-- [ ] Backend enforcement for the many NIP/policy toggles currently exposed by the desktop app
+- [ ] Backend enforcement for the remaining desktop-exposed auth, moderation, delete, expiration, and file/blob policy toggles
 - [ ] End-to-end relay authentication (`NIP-42`) instead of UI-only controls
 - [ ] Backend delete handling (`NIP-09`) instead of UI-only controls
 - [ ] Backend expiration handling (`NIP-40`) instead of UI-only controls
-- [ ] Backend text search (`NIP-50`) instead of UI-only controls
 - [ ] Backend file/blob policy enforcement for all desktop-exposed controls
-- [ ] Consistent capability advertisement so relay info matches actual enforced behavior
+- [ ] Consistent capability advertisement across the remaining unimplemented relay/file/auth surfaces
 - [ ] Structured production logging and operator health endpoints
 - [ ] Load/performance testing on large stores and long-running mirror sessions
 
