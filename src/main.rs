@@ -164,7 +164,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             for f in files {
                 let data = std::fs::read_to_string(&f)?;
                 let ev: event::Event = serde_json::from_str(&data)?;
-                store.ingest(&ev)?;
+                store.ingest_with_policy(&ev, cfg.delete_enabled(), cfg.expiration_enabled())?;
             }
         }
         Commands::Reindex => {
@@ -192,7 +192,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 until,
                 limit,
             });
-            let events = store.query(q)?;
+            let events = store.query_with_policy(q, cfg.delete_enabled(), cfg.expiration_enabled())?;
             if count {
                 println!("{}", events.len());
             } else {

@@ -91,8 +91,14 @@ async fn relay_info(
     if state.settings.relay_info_enabled() {
         supported_nips.push(11);
     }
+    if state.settings.delete_enabled() {
+        supported_nips.push(9);
+    }
     if state.settings.tag_queries_enabled() {
         supported_nips.push(12);
+    }
+    if state.settings.expiration_enabled() {
+        supported_nips.push(40);
     }
     if state.settings.count_enabled() {
         supported_nips.push(45);
@@ -208,7 +214,14 @@ async fn query(
             .body(Body::from("text search disabled"))
             .unwrap();
     }
-    let events = state.store.query(q).unwrap_or_default();
+    let events = state
+        .store
+        .query_with_policy(
+            q,
+            state.settings.delete_enabled(),
+            state.settings.expiration_enabled(),
+        )
+        .unwrap_or_default();
     // Return newline-delimited JSON so clients can stream and parse incrementally.
     let body = events
         .into_iter()
@@ -249,7 +262,15 @@ async fn count(
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
             serde_json::to_vec(&CountResponse {
-                count: state.store.query(q).map(|events| events.len()).unwrap_or(0),
+                count: state
+                    .store
+                    .query_with_policy(
+                        q,
+                        state.settings.delete_enabled(),
+                        state.settings.expiration_enabled(),
+                    )
+                    .map(|events| events.len())
+                    .unwrap_or(0),
             })
             .unwrap(),
         ))
@@ -282,7 +303,9 @@ mod tests {
             enable_search: true,
             enable_mirroring: true,
             support_nip11: true,
+            support_nip09: true,
             support_nip12: true,
+            support_nip40: true,
             support_nip45: true,
             support_nip50: true,
             filter_private_messages: true,
@@ -349,7 +372,7 @@ mod tests {
         let info: super::RelayInfo = resp.json().await.unwrap();
         assert_eq!(info.name, "stonr");
         assert_eq!(info.description, "File-backed Nostr relay");
-        assert_eq!(info.supported_nips, vec![11, 12, 45, 50]);
+        assert_eq!(info.supported_nips, vec![11, 9, 12, 40, 45, 50]);
         handle.abort();
     }
 
@@ -492,6 +515,48 @@ mod tests {
         let url = format!("http://{}/count?authors=p1&kinds=1", addr);
         let body: super::CountResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body.count, 2);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn query_endpoint_hides_deleted_events() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let target = Event {
+            id: "aa11".into(),
+            pubkey: "p1".into(),
+            kind: 1,
+            created_at: 1,
+            tags: vec![],
+            content: String::new(),
+            sig: String::new(),
+        };
+        let delete = Event {
+            id: "dd44".into(),
+            pubkey: "p1".into(),
+            kind: 5,
+            created_at: 2,
+            tags: vec![crate::event::Tag(vec!["e".into(), "aa11".into()])],
+            content: String::new(),
+            sig: String::new(),
+        };
+        store.ingest(&target).unwrap();
+        store.ingest_with_policy(&delete, true, true).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/query", get(super::query))
+            .with_state(test_state(store, dir.path()));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/query?authors=p1&kinds=1", addr);
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+        assert!(body.trim().is_empty());
         handle.abort();
     }
 

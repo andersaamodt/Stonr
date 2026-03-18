@@ -146,6 +146,8 @@ async fn mirror_relay_once(
                 store_root: &cfg.store_root,
                 cursor_key: &relay,
                 filter_private_messages: cfg.filter_private_messages,
+                delete_enabled: cfg.delete_enabled(),
+                expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
             },
         )
@@ -162,6 +164,8 @@ async fn mirror_relay_once(
                 store_root: &cfg.store_root,
                 cursor_key: &relay,
                 filter_private_messages: cfg.filter_private_messages,
+                delete_enabled: cfg.delete_enabled(),
+                expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
             },
         )
@@ -233,6 +237,8 @@ async fn mirror_site_posts_once(
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
                 filter_private_messages: cfg.filter_private_messages,
+                delete_enabled: cfg.delete_enabled(),
+                expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
             },
         )
@@ -249,6 +255,8 @@ async fn mirror_site_posts_once(
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
                 filter_private_messages: cfg.filter_private_messages,
+                delete_enabled: cfg.delete_enabled(),
+                expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: true,
             },
         )
@@ -289,7 +297,8 @@ async fn mirror_site_comments_once(
         Some(author) if !author.is_empty() => author,
         _ => return Ok(()),
     };
-    let post_events = store.query(Query {
+    let post_events = store.query_with_policy(
+        Query {
         authors: Some(vec![author.clone()]),
         kinds: Some(vec![30023]),
         d: None,
@@ -299,7 +308,10 @@ async fn mirror_site_comments_once(
         since: None,
         until: None,
         limit: Some(5000),
-    })?;
+        },
+        cfg.delete_enabled(),
+        cfg.expiration_enabled(),
+    )?;
     let mut addresses = vec![];
     for ev in post_events {
         if let Some(d_tag) = ev.tags.iter().find_map(|Tag(fields)| match fields.as_slice() {
@@ -341,6 +353,8 @@ async fn mirror_site_comments_once(
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
                 filter_private_messages: cfg.filter_private_messages,
+                delete_enabled: cfg.delete_enabled(),
+                expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: false,
             },
         )
@@ -357,6 +371,8 @@ async fn mirror_site_comments_once(
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
                 filter_private_messages: cfg.filter_private_messages,
+                delete_enabled: cfg.delete_enabled(),
+                expiration_enabled: cfg.expiration_enabled(),
                 keep_running_after_eose: false,
             },
         )
@@ -371,6 +387,8 @@ struct MirrorStreamOptions<'a> {
     store_root: &'a Path,
     cursor_key: &'a str,
     filter_private_messages: bool,
+    delete_enabled: bool,
+    expiration_enabled: bool,
     keep_running_after_eose: bool,
 }
 
@@ -402,15 +420,28 @@ where
                                     if options.filter_private_messages
                                         && is_private_message_kind(ev.kind)
                                     {
-                                        continue;
-                                    }
-                                    if let Err(e) = store.ingest(&ev) {
-                                        eprintln!("ingest error: {e}");
-                                    } else {
-                                        let _ = events_tx.send(ev.clone());
                                         let _ =
                                             write_cursor(options.store_root, options.cursor_key, latest);
+                                        continue;
                                     }
+                                    if let Err(e) = store.ingest_with_policy(
+                                        &ev,
+                                        options.delete_enabled,
+                                        options.expiration_enabled,
+                                    ) {
+                                        eprintln!("ingest error: {e}");
+                                    } else if store
+                                        .event_visible_with_policy(
+                                            &ev,
+                                            options.delete_enabled,
+                                            options.expiration_enabled,
+                                        )
+                                        .unwrap_or(false)
+                                    {
+                                        let _ = events_tx.send(ev.clone());
+                                    }
+                                    let _ =
+                                        write_cursor(options.store_root, options.cursor_key, latest);
                                 }
                             }
                             Some("EOSE") if !options.keep_running_after_eose => break,
@@ -520,7 +551,9 @@ mod tests {
             enable_search: true,
             enable_mirroring: true,
             support_nip11: true,
+            support_nip09: true,
             support_nip12: true,
+            support_nip40: true,
             support_nip45: true,
             support_nip50: true,
             filter_private_messages: false,

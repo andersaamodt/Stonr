@@ -5,12 +5,13 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Result};
 use rand::{seq::SliceRandom, thread_rng};
 use secp256k1::{schnorr::Signature, Message, Secp256k1, XOnlyPublicKey};
+use serde::{Deserialize, Serialize};
 use serde_json::{to_writer, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
@@ -68,6 +69,8 @@ impl Store {
             "index/by-kind",
             "index/by-tag/d",
             "index/by-tag/t",
+            "tombstones/by-id",
+            "tombstones/by-address",
             "mirror/authors",
             "mirror/kinds",
             "cursor",
@@ -86,8 +89,35 @@ impl Store {
     /// 2. Write the event JSON under `events/<id>.json`.
     /// 3. Append the event to `log/events.ndjson`.
     /// 4. Update indexes and create mirror symlinks.
+    #[allow(dead_code)]
     pub fn ingest(&self, ev: &Event) -> Result<()> {
         let _lock = self.mutation_lock()?;
+        let _ = self.ingest_locked(ev)?;
+        Ok(())
+    }
+
+    /// Ingest an event while enforcing delete and expiration policy.
+    ///
+    /// Returns `true` when a new event was stored and `false` when the event
+    /// was skipped because it was already present or already expired.
+    pub fn ingest_with_policy(
+        &self,
+        ev: &Event,
+        delete_enabled: bool,
+        expiration_enabled: bool,
+    ) -> Result<bool> {
+        let _lock = self.mutation_lock()?;
+        if expiration_enabled && ev.kind != 5 && event_is_expired(ev, current_unix_ts()) {
+            return Ok(false);
+        }
+        let stored = self.ingest_locked(ev)?;
+        if delete_enabled && ev.kind == 5 {
+            self.apply_delete_event_locked(ev)?;
+        }
+        Ok(stored)
+    }
+
+    fn ingest_locked(&self, ev: &Event) -> Result<bool> {
         // Optionally verify the event's Schnorr signature before writing.
         if self.verify_sig {
             verify_event(ev)?;
@@ -95,7 +125,7 @@ impl Store {
         // Skip ingest if the event already exists on disk.
         let path = self.event_path(&ev.id);
         if path.exists() {
-            return Ok(());
+            return Ok(false);
         }
         // Write the event JSON atomically to its canonical path.
         let parent_dir = path
@@ -124,7 +154,7 @@ impl Store {
         if self.max_stored_events.is_some() || self.max_stored_event_bytes.is_some() {
             self.enforce_retention_locked()?;
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Verify Schnorr signatures for a random sample of stored events.
@@ -237,6 +267,10 @@ impl Store {
         if latest_dir.exists() {
             fs::remove_dir_all(&latest_dir)?;
         }
+        let tombstone_dir = self.root.join("tombstones");
+        if tombstone_dir.exists() {
+            fs::remove_dir_all(&tombstone_dir)?;
+        }
         let mirror_dir = self.root.join("mirror");
         if mirror_dir.exists() {
             fs::remove_dir_all(&mirror_dir)?;
@@ -251,6 +285,8 @@ impl Store {
         fs::create_dir_all(self.root.join("index/by-tag/d"))?;
         fs::create_dir_all(self.root.join("index/by-tag/t"))?;
         fs::create_dir_all(self.root.join("latest"))?;
+        fs::create_dir_all(self.root.join("tombstones/by-id"))?;
+        fs::create_dir_all(self.root.join("tombstones/by-address"))?;
         fs::create_dir_all(self.root.join("mirror/authors"))?;
         fs::create_dir_all(self.root.join("mirror/kinds"))?;
         fs::create_dir_all(self.root.join("log"))?;
@@ -272,6 +308,9 @@ impl Store {
         for record in records {
             self.index_event(&record.event)?;
             self.write_mirror_links(&record.event)?;
+            if record.event.kind == 5 {
+                self.apply_delete_event_locked(&record.event)?;
+            }
             serde_json::to_writer(&mut log_file, &record.event)?;
             log_file.write_all(b"\n")?;
         }
@@ -493,49 +532,75 @@ impl Store {
     /// `index/by-author/npub1.txt` and `index/by-kind/1.txt`, intersecting the
     /// resulting ID sets, and then reading each matching event from disk. Time
     /// bounds and limits are applied after the intersection.
+    #[allow(dead_code)]
     pub fn query(&self, q: Query) -> Result<Vec<Event>> {
+        let events = self.query_candidates(&q)?;
+        self.filter_sort_and_limit(events, &q, false, false)
+    }
+
+    /// Execute a query while enforcing delete and expiration policy.
+    pub fn query_with_policy(
+        &self,
+        q: Query,
+        delete_enabled: bool,
+        expiration_enabled: bool,
+    ) -> Result<Vec<Event>> {
+        let events = self.query_candidates(&q)?;
+        self.filter_sort_and_limit(events, &q, delete_enabled, expiration_enabled)
+    }
+
+    /// Return whether an event is visible under delete/expiration policy.
+    pub fn event_visible_with_policy(
+        &self,
+        event: &Event,
+        delete_enabled: bool,
+        expiration_enabled: bool,
+    ) -> Result<bool> {
+        self.event_visible(event, delete_enabled, expiration_enabled)
+    }
+
+    fn query_candidates(&self, q: &Query) -> Result<Vec<Event>> {
         let since = q.since;
         let until = q.until;
         let limit = q.limit;
         let search = q.search.clone();
         // Collect ID sets for each filter category and intersect them below.
         let mut sets: Vec<std::collections::HashSet<String>> = vec![];
-        if let Some(authors) = q.authors {
-            sets.push(self.load_ids("index/by-author", &authors)?);
+        if let Some(authors) = &q.authors {
+            sets.push(self.load_ids("index/by-author", authors)?);
         }
-        if let Some(kinds) = q.kinds {
+        if let Some(kinds) = &q.kinds {
             let keys: Vec<String> = kinds.iter().map(|k| k.to_string()).collect();
             sets.push(self.load_ids("index/by-kind", &keys)?);
         }
-        if let Some(d) = q.d {
+        if let Some(d) = &q.d {
             let path = self
                 .root
                 .join("index/by-tag/d")
-                .join(format!("{}.txt", hashed_index_name(&d)));
+                .join(format!("{}.txt", hashed_index_name(d)));
             sets.push(read_ids(&path)?);
         }
-        if let Some(t) = q.t {
+        if let Some(t) = &q.t {
             let path = self
                 .root
                 .join("index/by-tag/t")
-                .join(format!("{}.txt", hashed_index_name(&t)));
+                .join(format!("{}.txt", hashed_index_name(t)));
             sets.push(read_ids(&path)?);
         }
-        for (tag, values) in q.tags {
+        for (tag, values) in &q.tags {
             let mut ids = std::collections::HashSet::new();
             for value in values {
                 let path = self
                     .root
                     .join("index/by-tag")
-                    .join(&tag)
-                    .join(format!("{}.txt", hashed_index_name(&value)));
+                    .join(tag)
+                    .join(format!("{}.txt", hashed_index_name(value)));
                 ids.extend(read_ids(&path)?);
             }
             sets.push(ids);
         }
         if sets.is_empty() {
-            let events = self.load_all_events()?;
-            return Ok(self.filter_sort_and_limit(events, since, until, limit, search));
+            return self.load_all_events();
         }
         let mut iter = sets.into_iter();
         // Start with the first ID set and intersect each subsequent one.
@@ -553,7 +618,8 @@ impl Store {
                 serde_json::from_str(&data).ok()
             })
             .collect();
-        Ok(self.filter_sort_and_limit(events, since, until, limit, search))
+        let _ = (since, until, limit, search);
+        Ok(events)
     }
 
     fn load_all_events(&self) -> Result<Vec<Event>> {
@@ -581,42 +647,154 @@ impl Store {
     fn filter_sort_and_limit(
         &self,
         mut events: Vec<Event>,
-        since: Option<u64>,
-        until: Option<u64>,
-        limit: Option<usize>,
-        search: Option<String>,
-    ) -> Vec<Event> {
-        let search = search.map(|value| value.to_lowercase());
-        events.retain(|ev: &Event| {
-            (since.is_none_or(|s| ev.created_at >= s))
-                && (until.is_none_or(|u| ev.created_at <= u))
-                && search
-                    .as_ref()
-                    .is_none_or(|term| ev.content.to_lowercase().contains(term))
-        });
+        q: &Query,
+        delete_enabled: bool,
+        expiration_enabled: bool,
+    ) -> Result<Vec<Event>> {
+        let search = q.search.as_ref().map(|value| value.to_lowercase());
+        let mut filtered = Vec::with_capacity(events.len());
+        for event in events.drain(..) {
+            if q.since.is_some_and(|since| event.created_at < since) {
+                continue;
+            }
+            if q.until.is_some_and(|until| event.created_at > until) {
+                continue;
+            }
+            if search
+                .as_ref()
+                .is_some_and(|term| !event.content.to_lowercase().contains(term))
+            {
+                continue;
+            }
+            if !self.event_visible(&event, delete_enabled, expiration_enabled)? {
+                continue;
+            }
+            filtered.push(event);
+        }
         // Sort newest-first so replaceable events keep the most recent version.
-        events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+        filtered.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
         // Drop older replaceable events sharing the same author, kind, and `#d` tag.
         let mut seen = std::collections::HashSet::new();
-        events.retain(|ev| {
-            let d_tag = ev
-                .tags
-                .iter()
-                .find_map(|Tag(fields)| match fields.as_slice() {
-                    [t, val, ..] if t == "d" => Some(val.clone()),
-                    _ => None,
-                });
-            if let Some(d) = d_tag {
-                let key = format!("{}:{}:{}", ev.pubkey, ev.kind, d);
-                seen.insert(key)
+        filtered.retain(|event| {
+            if let Some(address) = event_address(event) {
+                seen.insert(address)
             } else {
                 true
             }
         });
-        if let Some(limit) = limit {
-            events.truncate(limit);
+        if let Some(limit) = q.limit {
+            filtered.truncate(limit);
         }
-        events
+        Ok(filtered)
+    }
+
+    fn event_visible(
+        &self,
+        event: &Event,
+        delete_enabled: bool,
+        expiration_enabled: bool,
+    ) -> Result<bool> {
+        if expiration_enabled && event_is_expired(event, current_unix_ts()) {
+            return Ok(false);
+        }
+        if !delete_enabled || event.kind == 5 {
+            return Ok(true);
+        }
+        if let Some(tombstone) = self.read_tombstone(&self.tombstone_id_path(&event.id))? {
+            if tombstone.pubkey == event.pubkey && event.created_at <= tombstone.created_at {
+                return Ok(false);
+            }
+        }
+        if let Some(address) = event_address(event) {
+            if let Some(tombstone) = self.read_tombstone(&self.tombstone_address_path(&address))? {
+                if tombstone.pubkey == event.pubkey && event.created_at <= tombstone.created_at {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn apply_delete_event_locked(&self, event: &Event) -> Result<()> {
+        if event.kind != 5 {
+            return Ok(());
+        }
+        let tombstone = DeleteTombstone {
+            pubkey: event.pubkey.clone(),
+            created_at: event.created_at,
+            delete_event_id: event.id.clone(),
+        };
+        for Tag(fields) in &event.tags {
+            match fields.as_slice() {
+                [tag, value, ..] if tag == "e" => {
+                    self.write_tombstone(&self.tombstone_id_path(value), &tombstone)?;
+                }
+                [tag, value, ..] if tag == "a" => {
+                    self.write_tombstone(&self.tombstone_address_path(value), &tombstone)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn tombstone_id_path(&self, event_id: &str) -> PathBuf {
+        self.root
+            .join("tombstones/by-id")
+            .join(format!("{event_id}.json"))
+    }
+
+    fn tombstone_address_path(&self, address: &str) -> PathBuf {
+        self.root
+            .join("tombstones/by-address")
+            .join(format!("{}.json", hashed_index_name(address)))
+    }
+
+    fn read_tombstone(&self, path: &Path) -> Result<Option<DeleteTombstone>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let data = match fs::read_to_string(path) {
+            Ok(data) => data,
+            Err(error) => {
+                eprintln!(
+                    "storage warning: skipping unreadable tombstone {}: {error}",
+                    path.display()
+                );
+                return Ok(None);
+            }
+        };
+        match serde_json::from_str::<DeleteTombstone>(&data) {
+            Ok(tombstone) => Ok(Some(tombstone)),
+            Err(error) => {
+                eprintln!(
+                    "storage warning: skipping malformed tombstone {}: {error}",
+                    path.display()
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    fn write_tombstone(&self, path: &Path, tombstone: &DeleteTombstone) -> Result<()> {
+        if let Some(existing) = self.read_tombstone(path)? {
+            if existing.created_at > tombstone.created_at
+                || (existing.created_at == tombstone.created_at
+                    && existing.delete_event_id >= tombstone.delete_event_id)
+            {
+                return Ok(());
+            }
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, serde_json::to_vec(tombstone)?)?;
+        Ok(())
     }
 }
 
@@ -626,6 +804,13 @@ struct StoredEventRecord {
     size_bytes: u64,
     path: PathBuf,
     event: Event,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DeleteTombstone {
+    pubkey: String,
+    created_at: u64,
+    delete_event_id: String,
 }
 
 struct MutationLock {
@@ -747,6 +932,34 @@ fn hashed_index_name(value: &str) -> String {
     let mut hasher = Sha1::new();
     hasher.update(value.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+fn event_address(event: &Event) -> Option<String> {
+    event
+        .tags
+        .iter()
+        .find_map(|Tag(fields)| match fields.as_slice() {
+            [tag, value, ..] if tag == "d" => Some(format!("{}:{}:{}", event.kind, event.pubkey, value)),
+            _ => None,
+        })
+}
+
+fn event_expiration(event: &Event) -> Option<u64> {
+    event.tags.iter().find_map(|Tag(fields)| match fields.as_slice() {
+        [tag, value, ..] if tag == "expiration" => value.parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
+fn event_is_expired(event: &Event, now: u64) -> bool {
+    event_expiration(event).is_some_and(|expiration| expiration <= now)
+}
+
+fn current_unix_ts() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Recompute the Nostr event hash from its fields.
@@ -1012,10 +1225,14 @@ mod tests {
     }
 
     #[test]
-    fn query_without_filters_returns_empty() {
+    fn query_without_filters_returns_recent_events() {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
         store.init().unwrap();
+        let e1 = sample_event("aa11", "p1", 1, None, 10);
+        let e2 = sample_event("bb22", "p2", 1, None, 20);
+        store.ingest(&e1).unwrap();
+        store.ingest(&e2).unwrap();
         let res = store
             .query(Query {
                 authors: None,
@@ -1029,7 +1246,8 @@ mod tests {
                 limit: None,
             })
             .unwrap();
-        assert!(res.is_empty());
+        let ids: Vec<String> = res.into_iter().map(|event| event.id).collect();
+        assert_eq!(ids, vec!["bb22".to_string(), "aa11".to_string()]);
     }
 
     #[test]
@@ -1161,5 +1379,146 @@ mod tests {
                 .trim(),
             "2"
         );
+    }
+
+    #[test]
+    fn delete_event_hides_target_event_by_id() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let target = sample_event("aa11", "p1", 1, None, 10);
+        let delete = Event {
+            id: "dd55".into(),
+            pubkey: "p1".into(),
+            kind: 5,
+            created_at: 20,
+            tags: vec![Tag(vec!["e".into(), "aa11".into()])],
+            content: String::new(),
+            sig: String::new(),
+        };
+        store.ingest(&target).unwrap();
+        store.ingest_with_policy(&delete, true, true).unwrap();
+
+        let visible = store
+            .query_with_policy(
+                Query {
+                    authors: Some(vec!["p1".into()]),
+                    kinds: Some(vec![1]),
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: None,
+                },
+                true,
+                true,
+            )
+            .unwrap();
+        assert!(visible.is_empty());
+        assert!(store.event_path("aa11").exists());
+    }
+
+    #[test]
+    fn delete_by_address_hides_old_replaceable_but_keeps_newer_one() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let old_post = sample_event("aa11", "p1", 30023, Some("slug"), 10);
+        let delete = Event {
+            id: "dd55".into(),
+            pubkey: "p1".into(),
+            kind: 5,
+            created_at: 20,
+            tags: vec![Tag(vec!["a".into(), "30023:p1:slug".into()])],
+            content: String::new(),
+            sig: String::new(),
+        };
+        let new_post = sample_event("bb22", "p1", 30023, Some("slug"), 30);
+
+        store.ingest(&old_post).unwrap();
+        store.ingest_with_policy(&delete, true, true).unwrap();
+        store.ingest(&new_post).unwrap();
+
+        let visible = store
+            .query_with_policy(
+                Query {
+                    authors: Some(vec!["p1".into()]),
+                    kinds: Some(vec![30023]),
+                    d: Some("slug".into()),
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: None,
+                },
+                true,
+                true,
+            )
+            .unwrap();
+        let ids: Vec<String> = visible.into_iter().map(|event| event.id).collect();
+        assert_eq!(ids, vec!["bb22".to_string()]);
+    }
+
+    #[test]
+    fn expiration_hides_expired_events() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let expired = Event {
+            id: "aa11".into(),
+            pubkey: "p1".into(),
+            kind: 1,
+            created_at: 1,
+            tags: vec![Tag(vec!["expiration".into(), "1".into()])],
+            content: String::new(),
+            sig: String::new(),
+        };
+        store.ingest(&expired).unwrap();
+
+        let visible = store
+            .query_with_policy(
+                Query {
+                    authors: Some(vec!["p1".into()]),
+                    kinds: Some(vec![1]),
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: None,
+                },
+                true,
+                true,
+            )
+            .unwrap();
+        assert!(visible.is_empty());
+    }
+
+    #[test]
+    fn ingest_with_policy_skips_already_expired_events() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let expired = Event {
+            id: "aa11".into(),
+            pubkey: "p1".into(),
+            kind: 1,
+            created_at: 1,
+            tags: vec![Tag(vec!["expiration".into(), "1".into()])],
+            content: String::new(),
+            sig: String::new(),
+        };
+
+        let stored = store.ingest_with_policy(&expired, true, true).unwrap();
+        assert!(!stored);
+        assert!(!store.event_path("aa11").exists());
     }
 }

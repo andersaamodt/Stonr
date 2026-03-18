@@ -86,7 +86,13 @@ async fn process(socket: WebSocket, state: Arc<AppState>) {
             }
             live = live_rx.recv() => {
                 match live {
-                    Ok(event) => fan_out_live_event(&event, &subs, &out_tx),
+                    Ok(event) => fan_out_live_event(
+                        &state.store,
+                        &state.settings,
+                        &event,
+                        &subs,
+                        &out_tx,
+                    ),
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -128,7 +134,7 @@ async fn handle_text(
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
                 return;
             }
-            let snapshot = snapshot_events(&state.store, &filters).unwrap_or_default();
+            let snapshot = snapshot_events(&state.store, &state.settings, &filters).unwrap_or_default();
             for event in snapshot {
                 send_json(out_tx, serde_json::json!(["EVENT", sub, event]));
             }
@@ -152,7 +158,9 @@ async fn handle_text(
                 send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
                 return;
             }
-            let count = snapshot_events(&state.store, &filters).map(|events| events.len()).unwrap_or(0);
+            let count = snapshot_events(&state.store, &state.settings, &filters)
+                .map(|events| events.len())
+                .unwrap_or(0);
             send_json(out_tx, serde_json::json!(["COUNT", sub, {"count": count}]));
         }
         Some("CLOSE") if arr.len() >= 2 => {
@@ -192,16 +200,33 @@ fn publish_event(state: &AppState, event: &Event) -> Result<()> {
     if calc_id != event.id {
         anyhow::bail!("id mismatch");
     }
-    state.store.ingest(event)?;
-    let _ = state.events_tx.send(event.clone());
+    if state.store.ingest_with_policy(
+        event,
+        state.settings.delete_enabled(),
+        state.settings.expiration_enabled(),
+    )? {
+        let _ = state.events_tx.send(event.clone());
+    }
     Ok(())
 }
 
 fn fan_out_live_event(
+    store: &Store,
+    settings: &Settings,
     event: &Event,
     subs: &HashMap<String, Vec<Query>>,
     out_tx: &mpsc::UnboundedSender<String>,
 ) {
+    let visible = store
+        .event_visible_with_policy(
+            event,
+            settings.delete_enabled(),
+            settings.expiration_enabled(),
+        )
+        .unwrap_or(false);
+    if !visible {
+        return;
+    }
     for (sub, filters) in subs {
         if filters.iter().any(|filter| event_matches_query(event, filter)) {
             send_json(out_tx, serde_json::json!(["EVENT", sub, event]));
@@ -209,11 +234,15 @@ fn fan_out_live_event(
     }
 }
 
-fn snapshot_events(store: &Store, filters: &[Query]) -> Result<Vec<Event>> {
+fn snapshot_events(store: &Store, settings: &Settings, filters: &[Query]) -> Result<Vec<Event>> {
     let mut seen = HashSet::new();
     let mut events = Vec::new();
     for filter in filters {
-        for event in store.query(filter.clone())? {
+        for event in store.query_with_policy(
+            filter.clone(),
+            settings.delete_enabled(),
+            settings.expiration_enabled(),
+        )? {
             if seen.insert(event.id.clone()) {
                 events.push(event);
             }
@@ -241,6 +270,11 @@ fn event_matches_query(event: &Event, query: &Query) -> bool {
     }
     if let Some(until) = query.until {
         if event.created_at > until {
+            return false;
+        }
+    }
+    if let Some(search) = &query.search {
+        if !event.content.to_lowercase().contains(&search.to_lowercase()) {
             return false;
         }
     }
@@ -295,7 +329,9 @@ mod tests {
             enable_search: true,
             enable_mirroring: true,
             support_nip11: true,
+            support_nip09: true,
             support_nip12: true,
+            support_nip40: true,
             support_nip45: true,
             support_nip50: true,
             filter_private_messages: true,

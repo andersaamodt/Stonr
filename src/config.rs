@@ -341,7 +341,9 @@ mod tests {
         assert!(cfg.enable_search);
         assert!(cfg.enable_mirroring);
         assert!(cfg.support_nip11);
+        assert!(cfg.support_nip09);
         assert!(cfg.support_nip12);
+        assert!(cfg.support_nip40);
         assert!(cfg.support_nip45);
         assert!(cfg.support_nip50);
         assert!(cfg.filter_private_messages);
@@ -422,7 +424,9 @@ mod tests {
         assert!(cfg.enable_search);
         assert!(cfg.enable_mirroring);
         assert!(cfg.support_nip11);
+        assert!(cfg.support_nip09);
         assert!(cfg.support_nip12);
+        assert!(cfg.support_nip40);
         assert!(cfg.support_nip45);
         assert!(cfg.support_nip50);
         assert!(cfg.filter_private_messages);
@@ -599,7 +603,9 @@ mod tests {
                 "ENABLE_SEARCH=0\n",
                 "ENABLE_MIRRORING=0\n",
                 "SUPPORT_NIP11=0\n",
+                "SUPPORT_NIP09=0\n",
                 "SUPPORT_NIP12=0\n",
+                "SUPPORT_NIP40=0\n",
                 "SUPPORT_NIP45=0\n",
                 "SUPPORT_NIP50=0\n",
             ),
@@ -608,6 +614,8 @@ mod tests {
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert_eq!(cfg.relay_name, "My relay");
         assert!(!cfg.relay_info_enabled());
+        assert!(!cfg.delete_enabled());
+        assert!(!cfg.expiration_enabled());
         assert!(!cfg.query_enabled());
         assert!(!cfg.publish_enabled());
         assert!(!cfg.live_subscriptions_enabled());
