@@ -806,6 +806,26 @@ h4 {
   min-width: 0;
 }
 
+.radio-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.8rem;
+  min-width: 0;
+}
+
+.radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 1.1rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.radio-option input {
+  margin: 0;
+}
+
 .field-main label {
   display: inline-flex;
   align-items: center;

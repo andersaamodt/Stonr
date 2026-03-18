@@ -440,16 +440,29 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         drop(listener);
         let store_clone = store.clone();
-        let shutdown = tokio::time::sleep(Duration::from_millis(100));
+        let shutdown = tokio::time::sleep(Duration::from_millis(1000));
         let handle = tokio::spawn(async move {
             super::serve_http(addr, store_clone, shutdown)
                 .await
                 .unwrap();
         });
-        // give server a moment to start
-        tokio::time::sleep(Duration::from_millis(50)).await;
         let url = format!("http://{}/healthz", addr);
-        let resp: super::Health = reqwest::get(&url).await.unwrap().json().await.unwrap();
+        let client = reqwest::Client::new();
+        let mut body = None;
+        for _ in 0..10 {
+            match client.get(&url).send().await {
+                Ok(resp) => match resp.json::<super::Health>().await {
+                    Ok(health) => {
+                        body = Some(health);
+                        break;
+                    }
+                    Err(_) => {}
+                },
+                Err(_) => {}
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let resp = body.expect("health endpoint never became ready");
         assert_eq!(resp.status, "ok");
         handle.await.unwrap();
     }

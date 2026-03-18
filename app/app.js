@@ -41,6 +41,8 @@
     events: [],
     eventsTotal: 0,
     eventsBytes: 0,
+    backgroundMode: false,
+    menuBarIcon: false,
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -89,6 +91,13 @@
       title: 'Network And Mirror',
       detail: 'Bind addresses, upstream feeds, and mirror filter state.',
       fields: [
+        groupField('Mirror Mode'),
+        radioField('MIRROR_MODE', 'mirror_mode', 'Mirror mode', [
+          { value: 'broad', label: 'General relay' },
+          { value: 'site', label: 'One-site mirror' }
+        ], null, 'Choose whether this relay mirrors broad upstream traffic or only one site author and that site\'s comments.'),
+        textField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkey', 'Hex pubkey for the site owner', null, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Hex pubkey whose long-form posts define the one-site mirror scope.'),
+        boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.'),
         groupField('Local Paths And Ports'),
         browseTextField('STORE_ROOT', 'store_root', 'Data folder', '', null, null, 'Root folder for events, blobs, indexes, logs, and runtime files.'),
         textField('BIND_HTTP', 'bind_http', 'HTTP address', 'Example: 127.0.0.1:7777', null, null, 'Local host and port for relay info, file APIs, and other HTTP routes.'),
@@ -99,6 +108,7 @@
         groupField('Mirror Filters'),
         textField('FILTER_AUTHORS', 'filter_authors', 'Authors to import', 'Comma-separated pubkeys', formatList, null, 'If set, only import events from these author pubkeys.'),
         textField('FILTER_KINDS', 'filter_kinds', 'Kinds to import', 'Comma-separated kind numbers, for example: 1,7,30023', formatNumberList, null, 'If set, only import these event kinds.'),
+        textField('FILTER_TAG_A', 'filter_tag_a', 'Addresses to import', 'Comma-separated `kind:pubkey:d` addresses', formatList, null, 'If set, only import events whose `#a` tags match these addresses.'),
         textField('FILTER_TAG_T', 'filter_tag_t', 'Topics to import', 'Comma-separated topic tags', formatList, null, 'If set, only import events whose `#t` tags match these topics.'),
         textField('FILTER_SINCE_MODE', 'filter_since_mode', 'Import start point', 'Use `cursor` or `fixed:<unix time>`', formatSinceMode, null, 'Use `cursor` to resume where the importer left off, or `fixed:<unix time>` to start from a fixed timestamp.'),
         groupField('Kind Policy'),
@@ -342,6 +352,7 @@
     RELAYS_UPSTREAM: true,
     FILTER_AUTHORS: true,
     FILTER_KINDS: true,
+    FILTER_TAG_A: true,
     FILTER_TAG_T: true,
     ALLOW_KINDS: true,
     DENY_KINDS: true,
@@ -620,9 +631,31 @@
     }
   }
 
+  async function saveDesktopPrefs() {
+    if (!state.bridge) {
+      return;
+    }
+    await saveUiPref('background_mode', state.backgroundMode ? '1' : '0');
+    await saveUiPref('menu_bar_icon', state.menuBarIcon ? '1' : '0');
+    await syncDesktopHostSettings();
+  }
+
+  async function syncDesktopHostSettings() {
+    if (!state.bridge) {
+      return;
+    }
+    await execArgv([
+      '__wizardry_host_set_background_mode',
+      state.backgroundMode ? '1' : '0',
+      state.menuBarIcon ? '1' : '0'
+    ]);
+  }
+
   async function loadAll() {
     var prefs = await loadUiPrefs();
     state.envPath = prefs.env_path || state.envPath || '';
+    state.backgroundMode = matchesBool(prefs.background_mode || '');
+    state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
     state.envValues = {};
     state.activeSection = 'relay';
     state.events = [];
@@ -656,6 +689,7 @@
       els.doctorOutput.textContent = state.doctor.trim() || 'No backend output.';
       state.envValues = parseKv(await backend('load-env', [state.envPath]));
       state.status = parseKv(await backend('relay-status', [state.envPath]));
+      await syncDesktopHostSettings();
       renderRuntime();
       renderActiveSection();
       revealBootUi();
@@ -816,6 +850,9 @@
     if (section.fields.length) {
       els.sectionContent.appendChild(renderFieldSection(section));
     }
+    if (section.id === 'relay') {
+      els.sectionContent.appendChild(renderDesktopSection());
+    }
     if (section.custom === 'moderation') {
       els.sectionContent.appendChild(renderModerationSection());
     }
@@ -879,6 +916,38 @@
       input = document.createElement('input');
       input.type = 'checkbox';
       input.checked = !!resolvedFieldValue(field);
+    } else if (field.type === 'radio') {
+      input = document.createElement('div');
+      input.className = 'radio-group';
+      var selectedValue = String(displayValue(field) || field.options[0].value);
+      input.dataset.envKey = field.envKey;
+      input.dataset.path = field.path || '';
+      input.dataset.savedValue = selectedValue;
+      input.dataset.baseDisabled = !state.bridge ? '1' : '0';
+      input.title = helpText;
+      input.setAttribute('aria-description', helpText);
+      field.options.forEach(function (option) {
+        var optionWrap = document.createElement('label');
+        optionWrap.className = 'radio-option';
+        var radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = field.envKey;
+        radio.value = option.value;
+        radio.checked = selectedValue === String(option.value);
+        radio.disabled = !state.bridge;
+        radio.dataset.baseDisabled = !state.bridge ? '1' : '0';
+        radio.dataset.envKey = field.envKey;
+        radio.dataset.path = field.path || '';
+        radio.dataset.savedValue = selectedValue;
+        radio.title = helpText;
+        radio.setAttribute('aria-description', helpText);
+        bindFieldAutosave(field, radio);
+        var optionText = document.createElement('span');
+        optionText.textContent = option.label;
+        optionWrap.appendChild(radio);
+        optionWrap.appendChild(optionText);
+        input.appendChild(optionWrap);
+      });
     } else if (field.type === 'select') {
       input = document.createElement('select');
       field.options.forEach(function (option) {
@@ -898,17 +967,21 @@
       input.spellcheck = false;
     }
 
-    input.disabled = !state.bridge;
-    if (wideFieldEnvKeys[field.envKey]) {
+    if (field.type !== 'radio') {
+      input.disabled = !state.bridge;
+    }
+    if (field.type !== 'radio' && wideFieldEnvKeys[field.envKey]) {
       input.classList.add('field-input-wide');
     }
-    input.dataset.envKey = field.envKey;
-    input.dataset.path = field.path || '';
-    input.dataset.savedValue = serializeInput(field, input);
-    input.dataset.baseDisabled = !state.bridge ? '1' : '0';
-    input.title = helpText;
-    input.setAttribute('aria-description', helpText);
-    bindFieldAutosave(field, input);
+    if (field.type !== 'radio') {
+      input.dataset.envKey = field.envKey;
+      input.dataset.path = field.path || '';
+      input.dataset.savedValue = serializeInput(field, input);
+      input.dataset.baseDisabled = !state.bridge ? '1' : '0';
+      input.title = helpText;
+      input.setAttribute('aria-description', helpText);
+      bindFieldAutosave(field, input);
+    }
 
     if (field.browseDir) {
       button = document.createElement('button');
@@ -934,7 +1007,9 @@
       unit.setAttribute('aria-hidden', 'true');
     }
 
-    input.id = field.envKey;
+    if (field.type !== 'radio') {
+      input.id = field.envKey;
+    }
     var nipPill = createFieldNipPill(field);
     var label = createFieldLabel(field, sectionId, helpText);
     var nipSummary = createFieldNipSummary(field, sectionId);
@@ -1005,7 +1080,7 @@
       nipPill: nipPill,
       helpText: helpText
     };
-    if (field.type === 'bool') {
+    if (field.type === 'bool' || field.type === 'radio') {
       input.addEventListener('change', function () {
         syncFieldDependencies();
       });
@@ -1091,10 +1166,75 @@
     return wrap;
   }
 
+  function renderDesktopSection() {
+    var card = document.createElement('section');
+    card.className = 'section-panel autosave-panel';
+    card.appendChild(renderCardHead('Desktop App', ''));
+
+    var grid = document.createElement('div');
+    grid.className = 'field-grid';
+
+    grid.appendChild(renderDesktopToggleField(
+      'Keep running when window closes',
+      state.backgroundMode,
+      function (checked) {
+        state.backgroundMode = checked;
+        if (!checked) {
+          state.menuBarIcon = false;
+        }
+      },
+      'Hide the window instead of quitting the app so the relay keeps running in the background.'
+    ));
+
+    grid.appendChild(renderDesktopToggleField(
+      'Show menu bar icon',
+      state.menuBarIcon,
+      function (checked) {
+        state.menuBarIcon = checked;
+      },
+      'Show a menu bar or tray icon so you can reopen the window or quit while the relay keeps running.',
+      !state.backgroundMode
+    ));
+
+    card.appendChild(grid);
+    return card;
+  }
+
+  function renderDesktopToggleField(labelText, checked, onChange, helpText, forceDisabled) {
+    var wrap = document.createElement('div');
+    wrap.className = 'field checkbox-field';
+    if (forceDisabled) {
+      wrap.classList.add('field-disabled');
+    }
+    var input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !!checked;
+    input.disabled = !state.bridge || !!forceDisabled;
+    var label = document.createElement('label');
+    label.textContent = labelText;
+    label.title = helpText;
+    input.title = helpText;
+    input.addEventListener('change', function () {
+      onChange(input.checked);
+      saveDesktopPrefs().then(function () {
+        renderActiveSection();
+      }).catch(function (error) {
+        console.error(error);
+        toast(summarizeBackendError(error, 'Failed to save desktop settings'), 'bad');
+      });
+    });
+    wrap.appendChild(input);
+    wrap.appendChild(label);
+    return wrap;
+  }
+
   function displayValue(field) {
     var value = resolvedFieldValue(field);
     if (field.envKey === 'MAX_STORED_EVENT_BYTES') {
       return formatStoredEventMegabytes(value);
+    }
+    if (field.envKey === 'MIRROR_MODE') {
+      return String(value || '').toLowerCase();
     }
     if (field.format) {
       return field.format(value);
@@ -1166,6 +1306,10 @@
         return state.doctorKv.store_root || '';
       case 'RELAYS_UPSTREAM':
         return defaultUpstreamRelays.join(',');
+      case 'MIRROR_MODE':
+        return 'broad';
+      case 'MIRROR_SITE_INCLUDE_COMMENTS':
+        return true;
       case 'RELAY_NAME':
         return 'stonr';
       case 'RELAY_DESCRIPTION':
@@ -1242,6 +1386,10 @@
   function serializeInput(field, input) {
     if (field.type === 'bool') {
       return input.checked ? '1' : '0';
+    }
+    if (field.type === 'radio') {
+      var selected = input.querySelector('input[type="radio"]:checked');
+      return selected ? String(selected.value || '') : '';
     }
     if (field.envKey === 'MAX_STORED_EVENT_BYTES') {
       return serializeStoredEventMegabytes(input.value);
@@ -1796,6 +1944,18 @@
     return { envKey: envKey, path: path, label: label, hint: hint, type: 'text', format: format, browseDir: true, dependsOn: dependsOn || [], tooltip: tooltip || '' };
   }
 
+  function radioField(envKey, path, label, options, dependsOn, tooltip) {
+    return {
+      envKey: envKey,
+      path: path,
+      label: label,
+      type: 'radio',
+      options: options,
+      dependsOn: dependsOn || [],
+      tooltip: tooltip || ''
+    };
+  }
+
   function numberField(envKey, path, label, hint, format, dependsOn) {
     var tooltip = arguments[6];
     return {
@@ -1925,16 +2085,41 @@
     return match;
   }
 
+  function dependencySpecEnvKey(spec) {
+    if (typeof spec === 'string') {
+      return spec;
+    }
+    if (spec && typeof spec === 'object') {
+      return spec.envKey || '';
+    }
+    return '';
+  }
+
+  function dependencySpecMet(spec) {
+    var envKey = dependencySpecEnvKey(spec);
+    if (!envKey) {
+      return true;
+    }
+    var dependency = fieldByEnvKey(envKey);
+    if (!dependency) {
+      return true;
+    }
+    var value = resolvedFieldValue(dependency);
+    if (typeof spec === 'string') {
+      return !!value;
+    }
+    if (Object.prototype.hasOwnProperty.call(spec, 'equals')) {
+      return String(value || '') === String(spec.equals);
+    }
+    return !!value;
+  }
+
   function isFieldDependencyEnabled(field) {
     if (!field.dependsOn || !field.dependsOn.length) {
       return true;
     }
-    return field.dependsOn.every(function (envKey) {
-      var dependency = fieldByEnvKey(envKey);
-      if (!dependency) {
-        return true;
-      }
-      return !!resolvedFieldValue(dependency);
+    return field.dependsOn.every(function (spec) {
+      return dependencySpecMet(spec);
     });
   }
 
@@ -1943,22 +2128,29 @@
       return '';
     }
     for (var index = 0; index < field.dependsOn.length; index += 1) {
-      var envKey = field.dependsOn[index];
+      var spec = field.dependsOn[index];
+      var envKey = dependencySpecEnvKey(spec);
       var dependency = fieldByEnvKey(envKey);
       if (!dependency) {
         continue;
       }
-      if (!resolvedFieldValue(dependency)) {
-        return envKey;
+      if (!dependencySpecMet(spec)) {
+        return spec;
       }
     }
     return '';
   }
 
-  function dependencyReasonForKey(envKey) {
+  function dependencyReasonForKey(spec) {
+    var envKey = typeof spec === 'string' ? spec : dependencySpecEnvKey(spec);
     switch (envKey) {
       case 'ENABLE_NIP42':
         return 'Requires relay login.';
+      case 'MIRROR_MODE':
+        if (spec && typeof spec === 'object' && spec.equals === 'site') {
+          return 'Requires one-site mirror mode.';
+        }
+        return 'Requires general relay mode.';
       default:
         return 'Required feature is off.';
     }
@@ -2010,7 +2202,13 @@
       var unmetDependency = unmetFieldDependency(node.field);
       var disabledNip = disabledNipSupportKey(node.field);
       var enabled = state.bridge && !unmetDependency && !disabledNip;
-      node.input.disabled = !enabled || node.input.dataset.baseDisabled === '1';
+      if (node.field.type === 'radio') {
+        Array.prototype.slice.call(node.input.querySelectorAll('input[type="radio"]')).forEach(function (radio) {
+          radio.disabled = !enabled || radio.dataset.baseDisabled === '1';
+        });
+      } else {
+        node.input.disabled = !enabled || node.input.dataset.baseDisabled === '1';
+      }
       if (node.button) {
         node.button.disabled = !enabled || node.button.dataset.baseDisabled === '1';
       }
@@ -2265,7 +2463,7 @@
   }
 
   function bindFieldAutosave(field, input) {
-    var eventName = field.type === 'bool' || field.type === 'select' ? 'change' : 'input';
+    var eventName = field.type === 'bool' || field.type === 'select' || field.type === 'radio' ? 'change' : 'input';
     input.addEventListener(eventName, function () {
       applyInputToState(field, input);
       if (field.explicitSaveGroup) {
