@@ -38,8 +38,12 @@ pub struct Settings {
     pub enable_mirroring: bool,
     /// Master switch for NIP-11.
     pub support_nip11: bool,
+    /// Master switch for NIP-09 delete handling.
+    pub support_nip09: bool,
     /// Master switch for NIP-12.
     pub support_nip12: bool,
+    /// Master switch for NIP-40 expiration handling.
+    pub support_nip40: bool,
     /// Master switch for NIP-45.
     pub support_nip45: bool,
     /// Master switch for NIP-50.
@@ -110,7 +114,9 @@ impl Settings {
         let enable_search = env_value(&env, "ENABLE_SEARCH").unwrap_or("1") == "1";
         let enable_mirroring = env_value(&env, "ENABLE_MIRRORING").unwrap_or("1") == "1";
         let support_nip11 = env_value(&env, "SUPPORT_NIP11").unwrap_or("1") == "1";
+        let support_nip09 = env_value(&env, "SUPPORT_NIP09").unwrap_or("1") == "1";
         let support_nip12 = env_value(&env, "SUPPORT_NIP12").unwrap_or("1") == "1";
+        let support_nip40 = env_value(&env, "SUPPORT_NIP40").unwrap_or("1") == "1";
         let support_nip45 = env_value(&env, "SUPPORT_NIP45").unwrap_or("1") == "1";
         let support_nip50 = env_value(&env, "SUPPORT_NIP50").unwrap_or("1") == "1";
         let filter_private_messages = env_value(&env, "FILTER_PRIVATE_MESSAGES").unwrap_or("1") == "1";
@@ -185,7 +191,9 @@ impl Settings {
             enable_search,
             enable_mirroring,
             support_nip11,
+            support_nip09,
             support_nip12,
+            support_nip40,
             support_nip45,
             support_nip50,
             filter_private_messages,
@@ -206,6 +214,14 @@ impl Settings {
 
     pub fn relay_info_enabled(&self) -> bool {
         self.enable_nip11 && self.support_nip11
+    }
+
+    pub fn delete_enabled(&self) -> bool {
+        self.support_nip09
+    }
+
+    pub fn expiration_enabled(&self) -> bool {
+        self.support_nip40
     }
 
     pub fn query_enabled(&self) -> bool {
