@@ -24,6 +24,7 @@ Commands:
   load-env [ENV_PATH]
   count-events [ENV_PATH]
   size-events [ENV_PATH]
+  refresh-stats [ENV_PATH]
   purge-events [ENV_PATH]
   apply-retention [ENV_PATH]
   query-events [ENV_PATH] [SEARCH] [LIMIT]
@@ -682,6 +683,11 @@ case "$cmd" in
     else
       printf '0\n'
     fi
+    ;;
+  refresh-stats)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    run_stonr --env "$env_path" refresh-stats >/dev/null
     ;;
   purge-events)
     env_path=$(resolve_env_path "${1-}")

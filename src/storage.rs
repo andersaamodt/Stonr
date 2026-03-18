@@ -4,6 +4,8 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
@@ -85,6 +87,7 @@ impl Store {
     /// 3. Append the event to `log/events.ndjson`.
     /// 4. Update indexes and create mirror symlinks.
     pub fn ingest(&self, ev: &Event) -> Result<()> {
+        let _lock = self.mutation_lock()?;
         // Optionally verify the event's Schnorr signature before writing.
         if self.verify_sig {
             verify_event(ev)?;
@@ -143,11 +146,13 @@ impl Store {
 
     /// Rebuild all indexes and latest pointers from the `events/` tree.
     pub fn reindex(&self) -> Result<()> {
+        let _lock = self.mutation_lock()?;
         self.rebuild_metadata()
     }
 
     /// Apply configured retention limits immediately.
     pub fn enforce_retention(&self) -> Result<usize> {
+        let _lock = self.mutation_lock()?;
         if self.max_stored_events.is_none() && self.max_stored_event_bytes.is_none() {
             return Ok(0);
         }
@@ -179,7 +184,8 @@ impl Store {
             removed += 1;
         }
         if removed > 0 {
-            self.rebuild_metadata()?;
+            self.rewrite_event_log(records.into_iter().skip(removed))?;
+            self.write_stats_cache(total_events, total_bytes)?;
         }
         Ok(removed)
     }
@@ -264,6 +270,26 @@ impl Store {
         Ok(())
     }
 
+    fn rewrite_event_log<I>(&self, records: I) -> Result<()>
+    where
+        I: IntoIterator<Item = StoredEventRecord>,
+    {
+        let log_path = self.root.join("log/events.ndjson");
+        if let Some(parent) = log_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut log_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(log_path)?;
+        for record in records {
+            serde_json::to_writer(&mut log_file, &record.event)?;
+            log_file.write_all(b"\n")?;
+        }
+        Ok(())
+    }
+
     fn bump_stats_cache(&self, added_bytes: u64) -> Result<()> {
         let count_path = self.root.join("runtime/events-count.cache");
         let bytes_path = self.root.join("runtime/events-bytes.cache");
@@ -292,12 +318,31 @@ impl Store {
         Ok(())
     }
 
+    fn mutation_lock(&self) -> Result<MutationLock> {
+        let runtime_dir = self.root.join("runtime");
+        fs::create_dir_all(&runtime_dir)?;
+        let lock_path = runtime_dir.join("store.lock");
+        for _ in 0..400 {
+            match fs::create_dir(&lock_path) {
+                Ok(()) => return Ok(MutationLock { path: lock_path }),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(anyhow!("timed out waiting for storage lock"))
+    }
+
     fn load_event_records(&self) -> Result<Vec<StoredEventRecord>> {
         let mut records = vec![];
         for entry in walkdir::WalkDir::new(self.root.join("events")) {
             let entry = entry?;
             if entry.file_type().is_file() {
                 let path = entry.into_path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    continue;
+                }
                 let size_bytes = fs::metadata(&path)?.len();
                 let data = match fs::read_to_string(&path) {
                     Ok(data) => data,
@@ -493,6 +538,16 @@ struct StoredEventRecord {
     size_bytes: u64,
     path: PathBuf,
     event: Event,
+}
+
+struct MutationLock {
+    path: PathBuf,
+}
+
+impl Drop for MutationLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir(&self.path);
+    }
 }
 
 /// Read newline-separated IDs from a text file.

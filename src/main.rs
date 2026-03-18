@@ -44,6 +44,8 @@ enum Commands {
     PrintConfig,
     /// Apply store retention limits immediately.
     PruneRetention,
+    /// Recompute exact event count and byte stats from the store.
+    RefreshStats,
     /// Launch HTTP and WebSocket services (and mirror if configured).
     Serve,
     /// Verify a random sample of stored events.
@@ -85,6 +87,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::PruneRetention => {
             store.init()?;
             store.enforce_retention()?;
+        }
+        Commands::RefreshStats => {
+            store.init()?;
+            store.refresh_stats_cache()?;
         }
         Commands::Serve => {
             // Initialize storage then start HTTP and WS servers.
