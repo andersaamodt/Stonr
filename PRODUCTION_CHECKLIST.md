@@ -11,6 +11,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Delete tombstones enforced across ingest/query paths (`NIP-09`)
 - [x] Expiration filtering enforced across ingest/query paths (`NIP-40`)
 - [x] HTTP `/healthz`
+- [x] HTTP `/mirror-health`
 - [x] HTTP `/query`
 - [x] HTTP `/count`
 - [x] WebSocket `REQ`
@@ -31,7 +32,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Author/kind/topic filter support for broad mirroring
 - [x] One-site mirror mode for a single site author
 - [x] Optional one-site comment mirroring by `#a` reference
-- [ ] Per-upstream mirror health, lag, and last-success visibility
+- [x] Per-upstream mirror health, lag, and last-success visibility
 - [ ] Repair tooling for broken cursors / replay from a chosen checkpoint
 
 ## Storage Safety
@@ -68,7 +69,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [ ] End-to-end relay authentication (`NIP-42`) instead of UI-only controls
 - [ ] Backend file/blob policy enforcement for all desktop-exposed controls
 - [ ] Consistent capability advertisement across the remaining unimplemented relay/file/auth surfaces
-- [ ] Structured production logging and operator health endpoints
+- [ ] Structured production logging
 - [ ] Load/performance testing on large stores and long-running mirror sessions
 
 ## Explicitly Not Planned Right Now
