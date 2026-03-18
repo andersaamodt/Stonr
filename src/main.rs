@@ -5,6 +5,7 @@
 mod config;
 mod auth;
 mod event;
+mod log;
 mod mirror;
 mod policy;
 mod server;
@@ -236,9 +237,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let ws_addr: SocketAddr = cfg.bind_ws.parse()?;
             let (events_tx, _) = broadcast::channel(1024);
             let stats_store = store.clone();
-            tokio::spawn(async move {
+                tokio::spawn(async move {
                 if let Err(error) = stats_store.refresh_stats_cache() {
-                    eprintln!("stats warning: {error}");
+                    crate::log::warn(
+                        "runtime",
+                        "failed to refresh stats cache",
+                        serde_json::json!({ "error": error.to_string() }),
+                    );
                 }
             });
             if cfg.max_stored_events.is_some() || cfg.max_stored_event_bytes.is_some() {
@@ -246,7 +251,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 tokio::spawn(async move {
                     loop {
                         if let Err(error) = retention_store.enforce_retention() {
-                            eprintln!("retention warning: {error}");
+                            crate::log::warn(
+                                "retention",
+                                "failed to enforce retention",
+                                serde_json::json!({ "error": error.to_string() }),
+                            );
                         }
                         tokio::time::sleep(Duration::from_secs(60)).await;
                     }

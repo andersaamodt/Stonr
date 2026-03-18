@@ -247,9 +247,13 @@ impl Store {
                     total_bytes += meta.len();
                 }
                 Err(error) => {
-                    eprintln!(
-                        "storage warning: skipping event stat for {}: {error}",
-                        path.display()
+                    crate::log::warn(
+                        "storage",
+                        "skipping event stat",
+                        serde_json::json!({
+                            "path": path.display().to_string(),
+                            "error": error.to_string(),
+                        }),
                     );
                 }
             }
@@ -395,14 +399,28 @@ impl Store {
                 let data = match fs::read_to_string(&path) {
                     Ok(data) => data,
                     Err(error) => {
-                        eprintln!("storage warning: skipping unreadable event file {}: {error}", path.display());
+                        crate::log::warn(
+                            "storage",
+                            "skipping unreadable event file",
+                            serde_json::json!({
+                                "path": path.display().to_string(),
+                                "error": error.to_string(),
+                            }),
+                        );
                         continue;
                     }
                 };
                 let ev: Event = match serde_json::from_str(&data) {
                     Ok(event) => event,
                     Err(error) => {
-                        eprintln!("storage warning: skipping malformed event file {}: {error}", path.display());
+                        crate::log::warn(
+                            "storage",
+                            "skipping malformed event file",
+                            serde_json::json!({
+                                "path": path.display().to_string(),
+                                "error": error.to_string(),
+                            }),
+                        );
                         continue;
                     }
                 };
@@ -762,9 +780,13 @@ impl Store {
         let data = match fs::read_to_string(path) {
             Ok(data) => data,
             Err(error) => {
-                eprintln!(
-                    "storage warning: skipping unreadable tombstone {}: {error}",
-                    path.display()
+                crate::log::warn(
+                    "storage",
+                    "skipping unreadable tombstone",
+                    serde_json::json!({
+                        "path": path.display().to_string(),
+                        "error": error.to_string(),
+                    }),
                 );
                 return Ok(None);
             }
@@ -772,9 +794,13 @@ impl Store {
         match serde_json::from_str::<DeleteTombstone>(&data) {
             Ok(tombstone) => Ok(Some(tombstone)),
             Err(error) => {
-                eprintln!(
-                    "storage warning: skipping malformed tombstone {}: {error}",
-                    path.display()
+                crate::log::warn(
+                    "storage",
+                    "skipping malformed tombstone",
+                    serde_json::json!({
+                        "path": path.display().to_string(),
+                        "error": error.to_string(),
+                    }),
                 );
                 Ok(None)
             }

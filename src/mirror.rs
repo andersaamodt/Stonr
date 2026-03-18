@@ -58,9 +58,13 @@ pub(crate) fn read_statuses(root: &Path) -> Result<Vec<MirrorStatus>> {
         let data = match fs::read_to_string(entry.path()) {
             Ok(data) => data,
             Err(error) => {
-                eprintln!(
-                    "mirror warning: skipping unreadable status file {}: {error}",
-                    entry.path().display()
+                crate::log::warn(
+                    "mirror",
+                    "skipping unreadable status file",
+                    serde_json::json!({
+                        "path": entry.path().display().to_string(),
+                        "error": error.to_string(),
+                    }),
                 );
                 continue;
             }
@@ -68,9 +72,13 @@ pub(crate) fn read_statuses(root: &Path) -> Result<Vec<MirrorStatus>> {
         match serde_json::from_str::<MirrorStatus>(&data) {
             Ok(status) => statuses.push(status),
             Err(error) => {
-                eprintln!(
-                    "mirror warning: skipping malformed status file {}: {error}",
-                    entry.path().display()
+                crate::log::warn(
+                    "mirror",
+                    "skipping malformed status file",
+                    serde_json::json!({
+                        "path": entry.path().display().to_string(),
+                        "error": error.to_string(),
+                    }),
                 );
             }
         }
@@ -143,7 +151,14 @@ async fn mirror_relay_forever(
 ) {
     loop {
         if let Err(e) = mirror_relay_once(relay.clone(), cfg.clone(), store.clone(), events_tx.clone()).await {
-            eprintln!("mirror error: {e}");
+            crate::log::error(
+                "mirror",
+                "broad mirror cycle failed",
+                serde_json::json!({
+                    "relay": relay.clone(),
+                    "error": e.to_string(),
+                }),
+            );
             let _ = write_mirror_error(&cfg.store_root, &relay, &relay, "broad", &e.to_string());
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -261,7 +276,14 @@ async fn mirror_site_posts_forever(
         )
         .await
         {
-            eprintln!("site mirror post error: {e}");
+            crate::log::error(
+                "mirror",
+                "site post mirror cycle failed",
+                serde_json::json!({
+                    "relay": relay.clone(),
+                    "error": e.to_string(),
+                }),
+            );
             let cursor_key = format!("{relay}::site-posts");
             let _ = write_mirror_error(
                 &cfg.store_root,
@@ -358,7 +380,14 @@ async fn mirror_site_comments_forever(
         )
         .await
         {
-            eprintln!("site mirror comment error: {e}");
+            crate::log::error(
+                "mirror",
+                "site comment mirror cycle failed",
+                serde_json::json!({
+                    "relay": relay.clone(),
+                    "error": e.to_string(),
+                }),
+            );
             let cursor_key = format!("{relay}::site-comments");
             let _ = write_mirror_error(
                 &cfg.store_root,
@@ -533,7 +562,16 @@ where
                                         options.delete_enabled,
                                         options.expiration_enabled,
                                     ) {
-                                        eprintln!("ingest error: {e}");
+                                        crate::log::warn(
+                                            "mirror",
+                                            "failed to ingest mirrored event",
+                                            serde_json::json!({
+                                                "relay": options.relay,
+                                                "scope": options.scope,
+                                                "event_id": ev.id,
+                                                "error": e.to_string(),
+                                            }),
+                                        );
                                     } else if store
                                         .event_visible_with_policy(
                                             &ev,
