@@ -56,6 +56,9 @@ enum Commands {
         /// Exact `#t` value to match.
         #[arg(long)]
         t: Option<String>,
+        /// Relay-side text search term.
+        #[arg(long)]
+        search: Option<String>,
         /// Minimum `created_at` timestamp.
         #[arg(long)]
         since: Option<u64>,
@@ -84,17 +87,20 @@ enum Commands {
     },
 }
 
-fn cli_query(
+struct QueryArgs {
     authors: Option<String>,
     kinds: Option<String>,
     d: Option<String>,
     t: Option<String>,
+    search: Option<String>,
     since: Option<u64>,
     until: Option<u64>,
     limit: Option<usize>,
-) -> storage::Query {
+}
+
+fn cli_query(args: QueryArgs) -> storage::Query {
     let mut obj = serde_json::Map::new();
-    if let Some(authors) = authors {
+    if let Some(authors) = args.authors {
         obj.insert(
             "authors".into(),
             Value::Array(
@@ -106,7 +112,7 @@ fn cli_query(
             ),
         );
     }
-    if let Some(kinds) = kinds {
+    if let Some(kinds) = args.kinds {
         obj.insert(
             "kinds".into(),
             Value::Array(
@@ -118,19 +124,22 @@ fn cli_query(
             ),
         );
     }
-    if let Some(d) = d {
+    if let Some(d) = args.d {
         obj.insert("#d".into(), Value::Array(vec![Value::String(d)]));
     }
-    if let Some(t) = t {
+    if let Some(t) = args.t {
         obj.insert("#t".into(), Value::Array(vec![Value::String(t)]));
     }
-    if let Some(since) = since {
+    if let Some(search) = args.search {
+        obj.insert("search".into(), Value::String(search));
+    }
+    if let Some(since) = args.since {
         obj.insert("since".into(), Value::Number(since.into()));
     }
-    if let Some(until) = until {
+    if let Some(until) = args.until {
         obj.insert("until".into(), Value::Number(until.into()));
     }
-    if let Some(limit) = limit {
+    if let Some(limit) = args.limit {
         obj.insert("limit".into(), Value::Number((limit as u64).into()));
     }
     storage::Query::from_value(&Value::Object(obj))
@@ -167,12 +176,22 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             kinds,
             d,
             t,
+            search,
             since,
             until,
             limit,
             count,
         } => {
-            let q = cli_query(authors, kinds, d, t, since, until, limit);
+            let q = cli_query(QueryArgs {
+                authors,
+                kinds,
+                d,
+                t,
+                search,
+                since,
+                until,
+                limit,
+            });
             let events = store.query(q)?;
             if count {
                 println!("{}", events.len());
@@ -217,7 +236,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 });
             }
             // If upstream relays are configured, start mirroring in the background.
-            if !cfg.relays_upstream.is_empty() {
+            if cfg.enable_mirroring && !cfg.relays_upstream.is_empty() {
                 let store_clone = store.clone();
                 let cfg_clone = cfg.clone();
                 let mirror_events_tx = events_tx.clone();
@@ -225,9 +244,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
             let store_http = store.clone();
             let store_ws = store.clone();
+            let cfg_http = cfg.clone();
+            let cfg_ws = cfg.clone();
             tokio::try_join!(
-                server::serve_http(http_addr, store_http, std::future::pending()),
-                ws::serve_ws(ws_addr, store_ws, events_tx, std::future::pending())
+                server::serve_http(http_addr, store_http, cfg_http, std::future::pending()),
+                ws::serve_ws(ws_addr, store_ws, cfg_ws, events_tx, std::future::pending())
             )?;
         }
         Commands::Verify { sample } => {

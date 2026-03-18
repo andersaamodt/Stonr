@@ -497,6 +497,7 @@ impl Store {
         let since = q.since;
         let until = q.until;
         let limit = q.limit;
+        let search = q.search.clone();
         // Collect ID sets for each filter category and intersect them below.
         let mut sets: Vec<std::collections::HashSet<String>> = vec![];
         if let Some(authors) = q.authors {
@@ -534,7 +535,7 @@ impl Store {
         }
         if sets.is_empty() {
             let events = self.load_all_events()?;
-            return Ok(self.filter_sort_and_limit(events, since, until, limit));
+            return Ok(self.filter_sort_and_limit(events, since, until, limit, search));
         }
         let mut iter = sets.into_iter();
         // Start with the first ID set and intersect each subsequent one.
@@ -552,7 +553,7 @@ impl Store {
                 serde_json::from_str(&data).ok()
             })
             .collect();
-        Ok(self.filter_sort_and_limit(events, since, until, limit))
+        Ok(self.filter_sort_and_limit(events, since, until, limit, search))
     }
 
     fn load_all_events(&self) -> Result<Vec<Event>> {
@@ -583,10 +584,15 @@ impl Store {
         since: Option<u64>,
         until: Option<u64>,
         limit: Option<usize>,
+        search: Option<String>,
     ) -> Vec<Event> {
+        let search = search.map(|value| value.to_lowercase());
         events.retain(|ev: &Event| {
             (since.is_none_or(|s| ev.created_at >= s))
                 && (until.is_none_or(|u| ev.created_at <= u))
+                && search
+                    .as_ref()
+                    .is_none_or(|term| ev.content.to_lowercase().contains(term))
         });
         // Sort newest-first so replaceable events keep the most recent version.
         events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
@@ -649,6 +655,7 @@ pub struct Query {
     pub d: Option<String>,
     pub t: Option<String>,
     pub tags: Vec<(String, Vec<String>)>,
+    pub search: Option<String>,
     pub since: Option<u64>,
     pub until: Option<u64>,
     pub limit: Option<usize>,
@@ -709,6 +716,11 @@ impl Query {
             .unwrap_or_default();
         let since = val.get("since").and_then(|v| v.as_u64());
         let until = val.get("until").and_then(|v| v.as_u64());
+        let search = val
+            .get("search")
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
         let limit = val
             .get("limit")
             .and_then(|v| v.as_u64())
@@ -719,12 +731,16 @@ impl Query {
             d,
             t,
             tags,
+            search,
             since,
             until,
             limit,
         }
     }
 
+    pub fn has_tag_filters(&self) -> bool {
+        self.d.is_some() || self.t.is_some() || !self.tags.is_empty()
+    }
 }
 
 fn hashed_index_name(value: &str) -> String {
@@ -852,6 +868,7 @@ mod tests {
                 d: Some("s2".into()),
                 t: None,
                 tags: vec![],
+                search: None,
                 since: None,
                 until: None,
                 limit: Some(10),
@@ -928,6 +945,7 @@ mod tests {
                 d: Some("slug".into()),
                 t: None,
                 tags: vec![],
+                search: None,
                 since: None,
                 until: None,
                 limit: None,
@@ -983,6 +1001,7 @@ mod tests {
                 d: None,
                 t: None,
                 tags: vec![],
+                search: None,
                 since: Some(15),
                 until: Some(25),
                 limit: Some(1),
@@ -1004,6 +1023,7 @@ mod tests {
                 d: None,
                 t: None,
                 tags: vec![],
+                search: None,
                 since: None,
                 until: None,
                 limit: None,
@@ -1089,6 +1109,7 @@ mod tests {
                 d: None,
                 t: None,
                 tags: vec![],
+                search: None,
                 since: None,
                 until: None,
                 limit: Some(10),

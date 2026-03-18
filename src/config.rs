@@ -16,6 +16,34 @@ pub struct Settings {
     pub bind_ws: String,
     /// Enable Schnorr signature verification on ingest.
     pub verify_sig: bool,
+    /// Relay profile name exposed over NIP-11.
+    pub relay_name: String,
+    /// Relay profile description exposed over NIP-11.
+    pub relay_description: String,
+    /// Publish a relay information document over HTTP.
+    pub enable_nip11: bool,
+    /// Allow read/query access.
+    pub enable_query: bool,
+    /// Allow EVENT publish over relay interfaces.
+    pub enable_publish: bool,
+    /// Keep WS subscriptions open for live fanout.
+    pub enable_live_subscriptions: bool,
+    /// Allow COUNT requests.
+    pub enable_count: bool,
+    /// Allow tag-based queries like `#a`, `#e`, `#p`, `#t`.
+    pub enable_tag_queries: bool,
+    /// Allow relay-side content search.
+    pub enable_search: bool,
+    /// Enable upstream mirroring when relays are configured.
+    pub enable_mirroring: bool,
+    /// Master switch for NIP-11.
+    pub support_nip11: bool,
+    /// Master switch for NIP-12.
+    pub support_nip12: bool,
+    /// Master switch for NIP-45.
+    pub support_nip45: bool,
+    /// Master switch for NIP-50.
+    pub support_nip50: bool,
     /// Reject encrypted private-message kinds before storing them.
     pub filter_private_messages: bool,
     /// Upstream relays to mirror events from.
@@ -68,6 +96,23 @@ impl Settings {
         let bind_http = required_env(&env, "BIND_HTTP")?;
         let bind_ws = required_env(&env, "BIND_WS")?;
         let verify_sig = env_value(&env, "VERIFY_SIG").unwrap_or("0") == "1";
+        let relay_name = env_value(&env, "RELAY_NAME").unwrap_or("stonr").to_string();
+        let relay_description = env_value(&env, "RELAY_DESCRIPTION")
+            .unwrap_or("File-backed Nostr relay")
+            .to_string();
+        let enable_nip11 = env_value(&env, "ENABLE_NIP11").unwrap_or("1") == "1";
+        let enable_query = env_value(&env, "ENABLE_QUERY").unwrap_or("1") == "1";
+        let enable_publish = env_value(&env, "ENABLE_PUBLISH").unwrap_or("1") == "1";
+        let enable_live_subscriptions =
+            env_value(&env, "ENABLE_LIVE_SUBSCRIPTIONS").unwrap_or("1") == "1";
+        let enable_count = env_value(&env, "ENABLE_COUNT").unwrap_or("1") == "1";
+        let enable_tag_queries = env_value(&env, "ENABLE_TAG_QUERIES").unwrap_or("1") == "1";
+        let enable_search = env_value(&env, "ENABLE_SEARCH").unwrap_or("1") == "1";
+        let enable_mirroring = env_value(&env, "ENABLE_MIRRORING").unwrap_or("1") == "1";
+        let support_nip11 = env_value(&env, "SUPPORT_NIP11").unwrap_or("1") == "1";
+        let support_nip12 = env_value(&env, "SUPPORT_NIP12").unwrap_or("1") == "1";
+        let support_nip45 = env_value(&env, "SUPPORT_NIP45").unwrap_or("1") == "1";
+        let support_nip50 = env_value(&env, "SUPPORT_NIP50").unwrap_or("1") == "1";
         let filter_private_messages = env_value(&env, "FILTER_PRIVATE_MESSAGES").unwrap_or("1") == "1";
         let relays_upstream = csv_strings(env_value(&env, "RELAYS_UPSTREAM").unwrap_or_default());
         let tor_socks = env_value(&env, "TOR_SOCKS").filter(|s| !s.is_empty()).map(str::to_string);
@@ -129,6 +174,20 @@ impl Settings {
             bind_http,
             bind_ws,
             verify_sig,
+            relay_name,
+            relay_description,
+            enable_nip11,
+            enable_query,
+            enable_publish,
+            enable_live_subscriptions,
+            enable_count,
+            enable_tag_queries,
+            enable_search,
+            enable_mirroring,
+            support_nip11,
+            support_nip12,
+            support_nip45,
+            support_nip50,
             filter_private_messages,
             relays_upstream,
             tor_socks,
@@ -143,6 +202,34 @@ impl Settings {
             max_stored_events,
             max_stored_event_bytes,
         })
+    }
+
+    pub fn relay_info_enabled(&self) -> bool {
+        self.enable_nip11 && self.support_nip11
+    }
+
+    pub fn query_enabled(&self) -> bool {
+        self.enable_query
+    }
+
+    pub fn publish_enabled(&self) -> bool {
+        self.enable_publish
+    }
+
+    pub fn live_subscriptions_enabled(&self) -> bool {
+        self.enable_live_subscriptions
+    }
+
+    pub fn count_enabled(&self) -> bool {
+        self.enable_count && self.support_nip45
+    }
+
+    pub fn tag_queries_enabled(&self) -> bool {
+        self.enable_tag_queries && self.support_nip12
+    }
+
+    pub fn search_enabled(&self) -> bool {
+        self.enable_search && self.support_nip50
     }
 }
 
@@ -227,6 +314,20 @@ mod tests {
         assert_eq!(cfg.bind_ws, "127.0.0.1:8081");
         assert_eq!(cfg.store_root, PathBuf::from("/tmp"));
         assert!(cfg.verify_sig);
+        assert_eq!(cfg.relay_name, "stonr");
+        assert_eq!(cfg.relay_description, "File-backed Nostr relay");
+        assert!(cfg.enable_nip11);
+        assert!(cfg.enable_query);
+        assert!(cfg.enable_publish);
+        assert!(cfg.enable_live_subscriptions);
+        assert!(cfg.enable_count);
+        assert!(cfg.enable_tag_queries);
+        assert!(cfg.enable_search);
+        assert!(cfg.enable_mirroring);
+        assert!(cfg.support_nip11);
+        assert!(cfg.support_nip12);
+        assert!(cfg.support_nip45);
+        assert!(cfg.support_nip50);
         assert!(cfg.filter_private_messages);
         assert_eq!(cfg.relays_upstream.len(), 2);
         assert_eq!(
@@ -294,6 +395,20 @@ mod tests {
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert!(cfg.relays_upstream.is_empty());
         assert!(cfg.tor_socks.is_none());
+        assert_eq!(cfg.relay_name, "stonr");
+        assert_eq!(cfg.relay_description, "File-backed Nostr relay");
+        assert!(cfg.enable_nip11);
+        assert!(cfg.enable_query);
+        assert!(cfg.enable_publish);
+        assert!(cfg.enable_live_subscriptions);
+        assert!(cfg.enable_count);
+        assert!(cfg.enable_tag_queries);
+        assert!(cfg.enable_search);
+        assert!(cfg.enable_mirroring);
+        assert!(cfg.support_nip11);
+        assert!(cfg.support_nip12);
+        assert!(cfg.support_nip45);
+        assert!(cfg.support_nip50);
         assert!(cfg.filter_private_messages);
         assert!(cfg.filter_authors.is_none());
         assert!(cfg.filter_kinds.is_none());
@@ -402,6 +517,7 @@ mod tests {
         .unwrap();
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert_eq!(cfg.bind_http, "127.0.0.1:8080");
+        assert_eq!(cfg.relay_description, "First file-backed relay!");
     }
 
     #[test]
@@ -444,5 +560,44 @@ mod tests {
         assert_eq!(cfg.mirror_mode, MirrorMode::Site);
         assert_eq!(cfg.mirror_site_author.as_deref(), Some("abcdef"));
         assert!(!cfg.mirror_site_include_comments);
+    }
+
+    #[test]
+    fn relay_capability_toggles_parse() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let env_path = dir.path().join(".env");
+        fs::write(
+            &env_path,
+            concat!(
+                "STORE_ROOT=/tmp\n",
+                "BIND_HTTP=127.0.0.1:8080\n",
+                "BIND_WS=127.0.0.1:8081\n",
+                "RELAY_NAME=My relay\n",
+                "ENABLE_NIP11=0\n",
+                "ENABLE_QUERY=0\n",
+                "ENABLE_PUBLISH=0\n",
+                "ENABLE_LIVE_SUBSCRIPTIONS=0\n",
+                "ENABLE_COUNT=0\n",
+                "ENABLE_TAG_QUERIES=0\n",
+                "ENABLE_SEARCH=0\n",
+                "ENABLE_MIRRORING=0\n",
+                "SUPPORT_NIP11=0\n",
+                "SUPPORT_NIP12=0\n",
+                "SUPPORT_NIP45=0\n",
+                "SUPPORT_NIP50=0\n",
+            ),
+        )
+        .unwrap();
+        let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
+        assert_eq!(cfg.relay_name, "My relay");
+        assert!(!cfg.relay_info_enabled());
+        assert!(!cfg.query_enabled());
+        assert!(!cfg.publish_enabled());
+        assert!(!cfg.live_subscriptions_enabled());
+        assert!(!cfg.count_enabled());
+        assert!(!cfg.tag_queries_enabled());
+        assert!(!cfg.search_enabled());
+        assert!(!cfg.enable_mirroring);
     }
 }

@@ -11,7 +11,16 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
-use crate::storage::{Query, Store};
+use crate::{
+    config::Settings,
+    storage::{Query, Store},
+};
+
+#[derive(Clone)]
+struct AppState {
+    store: Store,
+    settings: Settings,
+}
 
 /// Response body for the `/healthz` endpoint.
 #[derive(Serialize, Deserialize)]
@@ -30,6 +39,7 @@ struct CountResponse {
 pub async fn serve_http(
     addr: SocketAddr,
     store: Store,
+    settings: Settings,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -38,7 +48,7 @@ pub async fn serve_http(
         .route("/healthz", get(healthz))
         .route("/query", get(query))
         .route("/count", get(count))
-        .with_state(Arc::new(store));
+        .with_state(Arc::new(AppState { store, settings }));
     axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown)
         .await?;
@@ -57,22 +67,53 @@ async fn healthz() -> Json<Health> {
 struct RelayInfo {
     /// Human-readable relay name.
     name: String,
+    /// Human-readable relay description.
+    description: String,
     /// Software identifier (here it is always "stonr").
     software: String,
     /// Semantic version string such as "0.1.0".
     version: String,
+    /// Supported NIP numbers advertised by this relay.
+    supported_nips: Vec<u32>,
 }
 
 /// Basic NIP-11 relay information document.
-async fn relay_info() -> impl axum::response::IntoResponse {
-    (
-        [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
-        Json(RelayInfo {
-            name: "stonr".into(),
-            software: "stonr".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        }),
-    )
+async fn relay_info(
+    State(state): State<Arc<AppState>>,
+) -> axum::response::Response {
+    if !state.settings.relay_info_enabled() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::NOT_FOUND)
+            .body(Body::from("relay profile disabled"))
+            .unwrap();
+    }
+    let mut supported_nips = vec![];
+    if state.settings.relay_info_enabled() {
+        supported_nips.push(11);
+    }
+    if state.settings.tag_queries_enabled() {
+        supported_nips.push(12);
+    }
+    if state.settings.count_enabled() {
+        supported_nips.push(45);
+    }
+    if state.settings.search_enabled() {
+        supported_nips.push(50);
+    }
+    axum::response::Response::builder()
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::CONTENT_TYPE, "application/nostr+json")
+        .body(Body::from(
+            serde_json::to_vec(&RelayInfo {
+                name: state.settings.relay_name.clone(),
+                description: state.settings.relay_description.clone(),
+                software: "stonr".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                supported_nips,
+            })
+            .unwrap(),
+        ))
+        .unwrap()
 }
 
 /// URL query parameters accepted by the `/query` endpoint.
@@ -92,6 +133,8 @@ struct QueryParams {
     until: Option<String>,
     /// Maximum number of events to return.
     limit: Option<String>,
+    /// Relay-side text search term.
+    search: Option<String>,
 }
 
 /// Convert query string parameters into a [`Query`] understood by the store.
@@ -134,17 +177,38 @@ fn params_to_query(params: QueryParams) -> Query {
     if let Some(l) = params.limit.and_then(|v| v.parse::<u64>().ok()) {
         obj.insert("limit".into(), Value::Number(l.into()));
     }
+    if let Some(search) = params.search {
+        obj.insert("search".into(), Value::String(search));
+    }
     Query::from_value(&Value::Object(obj))
 }
 
 /// Parse query parameters and return matching events as NDJSON.
 async fn query(
-    State(store): State<Arc<Store>>,
+    State(state): State<Arc<AppState>>,
     AxumQuery(params): AxumQuery<QueryParams>,
 ) -> axum::response::Response {
+    if !state.settings.query_enabled() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("read access disabled"))
+            .unwrap();
+    }
     // Translate URL parameters into a `Query` structure shared with the WS API.
     let q = params_to_query(params);
-    let events = store.query(q).unwrap_or_default();
+    if q.has_tag_filters() && !state.settings.tag_queries_enabled() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("tag queries disabled"))
+            .unwrap();
+    }
+    if q.search.is_some() && !state.settings.search_enabled() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("text search disabled"))
+            .unwrap();
+    }
+    let events = state.store.query(q).unwrap_or_default();
     // Return newline-delimited JSON so clients can stream and parse incrementally.
     let body = events
         .into_iter()
@@ -159,13 +223,37 @@ async fn query(
 
 /// Parse query parameters and return only the number of matching events.
 async fn count(
-    State(store): State<Arc<Store>>,
+    State(state): State<Arc<AppState>>,
     AxumQuery(params): AxumQuery<QueryParams>,
-) -> Json<CountResponse> {
+) -> axum::response::Response {
+    if !state.settings.query_enabled() || !state.settings.count_enabled() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("count queries disabled"))
+            .unwrap();
+    }
     let q = params_to_query(params);
-    Json(CountResponse {
-        count: store.query(q).map(|events| events.len()).unwrap_or(0),
-    })
+    if q.has_tag_filters() && !state.settings.tag_queries_enabled() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("tag queries disabled"))
+            .unwrap();
+    }
+    if q.search.is_some() && !state.settings.search_enabled() {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::FORBIDDEN)
+            .body(Body::from("text search disabled"))
+            .unwrap();
+    }
+    axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&CountResponse {
+                count: state.store.query(q).map(|events| events.len()).unwrap_or(0),
+            })
+            .unwrap(),
+        ))
+        .unwrap()
 }
 
 #[cfg(test)]
@@ -176,6 +264,49 @@ mod tests {
     use reqwest::{self, header::ACCESS_CONTROL_ALLOW_ORIGIN};
     use tempfile::TempDir;
     use tokio::task;
+
+    fn test_settings(root: &std::path::Path) -> Settings {
+        Settings {
+            store_root: root.to_path_buf(),
+            bind_http: "127.0.0.1:0".into(),
+            bind_ws: "127.0.0.1:0".into(),
+            verify_sig: false,
+            relay_name: "stonr".into(),
+            relay_description: "File-backed Nostr relay".into(),
+            enable_nip11: true,
+            enable_query: true,
+            enable_publish: true,
+            enable_live_subscriptions: true,
+            enable_count: true,
+            enable_tag_queries: true,
+            enable_search: true,
+            enable_mirroring: true,
+            support_nip11: true,
+            support_nip12: true,
+            support_nip45: true,
+            support_nip50: true,
+            filter_private_messages: true,
+            relays_upstream: vec![],
+            tor_socks: None,
+            filter_authors: None,
+            filter_kinds: None,
+            filter_tag_t: None,
+            filter_tag_a: None,
+            filter_since_mode: crate::config::SinceMode::Cursor,
+            mirror_mode: crate::config::MirrorMode::Broad,
+            mirror_site_author: None,
+            mirror_site_include_comments: true,
+            max_stored_events: None,
+            max_stored_event_bytes: None,
+        }
+    }
+
+    fn test_state(store: Store, root: &std::path::Path) -> Arc<AppState> {
+        Arc::new(AppState {
+            store,
+            settings: test_settings(root),
+        })
+    }
 
     #[tokio::test]
     async fn health_endpoint() {
@@ -196,9 +327,14 @@ mod tests {
 
     #[tokio::test]
     async fn relay_info_endpoint() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = Router::new().route("/", get(super::relay_info));
+        let app = Router::new()
+            .route("/", get(super::relay_info))
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -212,6 +348,31 @@ mod tests {
         );
         let info: super::RelayInfo = resp.json().await.unwrap();
         assert_eq!(info.name, "stonr");
+        assert_eq!(info.description, "File-backed Nostr relay");
+        assert_eq!(info.supported_nips, vec![11, 12, 45, 50]);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn relay_info_can_be_disabled() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_nip11 = false;
+        let app = Router::new()
+            .route("/", get(super::relay_info))
+            .with_state(Arc::new(AppState { store, settings }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/", addr);
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
         handle.abort();
     }
 
@@ -265,7 +426,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/query", get(super::query))
-            .with_state(Arc::new(store));
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -322,7 +483,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/count", get(super::count))
-            .with_state(Arc::new(store));
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -331,6 +492,97 @@ mod tests {
         let url = format!("http://{}/count?authors=p1&kinds=1", addr);
         let body: super::CountResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(body.count, 2);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn query_can_be_disabled() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_query = false;
+        let app = Router::new()
+            .route("/query", get(super::query))
+            .with_state(Arc::new(AppState { store, settings }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/query", addr);
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::FORBIDDEN);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn search_can_be_disabled() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_search = false;
+        let app = Router::new()
+            .route("/query", get(super::query))
+            .with_state(Arc::new(AppState { store, settings }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/query?search=hello", addr);
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::FORBIDDEN);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn query_search_filters_content() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        for event in [
+            Event {
+                id: "aa11".into(),
+                pubkey: "p1".into(),
+                kind: 1,
+                created_at: 1,
+                tags: vec![],
+                content: "hello world".into(),
+                sig: String::new(),
+            },
+            Event {
+                id: "bb22".into(),
+                pubkey: "p1".into(),
+                kind: 1,
+                created_at: 2,
+                tags: vec![],
+                content: "goodbye".into(),
+                sig: String::new(),
+            },
+        ] {
+            store.ingest(&event).unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/query", get(super::query))
+            .with_state(test_state(store, dir.path()));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/query?search=world", addr);
+        let resp = reqwest::get(&url).await.unwrap().text().await.unwrap();
+        let lines: Vec<_> = resp.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("aa11"));
         handle.abort();
     }
 
@@ -370,7 +622,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/query", get(super::query))
-            .with_state(Arc::new(store));
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -413,7 +665,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/query", get(super::query))
-            .with_state(Arc::new(store));
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -448,7 +700,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/query", get(super::query))
-            .with_state(Arc::new(store));
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -468,7 +720,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/query", get(super::query))
-            .with_state(Arc::new(store));
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -488,7 +740,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/query", get(super::query))
-            .with_state(Arc::new(store));
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -511,9 +763,10 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         drop(listener);
         let store_clone = store.clone();
+        let settings = test_settings(dir.path());
         let shutdown = tokio::time::sleep(Duration::from_millis(1000));
         let handle = tokio::spawn(async move {
-            super::serve_http(addr, store_clone, shutdown)
+            super::serve_http(addr, store_clone, settings, shutdown)
                 .await
                 .unwrap();
         });
@@ -544,8 +797,9 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
+        let settings = test_settings(dir.path());
         // binding to the same address should error because it's already taken
-        assert!(super::serve_http(addr, store, std::future::pending())
+        assert!(super::serve_http(addr, store, settings, std::future::pending())
             .await
             .is_err());
     }

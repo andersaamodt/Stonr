@@ -22,6 +22,7 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
+    config::Settings,
     event::{Event, Tag},
     storage::{event_hash, Query, Store},
 };
@@ -29,6 +30,7 @@ use crate::{
 #[derive(Clone)]
 struct AppState {
     store: Store,
+    settings: Settings,
     events_tx: broadcast::Sender<Event>,
 }
 
@@ -36,13 +38,18 @@ struct AppState {
 pub async fn serve_ws(
     addr: SocketAddr,
     store: Store,
+    settings: Settings,
     events_tx: broadcast::Sender<Event>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let app = Router::new()
         .route("/", get(handler))
-        .with_state(Arc::new(AppState { store, events_tx }));
+        .with_state(Arc::new(AppState {
+            store,
+            settings,
+            events_tx,
+        }));
     axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown)
         .await?;
@@ -109,16 +116,42 @@ async fn handle_text(
         Some("REQ") if arr.len() >= 3 => {
             let sub = arr.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
             let filters = arr.iter().skip(2).map(Query::from_value).collect::<Vec<_>>();
+            if !state.settings.query_enabled() {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "read access disabled"]));
+                return;
+            }
+            if filters.iter().any(Query::has_tag_filters) && !state.settings.tag_queries_enabled() {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "tag queries disabled"]));
+                return;
+            }
+            if filters.iter().any(|query| query.search.is_some()) && !state.settings.search_enabled() {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
+                return;
+            }
             let snapshot = snapshot_events(&state.store, &filters).unwrap_or_default();
             for event in snapshot {
                 send_json(out_tx, serde_json::json!(["EVENT", sub, event]));
             }
             send_json(out_tx, serde_json::json!(["EOSE", sub]));
-            subs.insert(sub, filters);
+            if state.settings.live_subscriptions_enabled() {
+                subs.insert(sub, filters);
+            }
         }
         Some("COUNT") if arr.len() >= 3 => {
             let sub = arr.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
             let filters = arr.iter().skip(2).map(Query::from_value).collect::<Vec<_>>();
+            if !state.settings.query_enabled() || !state.settings.count_enabled() {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "count queries disabled"]));
+                return;
+            }
+            if filters.iter().any(Query::has_tag_filters) && !state.settings.tag_queries_enabled() {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "tag queries disabled"]));
+                return;
+            }
+            if filters.iter().any(|query| query.search.is_some()) && !state.settings.search_enabled() {
+                send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
+                return;
+            }
             let count = snapshot_events(&state.store, &filters).map(|events| events.len()).unwrap_or(0);
             send_json(out_tx, serde_json::json!(["COUNT", sub, {"count": count}]));
         }
@@ -128,6 +161,15 @@ async fn handle_text(
             send_json(out_tx, serde_json::json!(["CLOSED", sub, "closed"]));
         }
         Some("EVENT") if arr.len() >= 2 => {
+            if !state.settings.publish_enabled() {
+                let event_id = arr
+                    .get(1)
+                    .and_then(|value| value.get("id"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                send_json(out_tx, serde_json::json!(["OK", event_id, false, "publish disabled"]));
+                return;
+            }
             match serde_json::from_value::<Event>(arr[1].clone()) {
                 Ok(event) => {
                     let result = publish_event(state, &event);
@@ -236,9 +278,50 @@ mod tests {
     use tempfile::TempDir;
     use tokio_tungstenite::tungstenite::protocol::Message as TungMessage;
 
+    fn test_settings(root: &std::path::Path) -> Settings {
+        Settings {
+            store_root: root.to_path_buf(),
+            bind_http: "127.0.0.1:0".into(),
+            bind_ws: "127.0.0.1:0".into(),
+            verify_sig: false,
+            relay_name: "stonr".into(),
+            relay_description: "File-backed Nostr relay".into(),
+            enable_nip11: true,
+            enable_query: true,
+            enable_publish: true,
+            enable_live_subscriptions: true,
+            enable_count: true,
+            enable_tag_queries: true,
+            enable_search: true,
+            enable_mirroring: true,
+            support_nip11: true,
+            support_nip12: true,
+            support_nip45: true,
+            support_nip50: true,
+            filter_private_messages: true,
+            relays_upstream: vec![],
+            tor_socks: None,
+            filter_authors: None,
+            filter_kinds: None,
+            filter_tag_t: None,
+            filter_tag_a: None,
+            filter_since_mode: crate::config::SinceMode::Cursor,
+            mirror_mode: crate::config::MirrorMode::Broad,
+            mirror_site_author: None,
+            mirror_site_include_comments: true,
+            max_stored_events: None,
+            max_stored_event_bytes: None,
+        }
+    }
+
     fn test_state(store: Store) -> Arc<AppState> {
         let (events_tx, _) = broadcast::channel(256);
-        Arc::new(AppState { store, events_tx })
+        let settings = test_settings(std::path::Path::new("/tmp"));
+        Arc::new(AppState {
+            store,
+            settings,
+            events_tx,
+        })
     }
 
     fn hashed_event(
@@ -268,6 +351,7 @@ mod tests {
             "kinds": [1, 2],
             "#d": ["slug"],
             "#t": ["tag"],
+            "search": "hello",
             "since": 1,
             "until": 2,
             "limit": 3
@@ -277,6 +361,7 @@ mod tests {
         assert_eq!(q.kinds.unwrap(), vec![1, 2]);
         assert_eq!(q.d.unwrap(), "slug");
         assert_eq!(q.t.unwrap(), "tag");
+        assert_eq!(q.search.unwrap(), "hello");
         assert_eq!(q.since, Some(1));
         assert_eq!(q.until, Some(2));
         assert_eq!(q.limit, Some(3));
@@ -289,6 +374,7 @@ mod tests {
         assert!(q.kinds.is_none());
         assert!(q.d.is_none());
         assert!(q.t.is_none());
+        assert!(q.search.is_none());
         assert!(q.since.is_none());
         assert!(q.until.is_none());
         assert!(q.limit.is_none());
@@ -762,10 +848,11 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         drop(listener);
         let store_clone = store.clone();
+        let settings = test_settings(dir.path());
         let (events_tx, _) = broadcast::channel(256);
         let shutdown = tokio::time::sleep(std::time::Duration::from_millis(100));
         let handle = tokio::spawn(async move {
-            super::serve_ws(addr, store_clone, events_tx, shutdown)
+            super::serve_ws(addr, store_clone, settings, events_tx, shutdown)
                 .await
                 .unwrap();
         });
@@ -796,8 +883,9 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
+        let settings = test_settings(dir.path());
         let (events_tx, _) = broadcast::channel(256);
-        assert!(super::serve_ws(addr, store, events_tx, std::future::pending())
+        assert!(super::serve_ws(addr, store, settings, events_tx, std::future::pending())
             .await
             .is_err());
     }
@@ -909,6 +997,128 @@ mod tests {
         }
         assert!(saw_live_event);
         assert!(dir.path().join(format!("events/{}/{}/{}.json", &event.id[0..2], &event.id[2..4], event.id)).exists());
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_req_respects_disabled_query() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_query = false;
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let req = serde_json::json!(["REQ", "sub", {"authors": ["p1"]}]);
+        ws_stream
+            .send(TungMessage::Text(req.to_string()))
+            .await
+            .unwrap();
+        let msg = ws_stream.next().await.unwrap().unwrap();
+        let text = match msg {
+            TungMessage::Text(text) => text,
+            other => panic!("expected text message, got {other:?}"),
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value[0], "CLOSED");
+        assert_eq!(value[2], "read access disabled");
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_count_respects_disabled_count() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_count = false;
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let req = serde_json::json!(["COUNT", "sub", {"authors": ["p1"]}]);
+        ws_stream
+            .send(TungMessage::Text(req.to_string()))
+            .await
+            .unwrap();
+        let msg = ws_stream.next().await.unwrap().unwrap();
+        let text = match msg {
+            TungMessage::Text(text) => text,
+            other => panic!("expected text message, got {other:?}"),
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value[0], "CLOSED");
+        assert_eq!(value[2], "count queries disabled");
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_event_respects_disabled_publish() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.enable_publish = false;
+        let (events_tx, _) = broadcast::channel(256);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let event = hashed_event("p9", 1, 42, vec![], "hello world");
+        let publish = serde_json::json!(["EVENT", event]);
+        ws_stream
+            .send(TungMessage::Text(publish.to_string()))
+            .await
+            .unwrap();
+        let msg = ws_stream.next().await.unwrap().unwrap();
+        let text = match msg {
+            TungMessage::Text(text) => text,
+            other => panic!("expected text message, got {other:?}"),
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value[0], "OK");
+        assert_eq!(value[2], false);
+        assert_eq!(value[3], "publish disabled");
         handle.abort();
     }
 }
