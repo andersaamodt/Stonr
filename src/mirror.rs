@@ -18,6 +18,10 @@ use crate::{
     storage::Store,
 };
 
+fn is_private_message_kind(kind: u32) -> bool {
+    matches!(kind, 4 | 13 | 14 | 15 | 1059)
+}
+
 /// Spawn a mirroring task for each configured upstream relay.
 pub async fn run(cfg: Settings, store: Store) {
     for relay in cfg.relays_upstream.clone() {
@@ -76,10 +80,10 @@ async fn mirror_relay(relay: String, cfg: Settings, store: Store) -> Result<()> 
     // Open the WebSocket (optionally through Tor) and send the subscription.
     let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
         let ws = connect_ws_via_proxy(&relay, proxy).await?;
-        mirror_stream(ws, req, since, &store).await?
+        mirror_stream(ws, req, since, cfg.filter_private_messages, &store).await?
     } else {
         let (ws, _) = connect_async(&relay).await?;
-        mirror_stream(ws, req, since, &store).await?
+        mirror_stream(ws, req, since, cfg.filter_private_messages, &store).await?
     };
     // Persist the cursor so the next run resumes from where we left off.
     write_cursor(&cfg.store_root, &relay, latest)?;
@@ -90,6 +94,7 @@ async fn mirror_stream<S>(
     mut ws: WebSocketStream<S>,
     req: Value,
     since: u64,
+    filter_private_messages: bool,
     store: &Store,
 ) -> Result<u64>
 where
@@ -106,6 +111,9 @@ where
                             Some("EVENT") if arr.len() >= 3 => {
                                 if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone()) {
                                     latest = latest.max(ev.created_at);
+                                    if filter_private_messages && is_private_message_kind(ev.kind) {
+                                        continue;
+                                    }
                                     if let Err(e) = store.ingest(&ev) {
                                         eprintln!("ingest error: {e}");
                                     }
@@ -246,6 +254,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: false,
+            filter_private_messages: false,
             relays_upstream: vec![relay_url.clone()],
             tor_socks: None,
             filter_authors: None,
@@ -268,6 +277,70 @@ mod tests {
         let cursor = dir.path().join(format!("cursor/{}.since", hash));
         let ts = std::fs::read_to_string(cursor).unwrap();
         assert_eq!(ts.trim(), "2");
+    }
+
+    #[tokio::test]
+    async fn mirror_skips_private_message_kinds_when_filter_enabled() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let ws_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ws_addr = ws_listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = ws_listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await;
+            let private = Event {
+                id: "aa11".into(),
+                pubkey: "p".into(),
+                kind: 1059,
+                created_at: 1,
+                tags: vec![],
+                content: "cipher".into(),
+                sig: String::new(),
+            };
+            let public = Event {
+                id: "bb22".into(),
+                pubkey: "p".into(),
+                kind: 1,
+                created_at: 2,
+                tags: vec![],
+                content: "hello".into(),
+                sig: String::new(),
+            };
+            ws.send(TMsg::Text(json!(["EVENT", "mirror", private]).to_string()))
+                .await
+                .unwrap();
+            ws.send(TMsg::Text(json!(["EVENT", "mirror", public]).to_string()))
+                .await
+                .unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "mirror"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let cfg = Settings {
+            store_root: dir.path().to_path_buf(),
+            bind_http: "127.0.0.1:0".into(),
+            bind_ws: "127.0.0.1:0".into(),
+            verify_sig: false,
+            filter_private_messages: true,
+            relays_upstream: vec![format!("ws://{}", ws_addr)],
+            tor_socks: None,
+            filter_authors: None,
+            filter_kinds: None,
+            filter_tag_t: None,
+            filter_since_mode: SinceMode::Cursor,
+            max_stored_events: None,
+            max_stored_event_bytes: None,
+        };
+        super::run(cfg, store.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        server.await.unwrap();
+
+        assert!(!dir.path().join("events/aa/11/aa11.json").exists());
+        assert!(dir.path().join("events/bb/22/bb22.json").exists());
     }
     #[tokio::test]
     async fn mirror_resumes_from_cursor() {
@@ -308,6 +381,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: false,
+            filter_private_messages: false,
             relays_upstream: vec![relay_url.clone()],
             tor_socks: None,
             filter_authors: None,
@@ -410,6 +484,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: false,
+            filter_private_messages: false,
             relays_upstream: vec![relay_url.clone()],
             tor_socks: Some(proxy.to_string()),
             filter_authors: None,
@@ -453,6 +528,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: false,
+            filter_private_messages: false,
             relays_upstream: vec![relay_url.clone()],
             tor_socks: None,
             filter_authors: Some(vec!["a1".into()]),
@@ -505,6 +581,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: false,
+            filter_private_messages: false,
             relays_upstream: vec![relay_url.clone()],
             tor_socks: None,
             filter_authors: None,
@@ -559,6 +636,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: false,
+            filter_private_messages: false,
             relays_upstream: vec![relay_url.clone()],
             tor_socks: None,
             filter_authors: None,
@@ -611,6 +689,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: false,
+            filter_private_messages: false,
             relays_upstream: vec!["ws://127.0.0.1:1".into()],
             tor_socks: None,
             filter_authors: None,
@@ -655,6 +734,7 @@ mod tests {
             bind_http: String::new(),
             bind_ws: String::new(),
             verify_sig: true,
+            filter_private_messages: false,
             relays_upstream: vec![relay_url.clone()],
             tor_socks: None,
             filter_authors: None,

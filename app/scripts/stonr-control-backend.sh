@@ -396,6 +396,7 @@ run_stonr() {
 
 summarize_events_json() {
   limit=${1-50}
+  filter_private=${2-0}
   python3 -c '
 import json, re, sys, time
 
@@ -403,7 +404,9 @@ MAX_CONTENT = 220
 IMAGE_RE = re.compile(r"https?://\S+\.(?:png|jpe?g|gif|webp|avif)(?:\?\S*)?$", re.I)
 URL_RE = re.compile(r"https?://\S+")
 LIMIT = int(sys.argv[1])
+FILTER_PRIVATE = sys.argv[2] == "1"
 NOW = int(time.time())
+PRIVATE_KINDS = {4, 13, 14, 15, 1059}
 
 def image_url_from_text(text):
     for match in URL_RE.findall(text or ""):
@@ -446,12 +449,14 @@ def summarize(event):
     }
 
 events = json.load(sys.stdin)
+if FILTER_PRIVATE:
+    events = [event for event in events if int(event.get("kind") or 0) not in PRIVATE_KINDS]
 summaries = [summarize(event) for event in events]
 summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
 summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
 summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
 json.dump(summaries[:LIMIT], sys.stdout)
-' "$limit"
+' "$limit" "$filter_private"
 }
 
 query_events_from_log() {
@@ -700,11 +705,12 @@ case "$cmd" in
     search=${2-}
     limit=${3-50}
     query_limit=$((limit * 2))
+    filter_private=$(env_get "$env_path" FILTER_PRIVATE_MESSAGES 2>/dev/null || printf '1')
     normalize_env_file "$env_path"
     event_log=$(event_log_path "$env_path")
     if [ -f "$event_log" ]; then
       if [ -n "$search" ]; then
-        query_events_from_log "$event_log" "$search" "$limit" | summarize_events_json "$limit"
+        query_events_from_log "$event_log" "$search" "$limit" | summarize_events_json "$limit" "$filter_private"
       else
         tail -n "$query_limit" "$event_log" | python3 -c '
 import json, sys
@@ -718,14 +724,14 @@ for raw in sys.stdin:
     except json.JSONDecodeError:
         continue
 json.dump(events, sys.stdout)
-' | summarize_events_json "$limit"
+' | summarize_events_json "$limit" "$filter_private"
       fi
     elif [ -n "$search" ]; then
       query_json=$(run_stonr --env "$env_path" query --search "$search" --limit "$query_limit")
-      printf '%s' "$query_json" | summarize_events_json "$limit"
+      printf '%s' "$query_json" | summarize_events_json "$limit" "$filter_private"
     else
       query_json=$(run_stonr --env "$env_path" query --limit "$query_limit")
-      printf '%s' "$query_json" | summarize_events_json "$limit"
+      printf '%s' "$query_json" | summarize_events_json "$limit" "$filter_private"
     fi
     ;;
   save-env)

@@ -19,7 +19,7 @@ fn write_env(dir: &TempDir) -> String {
     fs::write(
         &env_path,
         format!(
-            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:7777\nBIND_WS=127.0.0.1:7778\nVERIFY_SIG=0\n",
+            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:7777\nBIND_WS=127.0.0.1:7778\nVERIFY_SIG=0\nFILTER_PRIVATE_MESSAGES=1\n",
             store_root.display()
         ),
     )
@@ -61,10 +61,40 @@ fn count_events_uses_event_log() {
 }
 
 #[test]
-fn query_events_reads_recent_summaries_from_log() {
+fn query_events_hides_private_messages_when_filter_enabled() {
     let dir = TempDir::new().unwrap();
     let env_path = write_env(&dir);
     let store_root = dir.path().join("store");
+    fs::write(
+        store_root.join("log/events.ndjson"),
+        concat!(
+            "{\"id\":\"a\",\"pubkey\":\"p1\",\"kind\":1,\"created_at\":10,\"tags\":[],\"content\":\"older text\"}\n",
+            "{\"id\":\"b\",\"pubkey\":\"p2\",\"kind\":1059,\"created_at\":20,\"tags\":[],\"content\":\"ciphertext\"}\n",
+            "{\"id\":\"c\",\"pubkey\":\"p3\",\"kind\":1,\"created_at\":30,\"tags\":[],\"content\":\"latest text\"}\n"
+        ),
+    )
+    .unwrap();
+
+    let output = run_backend(&["query-events", &env_path, "", "2"]);
+    let events: Vec<Value> = serde_json::from_str(&output).unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["id"], "c");
+    assert_eq!(events[1]["id"], "a");
+}
+
+#[test]
+fn query_events_can_show_private_messages_when_filter_disabled() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let store_root = dir.path().join("store");
+    fs::write(
+        &env_path,
+        format!(
+            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:7777\nBIND_WS=127.0.0.1:7778\nVERIFY_SIG=0\nFILTER_PRIVATE_MESSAGES=0\n",
+            store_root.display()
+        ),
+    )
+    .unwrap();
     fs::write(
         store_root.join("log/events.ndjson"),
         concat!(

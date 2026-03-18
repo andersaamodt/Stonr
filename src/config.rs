@@ -16,6 +16,8 @@ pub struct Settings {
     pub bind_ws: String,
     /// Enable Schnorr signature verification on ingest.
     pub verify_sig: bool,
+    /// Reject encrypted private-message kinds before storing them.
+    pub filter_private_messages: bool,
     /// Upstream relays to mirror events from.
     pub relays_upstream: Vec<String>,
     /// Optional Tor SOCKS proxy (host:port).
@@ -51,6 +53,7 @@ impl Settings {
         let bind_http = required_env(&env, "BIND_HTTP")?;
         let bind_ws = required_env(&env, "BIND_WS")?;
         let verify_sig = env_value(&env, "VERIFY_SIG").unwrap_or("0") == "1";
+        let filter_private_messages = env_value(&env, "FILTER_PRIVATE_MESSAGES").unwrap_or("1") == "1";
         let relays_upstream = csv_strings(env_value(&env, "RELAYS_UPSTREAM").unwrap_or_default());
         let tor_socks = env_value(&env, "TOR_SOCKS").filter(|s| !s.is_empty()).map(str::to_string);
         let filter_authors = env_value(&env, "FILTER_AUTHORS").and_then(|s| {
@@ -94,6 +97,7 @@ impl Settings {
             bind_http,
             bind_ws,
             verify_sig,
+            filter_private_messages,
             relays_upstream,
             tor_socks,
             filter_authors,
@@ -186,6 +190,7 @@ mod tests {
         assert_eq!(cfg.bind_ws, "127.0.0.1:8081");
         assert_eq!(cfg.store_root, PathBuf::from("/tmp"));
         assert!(cfg.verify_sig);
+        assert!(cfg.filter_private_messages);
         assert_eq!(cfg.relays_upstream.len(), 2);
         assert_eq!(
             cfg.filter_authors.as_ref().unwrap(),
@@ -245,6 +250,7 @@ mod tests {
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert!(cfg.relays_upstream.is_empty());
         assert!(cfg.tor_socks.is_none());
+        assert!(cfg.filter_private_messages);
         assert!(cfg.filter_authors.is_none());
         assert!(cfg.filter_kinds.is_none());
         assert!(cfg.filter_tag_t.is_none());
@@ -346,5 +352,24 @@ mod tests {
         .unwrap();
         let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
         assert_eq!(cfg.bind_http, "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn filter_private_messages_can_be_disabled() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let env_path = dir.path().join(".env");
+        fs::write(
+            &env_path,
+            concat!(
+                "STORE_ROOT=/tmp\n",
+                "BIND_HTTP=127.0.0.1:8080\n",
+                "BIND_WS=127.0.0.1:8081\n",
+                "FILTER_PRIVATE_MESSAGES=0\n"
+            ),
+        )
+        .unwrap();
+        let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
+        assert!(!cfg.filter_private_messages);
     }
 }
