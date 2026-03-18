@@ -18,6 +18,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] WebSocket `COUNT`
 - [x] WebSocket `EVENT` publish
 - [x] WebSocket `CLOSE`
+- [x] WebSocket `AUTH` challenge/response (`NIP-42`)
 - [x] Live WebSocket subscription fanout for newly published events
 - [x] Live WebSocket subscription fanout for mirrored upstream events
 - [x] Empty-filter queries return recent stored events instead of an empty set
@@ -65,8 +66,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 
 ## Remaining Production Blockers
 
-- [ ] Backend enforcement for the remaining desktop-exposed auth, moderation, and file/blob policy toggles
-- [ ] End-to-end relay authentication (`NIP-42`) instead of UI-only controls
+- [ ] Backend enforcement for the remaining desktop-exposed moderation and file/blob policy toggles
 - [ ] Backend file/blob policy enforcement for all desktop-exposed controls
 - [ ] Consistent capability advertisement across the remaining unimplemented relay/file/auth surfaces
 - [ ] Structured production logging
