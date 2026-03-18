@@ -74,6 +74,8 @@ enum Commands {
     },
     /// Print the effective parsed configuration as JSON.
     PrintConfig,
+    /// Print per-upstream mirror health/status as JSON.
+    MirrorStatus,
     /// Apply store retention limits immediately.
     PruneRetention,
     /// Recompute exact event count and byte stats from the store.
@@ -203,6 +205,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::PrintConfig => {
             println!("{}", serde_json::to_string(&cfg)?);
+        }
+        Commands::MirrorStatus => {
+            println!(
+                "{}",
+                serde_json::to_string(
+                    &crate::mirror::read_statuses(&cfg.store_root)?
+                )?
+            );
         }
         Commands::PruneRetention => {
             store.init()?;

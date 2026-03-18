@@ -13,6 +13,7 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use crate::{
     config::Settings,
+    mirror::{read_statuses, MirrorStatus},
     storage::{Query, Store},
 };
 
@@ -27,12 +28,37 @@ struct AppState {
 struct Health {
     /// Always "ok" when the server is running.
     status: String,
+    mirrors_total: usize,
+    mirrors_healthy: usize,
+    last_mirror_success_at: Option<u64>,
 }
 
 /// Response body for the `/count` endpoint.
 #[derive(Serialize, Deserialize)]
 struct CountResponse {
     count: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MirrorHealth {
+    total: usize,
+    healthy: usize,
+    mirrors: Vec<MirrorHealthEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MirrorHealthEntry {
+    cursor_key: String,
+    relay: String,
+    scope: String,
+    state: String,
+    last_connect_at: Option<u64>,
+    last_event_at: Option<u64>,
+    last_seen_event_created_at: Option<u64>,
+    last_success_at: Option<u64>,
+    seconds_since_last_success: Option<u64>,
+    lag_seconds: Option<u64>,
+    last_error: Option<String>,
 }
 
 /// Start an HTTP server exposing `/healthz`, `/query`, and relay info.
@@ -46,6 +72,7 @@ pub async fn serve_http(
     let app = Router::new()
         .route("/", get(relay_info))
         .route("/healthz", get(healthz))
+        .route("/mirror-health", get(mirror_health))
         .route("/query", get(query))
         .route("/count", get(count))
         .with_state(Arc::new(AppState { store, settings }));
@@ -56,9 +83,51 @@ pub async fn serve_http(
 }
 
 /// Health check endpoint.
-async fn healthz() -> Json<Health> {
+async fn healthz(State(state): State<Arc<AppState>>) -> Json<Health> {
+    let statuses = read_statuses(&state.settings.store_root).unwrap_or_default();
+    let now = unix_now();
     Json(Health {
         status: "ok".to_string(),
+        mirrors_total: statuses.len(),
+        mirrors_healthy: statuses
+            .iter()
+            .filter(|status| mirror_status_is_healthy(status, now))
+            .count(),
+        last_mirror_success_at: statuses.iter().filter_map(|status| status.last_success_at).max(),
+    })
+}
+
+async fn mirror_health(State(state): State<Arc<AppState>>) -> Json<MirrorHealth> {
+    let now = unix_now();
+    let statuses = read_statuses(&state.settings.store_root).unwrap_or_default();
+    let mirrors = statuses
+        .iter()
+        .map(|status| MirrorHealthEntry {
+            cursor_key: status.cursor_key.clone(),
+            relay: status.relay.clone(),
+            scope: status.scope.clone(),
+            state: status.state.clone(),
+            last_connect_at: status.last_connect_at,
+            last_event_at: status.last_event_at,
+            last_seen_event_created_at: status.last_seen_event_created_at,
+            last_success_at: status.last_success_at,
+            seconds_since_last_success: status
+                .last_success_at
+                .map(|ts| now.saturating_sub(ts)),
+            lag_seconds: status
+                .last_seen_event_created_at
+                .map(|ts| now.saturating_sub(ts)),
+            last_error: status.last_error.clone(),
+        })
+        .collect::<Vec<_>>();
+    let healthy = statuses
+        .iter()
+        .filter(|status| mirror_status_is_healthy(status, now))
+        .count();
+    Json(MirrorHealth {
+        total: mirrors.len(),
+        healthy,
+        mirrors,
     })
 }
 
@@ -277,11 +346,29 @@ async fn count(
         .unwrap()
 }
 
+fn unix_now() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn mirror_status_is_healthy(status: &MirrorStatus, now: u64) -> bool {
+    if status.state == "error" {
+        return false;
+    }
+    status
+        .last_success_at
+        .is_some_and(|ts| now.saturating_sub(ts) <= 600)
+}
+
 #[cfg(test)]
 #[allow(clippy::single_match)]
 mod tests {
     use super::*;
-    use crate::event::Event;
+    use crate::{event::Event, mirror::{MirrorStatus, write_status}};
     use reqwest::{self, header::ACCESS_CONTROL_ALLOW_ORIGIN};
     use tempfile::TempDir;
     use tokio::task;
@@ -333,9 +420,14 @@ mod tests {
 
     #[tokio::test]
     async fn health_endpoint() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = Router::new().route("/healthz", get(super::healthz));
+        let app = Router::new()
+            .route("/healthz", get(super::healthz))
+            .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
         let handle = task::spawn(async move {
             server.await.unwrap();
@@ -345,6 +437,51 @@ mod tests {
         let resp = reqwest::get(&url).await.unwrap();
         let body: super::Health = resp.json().await.unwrap();
         assert_eq!(body.status, "ok");
+        assert_eq!(body.mirrors_total, 0);
+        assert_eq!(body.mirrors_healthy, 0);
+        assert!(body.last_mirror_success_at.is_none());
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn mirror_health_endpoint_reports_runtime_status() {
+        let dir = TempDir::new().unwrap();
+        write_status(
+            dir.path(),
+            &MirrorStatus {
+                cursor_key: "wss://relay.example".into(),
+                relay: "wss://relay.example".into(),
+                scope: "broad".into(),
+                state: "running".into(),
+                last_connect_at: Some(10),
+                last_event_at: Some(20),
+                last_seen_event_created_at: Some(30),
+                last_eose_at: None,
+                last_success_at: Some(super::unix_now()),
+                last_error_at: None,
+                last_error: None,
+            },
+        )
+        .unwrap();
+
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/mirror-health", get(super::mirror_health))
+            .with_state(test_state(store, dir.path()));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/mirror-health", addr);
+        let body: super::MirrorHealth = reqwest::get(&url).await.unwrap().json().await.unwrap();
+        assert_eq!(body.total, 1);
+        assert_eq!(body.healthy, 1);
+        assert_eq!(body.mirrors[0].relay, "wss://relay.example");
+        assert_eq!(body.mirrors[0].scope, "broad");
         handle.abort();
     }
 

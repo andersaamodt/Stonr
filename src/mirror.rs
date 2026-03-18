@@ -1,9 +1,14 @@
 //! Upstream relay mirroring for importing events into the local store.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use tokio::{
@@ -23,6 +28,63 @@ use crate::{
 
 fn is_private_message_kind(kind: u32) -> bool {
     matches!(kind, 4 | 13 | 14 | 15 | 1059)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct MirrorStatus {
+    pub cursor_key: String,
+    pub relay: String,
+    pub scope: String,
+    pub state: String,
+    pub last_connect_at: Option<u64>,
+    pub last_event_at: Option<u64>,
+    pub last_seen_event_created_at: Option<u64>,
+    pub last_eose_at: Option<u64>,
+    pub last_success_at: Option<u64>,
+    pub last_error_at: Option<u64>,
+    pub last_error: Option<String>,
+}
+
+pub(crate) fn read_statuses(root: &Path) -> Result<Vec<MirrorStatus>> {
+    let mut statuses = Vec::new();
+    let status_dir = mirror_status_dir(root);
+    if !status_dir.exists() {
+        return Ok(statuses);
+    }
+    for entry in fs::read_dir(status_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let data = match fs::read_to_string(entry.path()) {
+            Ok(data) => data,
+            Err(error) => {
+                eprintln!(
+                    "mirror warning: skipping unreadable status file {}: {error}",
+                    entry.path().display()
+                );
+                continue;
+            }
+        };
+        match serde_json::from_str::<MirrorStatus>(&data) {
+            Ok(status) => statuses.push(status),
+            Err(error) => {
+                eprintln!(
+                    "mirror warning: skipping malformed status file {}: {error}",
+                    entry.path().display()
+                );
+            }
+        }
+    }
+    statuses.sort_by(|left, right| {
+        left.scope
+            .cmp(&right.scope)
+            .then_with(|| left.relay.cmp(&right.relay))
+    });
+    Ok(statuses)
 }
 
 /// Spawn a mirroring task for each configured upstream relay.
@@ -86,6 +148,7 @@ async fn mirror_relay_forever(
     loop {
         if let Err(e) = mirror_relay_once(relay.clone(), cfg.clone(), store.clone(), events_tx.clone()).await {
             eprintln!("mirror error: {e}");
+            let _ = write_mirror_error(&cfg.store_root, &relay, &relay, "broad", &e.to_string());
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
@@ -97,6 +160,7 @@ async fn mirror_relay_once(
     store: Store,
     events_tx: broadcast::Sender<Event>,
 ) -> Result<()> {
+    write_mirror_connecting(&cfg.store_root, &relay, &relay, "broad")?;
     // Determine the starting timestamp either from a stored cursor or a fixed
     // configuration value.
     let since = match cfg.filter_since_mode {
@@ -145,6 +209,8 @@ async fn mirror_relay_once(
                 since,
                 store_root: &cfg.store_root,
                 cursor_key: &relay,
+                relay: &relay,
+                scope: "broad",
                 filter_private_messages: cfg.filter_private_messages,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
@@ -163,6 +229,8 @@ async fn mirror_relay_once(
                 since,
                 store_root: &cfg.store_root,
                 cursor_key: &relay,
+                relay: &relay,
+                scope: "broad",
                 filter_private_messages: cfg.filter_private_messages,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
@@ -198,6 +266,14 @@ async fn mirror_site_posts_forever(
         .await
         {
             eprintln!("site mirror post error: {e}");
+            let cursor_key = format!("{relay}::site-posts");
+            let _ = write_mirror_error(
+                &cfg.store_root,
+                &cursor_key,
+                &relay,
+                "site-posts",
+                &e.to_string(),
+            );
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
@@ -213,8 +289,10 @@ async fn mirror_site_posts_once(
         Some(author) if !author.is_empty() => author,
         _ => return Ok(()),
     };
+    let cursor_key = format!("{relay}::site-posts");
+    write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-posts")?;
     let since = match cfg.filter_since_mode {
-        SinceMode::Cursor => read_cursor(&cfg.store_root, &format!("{relay}::site-posts")).unwrap_or(0),
+        SinceMode::Cursor => read_cursor(&cfg.store_root, &cursor_key).unwrap_or(0),
         SinceMode::Fixed(ts) => ts,
     };
     let mut filter = serde_json::Map::new();
@@ -224,7 +302,6 @@ async fn mirror_site_posts_once(
         filter.insert("since".into(), Value::Number(since.into()));
     }
     let req = json!(["REQ", "site-posts", Value::Object(filter)]);
-    let cursor_key = format!("{relay}::site-posts");
     let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
         let ws = connect_ws_via_proxy(&relay, proxy).await?;
         mirror_stream(
@@ -236,6 +313,8 @@ async fn mirror_site_posts_once(
                 since,
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
+                relay: &relay,
+                scope: "site-posts",
                 filter_private_messages: cfg.filter_private_messages,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
@@ -254,6 +333,8 @@ async fn mirror_site_posts_once(
                 since,
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
+                relay: &relay,
+                scope: "site-posts",
                 filter_private_messages: cfg.filter_private_messages,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
@@ -282,6 +363,14 @@ async fn mirror_site_comments_forever(
         .await
         {
             eprintln!("site mirror comment error: {e}");
+            let cursor_key = format!("{relay}::site-comments");
+            let _ = write_mirror_error(
+                &cfg.store_root,
+                &cursor_key,
+                &relay,
+                "site-comments",
+                &e.to_string(),
+            );
         }
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     }
@@ -297,6 +386,8 @@ async fn mirror_site_comments_once(
         Some(author) if !author.is_empty() => author,
         _ => return Ok(()),
     };
+    let cursor_key = format!("{relay}::site-comments");
+    write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-comments")?;
     let post_events = store.query_with_policy(
         Query {
         authors: Some(vec![author.clone()]),
@@ -327,7 +418,7 @@ async fn mirror_site_comments_once(
         return Ok(());
     }
     let since = match cfg.filter_since_mode {
-        SinceMode::Cursor => read_cursor(&cfg.store_root, &format!("{relay}::site-comments")).unwrap_or(0),
+        SinceMode::Cursor => read_cursor(&cfg.store_root, &cursor_key).unwrap_or(0),
         SinceMode::Fixed(ts) => ts,
     };
     let mut filter = serde_json::Map::new();
@@ -340,7 +431,6 @@ async fn mirror_site_comments_once(
         filter.insert("since".into(), Value::Number(since.into()));
     }
     let req = json!(["REQ", "site-comments", Value::Object(filter)]);
-    let cursor_key = format!("{relay}::site-comments");
     let latest = if let Some(proxy) = cfg.tor_socks.as_deref() {
         let ws = connect_ws_via_proxy(&relay, proxy).await?;
         mirror_stream(
@@ -352,6 +442,8 @@ async fn mirror_site_comments_once(
                 since,
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
+                relay: &relay,
+                scope: "site-comments",
                 filter_private_messages: cfg.filter_private_messages,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
@@ -370,6 +462,8 @@ async fn mirror_site_comments_once(
                 since,
                 store_root: &cfg.store_root,
                 cursor_key: &cursor_key,
+                relay: &relay,
+                scope: "site-comments",
                 filter_private_messages: cfg.filter_private_messages,
                 delete_enabled: cfg.delete_enabled(),
                 expiration_enabled: cfg.expiration_enabled(),
@@ -386,6 +480,8 @@ struct MirrorStreamOptions<'a> {
     since: u64,
     store_root: &'a Path,
     cursor_key: &'a str,
+    relay: &'a str,
+    scope: &'a str,
     filter_private_messages: bool,
     delete_enabled: bool,
     expiration_enabled: bool,
@@ -420,6 +516,14 @@ where
                                     if options.filter_private_messages
                                         && is_private_message_kind(ev.kind)
                                     {
+                                        let _ = write_mirror_success(
+                                            options.store_root,
+                                            options.cursor_key,
+                                            options.relay,
+                                            options.scope,
+                                            Some(ev.created_at),
+                                            false,
+                                        );
                                         let _ =
                                             write_cursor(options.store_root, options.cursor_key, latest);
                                         continue;
@@ -440,11 +544,31 @@ where
                                     {
                                         let _ = events_tx.send(ev.clone());
                                     }
+                                    let _ = write_mirror_success(
+                                        options.store_root,
+                                        options.cursor_key,
+                                        options.relay,
+                                        options.scope,
+                                        Some(ev.created_at),
+                                        false,
+                                    );
                                     let _ =
                                         write_cursor(options.store_root, options.cursor_key, latest);
                                 }
                             }
-                            Some("EOSE") if !options.keep_running_after_eose => break,
+                            Some("EOSE") => {
+                                let _ = write_mirror_success(
+                                    options.store_root,
+                                    options.cursor_key,
+                                    options.relay,
+                                    options.scope,
+                                    None,
+                                    !options.keep_running_after_eose,
+                                );
+                                if !options.keep_running_after_eose {
+                                    break;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -517,6 +641,122 @@ fn write_cursor(root: &Path, relay: &str, ts: u64) -> Result<()> {
     }
     std::fs::write(path, ts.to_string())?;
     Ok(())
+}
+
+fn mirror_status_dir(root: &Path) -> PathBuf {
+    root.join("runtime/mirror")
+}
+
+fn mirror_status_path(root: &Path, cursor_key: &str) -> PathBuf {
+    let mut hasher = Sha1::new();
+    hasher.update(cursor_key.as_bytes());
+    let hash = hex::encode(hasher.finalize());
+    mirror_status_dir(root).join(format!("{hash}.json"))
+}
+
+fn read_status(root: &Path, cursor_key: &str) -> Result<Option<MirrorStatus>> {
+    let path = mirror_status_path(root, cursor_key);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read_to_string(path)?;
+    Ok(Some(serde_json::from_str(&data)?))
+}
+
+pub(crate) fn write_status(root: &Path, status: &MirrorStatus) -> Result<()> {
+    let path = mirror_status_path(root, &status.cursor_key);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_vec(status)?)?;
+    Ok(())
+}
+
+fn update_mirror_status<F>(
+    root: &Path,
+    cursor_key: &str,
+    relay: &str,
+    scope: &str,
+    mutator: F,
+) -> Result<()>
+where
+    F: FnOnce(&mut MirrorStatus),
+{
+    let mut status = read_status(root, cursor_key)?.unwrap_or(MirrorStatus {
+        cursor_key: cursor_key.to_string(),
+        relay: relay.to_string(),
+        scope: scope.to_string(),
+        state: "idle".into(),
+        last_connect_at: None,
+        last_event_at: None,
+        last_seen_event_created_at: None,
+        last_eose_at: None,
+        last_success_at: None,
+        last_error_at: None,
+        last_error: None,
+    });
+    status.relay = relay.to_string();
+    status.scope = scope.to_string();
+    mutator(&mut status);
+    write_status(root, &status)
+}
+
+fn write_mirror_connecting(root: &Path, cursor_key: &str, relay: &str, scope: &str) -> Result<()> {
+    let now = current_unix_ts();
+    update_mirror_status(root, cursor_key, relay, scope, |status| {
+        status.state = "connecting".into();
+        status.last_connect_at = Some(now);
+        status.last_error = None;
+    })
+}
+
+fn write_mirror_success(
+    root: &Path,
+    cursor_key: &str,
+    relay: &str,
+    scope: &str,
+    event_created_at: Option<u64>,
+    idle_after_success: bool,
+) -> Result<()> {
+    let now = current_unix_ts();
+    update_mirror_status(root, cursor_key, relay, scope, |status| {
+        status.state = if idle_after_success {
+            "idle".into()
+        } else {
+            "running".into()
+        };
+        status.last_success_at = Some(now);
+        if event_created_at.is_some() {
+            status.last_event_at = Some(now);
+            status.last_seen_event_created_at = event_created_at;
+        }
+        if idle_after_success {
+            status.last_eose_at = Some(now);
+        }
+        status.last_error = None;
+    })
+}
+
+fn write_mirror_error(
+    root: &Path,
+    cursor_key: &str,
+    relay: &str,
+    scope: &str,
+    error: &str,
+) -> Result<()> {
+    let now = current_unix_ts();
+    update_mirror_status(root, cursor_key, relay, scope, |status| {
+        status.state = "error".into();
+        status.last_error_at = Some(now);
+        status.last_error = Some(error.to_string());
+    })
+}
+
+fn current_unix_ts() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
