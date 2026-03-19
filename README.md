@@ -42,6 +42,7 @@ See [docs/api.md](docs/api.md) for HTTP and WebSocket details,
 [docs/mirroring.md](docs/mirroring.md) for mirroring setups, and
 [docs/onion.md](docs/onion.md) for Tor deployment. Operational backup,
 restore, and retention guidance lives in [docs/operations.md](docs/operations.md).
+For one-site blog mirroring, see [docs/nostr-blog.md](docs/nostr-blog.md).
 
 ## Configuration
 Runtime settings are read from a `.env` file:

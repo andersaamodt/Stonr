@@ -19,6 +19,7 @@
     saveStatusTicket: 0,
     saveStatusShownAt: 0,
     relayBusyAction: '',
+    presetBusy: '',
     retentionBusy: false,
     railWidth: 224,
     dragPointerId: null,
@@ -96,6 +97,12 @@
       title: 'Network And Mirror',
       detail: 'Bind addresses, upstream feeds, and mirror filter state.',
       fields: [
+        groupField('Presets'),
+        presetApplyField(
+          'nostr-blog',
+          'Apply nostr-blog preset',
+          'Sets one-site mirror defaults for one site author and that site\'s comments. Set Site author pubkey after applying.'
+        ),
         groupField('Mirror Mode'),
         radioField('MIRROR_MODE', 'mirror_mode', 'Mirror mode', [
           { value: 'broad', label: 'General relay' },
@@ -671,6 +678,12 @@
     state.eventsTotalLoading = false;
     state.eventsLoadedOnce = false;
     state.eventsStatsLoadedAt = 0;
+    state.diagnosticsLoading = false;
+    state.diagnosticsLoadedOnce = false;
+    state.diagnosticsMirror = [];
+    state.diagnosticsRetention = null;
+    state.diagnosticsError = '';
+    state.presetBusy = '';
     state.railWidth = parseRailWidth(prefs.rail_width) || state.railWidth;
     els.envPath.value = state.envPath;
     applyRailWidth(state.railWidth);
@@ -722,6 +735,9 @@
         state.activeSection = section.id;
         renderSectionList();
         renderActiveSection(true);
+        if (section.id === 'diagnostics') {
+          queueDiagnosticsLoad();
+        }
       });
       els.sectionList.appendChild(button);
     });
@@ -899,6 +915,9 @@
     }
     if (field.type === 'note') {
       return renderNoteField(field);
+    }
+    if (field.type === 'preset-apply') {
+      return renderPresetApplyField(field);
     }
     if (field.type === 'retention-apply') {
       return renderRetentionApplyField();
@@ -1152,6 +1171,31 @@
     return note;
   }
 
+  function renderPresetApplyField(field) {
+    var wrap = document.createElement('div');
+    wrap.className = 'field preset-apply-field';
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'action mini preset-apply-btn';
+    button.textContent = state.presetBusy === field.preset ? 'Applying...' : field.label;
+    button.disabled = !state.bridge || state.presetBusy === field.preset;
+    button.title = field.note || field.label;
+    button.addEventListener('click', function () {
+      applyPreset(field.preset).catch(function (error) {
+        console.error(error);
+        toast(summarizeBackendError(error, 'Failed to apply preset'), 'bad');
+      });
+    });
+    wrap.appendChild(button);
+    if (field.note) {
+      var note = document.createElement('p');
+      note.className = 'section-note preset-note';
+      note.textContent = field.note;
+      wrap.appendChild(note);
+    }
+    return wrap;
+  }
+
   function renderRetentionApplyField() {
     var wrap = document.createElement('div');
     wrap.className = 'field retention-apply-field';
@@ -1169,6 +1213,29 @@
     });
     wrap.appendChild(button);
     return wrap;
+  }
+
+  async function applyPreset(preset) {
+    if (!state.bridge) {
+      return;
+    }
+    try {
+      state.presetBusy = preset;
+      renderActiveSection();
+      await backend('apply-preset', [state.envPath, preset]);
+      state.doctor = await backend('doctor', [state.envPath]);
+      state.doctorKv = parseKv(state.doctor);
+      state.envValues = parseKv(await backend('load-env', [state.envPath]));
+      state.status = parseKv(await backend('relay-status', [state.envPath]));
+      state.config = JSON.parse(await backend('load-config', [state.envPath]));
+      syncFieldDependencies();
+      renderRuntime();
+      renderActiveSection();
+      toast('Applied ' + preset + ' preset');
+    } finally {
+      state.presetBusy = '';
+      renderActiveSection();
+    }
   }
 
   function renderDesktopSection() {
@@ -1822,6 +1889,16 @@
     var wrap = document.createElement('div');
     wrap.className = 'section-stack';
 
+    if (state.diagnosticsError) {
+      var alert = document.createElement('p');
+      alert.className = 'diagnostics-alert';
+      alert.textContent = state.diagnosticsError;
+      wrap.appendChild(alert);
+    }
+
+    wrap.appendChild(renderMirrorHealthPanel());
+    wrap.appendChild(renderRetentionHealthPanel());
+
     var actions = document.createElement('section');
     actions.className = 'section-panel';
     var checksActions = [
@@ -1860,6 +1937,190 @@
     return wrap;
   }
 
+  function renderMirrorHealthPanel() {
+    var card = document.createElement('section');
+    card.className = 'section-panel';
+    card.innerHTML = renderCardHeadHtml(
+      'Mirror health',
+      'Live upstream connection state, last successful import, and last mirror errors.'
+    );
+
+    if (!state.bridge) {
+      card.appendChild(renderDiagnosticsEmpty('Run Stonr in the desktop host to load live mirror health.'));
+      return card;
+    }
+    if (state.diagnosticsLoading && !state.diagnosticsLoadedOnce) {
+      card.appendChild(renderDiagnosticsLoading('Loading mirror health...'));
+      return card;
+    }
+    if (!state.diagnosticsMirror.length) {
+      card.appendChild(renderDiagnosticsEmpty('No mirror status yet. Start the relay and let at least one upstream connection complete.'));
+      return card;
+    }
+
+    var list = document.createElement('div');
+    list.className = 'diagnostic-list';
+    state.diagnosticsMirror.forEach(function (status) {
+      var row = document.createElement('article');
+      row.className = 'diagnostic-item';
+
+      var head = document.createElement('div');
+      head.className = 'diagnostic-item-head';
+      var title = document.createElement('h4');
+      title.textContent = shortRelayLabel(status.relay) + ' · ' + String(status.scope || 'mirror');
+      title.title = String(status.relay || '');
+      head.appendChild(title);
+      head.appendChild(renderDiagnosticsStatePill(status.state));
+      row.appendChild(head);
+
+      var meta = document.createElement('p');
+      meta.className = 'diagnostic-meta';
+      meta.textContent = [
+        'Last success ' + formatDiagnosticTimestamp(status.last_success_at),
+        'Last event ' + formatDiagnosticTimestamp(status.last_seen_event_created_at),
+        'EOSE ' + formatDiagnosticTimestamp(status.last_eose_at)
+      ].join(' · ');
+      row.appendChild(meta);
+
+      if (status.last_error) {
+        var error = document.createElement('p');
+        error.className = 'diagnostic-inline-error';
+        error.textContent = status.last_error;
+        row.appendChild(error);
+      }
+
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    return card;
+  }
+
+  function renderRetentionHealthPanel() {
+    var card = document.createElement('section');
+    card.className = 'section-panel';
+    card.innerHTML = renderCardHeadHtml(
+      'Retention health',
+      'Current stored volume, configured caps, and the last prune result.'
+    );
+
+    if (!state.bridge) {
+      card.appendChild(renderDiagnosticsEmpty('Run Stonr in the desktop host to load live retention health.'));
+      return card;
+    }
+    if (state.diagnosticsLoading && !state.diagnosticsLoadedOnce) {
+      card.appendChild(renderDiagnosticsLoading('Loading retention health...'));
+      return card;
+    }
+    if (!state.diagnosticsRetention) {
+      card.appendChild(renderDiagnosticsEmpty('No retention status yet.'));
+      return card;
+    }
+
+    var rows = document.createElement('div');
+    rows.className = 'diagnostic-kv';
+    rows.appendChild(renderDiagnosticKvRow('State', String(state.diagnosticsRetention.state || 'unknown')));
+    rows.appendChild(renderDiagnosticKvRow('Stored events', Number(state.diagnosticsRetention.current_events || 0).toLocaleString()));
+    rows.appendChild(renderDiagnosticKvRow('Stored size', formatBytes(state.diagnosticsRetention.current_bytes || 0)));
+    rows.appendChild(renderDiagnosticKvRow('Event cap', formatDiagnosticLimit(state.diagnosticsRetention.max_events, 'events')));
+    rows.appendChild(renderDiagnosticKvRow('Size cap', formatDiagnosticBytesLimit(state.diagnosticsRetention.max_bytes)));
+    rows.appendChild(renderDiagnosticKvRow('Last prune', formatDiagnosticTimestamp(state.diagnosticsRetention.last_prune_at)));
+    rows.appendChild(renderDiagnosticKvRow('Removed last prune', formatDiagnosticOptionalCount(state.diagnosticsRetention.last_prune_removed)));
+    card.appendChild(rows);
+
+    if (state.diagnosticsRetention.warning) {
+      var warning = document.createElement('p');
+      warning.className = 'diagnostic-inline-warning';
+      warning.textContent = state.diagnosticsRetention.warning;
+      card.appendChild(warning);
+    }
+    if (state.diagnosticsRetention.last_error) {
+      var error = document.createElement('p');
+      error.className = 'diagnostic-inline-error';
+      error.textContent = state.diagnosticsRetention.last_error;
+      card.appendChild(error);
+    }
+    return card;
+  }
+
+  function renderDiagnosticsLoading(text) {
+    var node = document.createElement('p');
+    node.className = 'diagnostics-empty';
+    node.innerHTML = '<span>' + escapeHtml(text) + '</span><span class="action-spinner" aria-hidden="true"></span>';
+    return node;
+  }
+
+  function renderDiagnosticsEmpty(text) {
+    var node = document.createElement('p');
+    node.className = 'diagnostics-empty';
+    node.textContent = text;
+    return node;
+  }
+
+  function renderDiagnosticKvRow(labelText, valueText) {
+    var row = document.createElement('div');
+    row.className = 'diagnostic-kv-row';
+    var label = document.createElement('span');
+    label.className = 'diagnostic-kv-label';
+    label.textContent = labelText;
+    var value = document.createElement('span');
+    value.className = 'diagnostic-kv-value';
+    value.textContent = valueText;
+    row.appendChild(label);
+    row.appendChild(value);
+    return row;
+  }
+
+  function renderDiagnosticsStatePill(value) {
+    var pill = document.createElement('span');
+    var stateText = String(value || 'unknown');
+    var kind = 'neutral';
+    if (stateText === 'running' || stateText === 'idle') {
+      kind = 'good';
+    } else if (stateText === 'error') {
+      kind = 'bad';
+    }
+    pill.className = 'status-pill ' + kind;
+    pill.textContent = stateText;
+    return pill;
+  }
+
+  function shortRelayLabel(relay) {
+    try {
+      return new URL(String(relay || '')).host || String(relay || '');
+    } catch (error) {
+      return String(relay || '');
+    }
+  }
+
+  function formatDiagnosticTimestamp(value) {
+    var stamp = Number(value || 0);
+    if (!isFinite(stamp) || stamp <= 0) {
+      return 'never';
+    }
+    return formatEventTime(stamp);
+  }
+
+  function formatDiagnosticLimit(value, suffix) {
+    if (value === null || typeof value === 'undefined' || value === '') {
+      return 'unlimited';
+    }
+    return Number(value || 0).toLocaleString() + (suffix ? ' ' + suffix : '');
+  }
+
+  function formatDiagnosticBytesLimit(value) {
+    if (value === null || typeof value === 'undefined' || value === '') {
+      return 'unlimited';
+    }
+    return formatBytes(value);
+  }
+
+  function formatDiagnosticOptionalCount(value) {
+    if (value === null || typeof value === 'undefined' || value === '') {
+      return 'n/a';
+    }
+    return Number(value || 0).toLocaleString();
+  }
+
   async function refreshStatus() {
     if (!state.bridge) {
       return;
@@ -1890,6 +2151,52 @@
     state.log = await backend('tail-log', [state.envPath, '200']);
   }
 
+  function queueDiagnosticsLoad() {
+    if (!state.bridge || state.diagnosticsLoading) {
+      return;
+    }
+    loadDiagnosticsStatus().then(function () {
+      if (state.activeSection === 'diagnostics') {
+        renderActiveSection();
+      }
+    }).catch(function (error) {
+      console.error(error);
+    });
+  }
+
+  async function loadDiagnosticsStatus() {
+    if (!state.bridge) {
+      state.diagnosticsMirror = [];
+      state.diagnosticsRetention = null;
+      state.diagnosticsError = '';
+      state.diagnosticsLoading = false;
+      state.diagnosticsLoadedOnce = true;
+      return;
+    }
+    var hadSnapshot = state.diagnosticsLoadedOnce || state.diagnosticsMirror.length > 0 || !!state.diagnosticsRetention;
+    state.diagnosticsLoading = true;
+    try {
+      var results = await Promise.all([
+        backend('mirror-status', [state.envPath]),
+        backend('retention-status', [state.envPath])
+      ]);
+      state.diagnosticsMirror = JSON.parse(results[0] || '[]');
+      state.diagnosticsRetention = JSON.parse(results[1] || 'null');
+      state.diagnosticsError = '';
+      state.diagnosticsLoadedOnce = true;
+    } catch (error) {
+      console.error(error);
+      if (!hadSnapshot) {
+        state.diagnosticsMirror = [];
+        state.diagnosticsRetention = null;
+      }
+      state.diagnosticsError = summarizeBackendError(error, 'Failed to load relay health');
+      state.diagnosticsLoadedOnce = true;
+    } finally {
+      state.diagnosticsLoading = false;
+    }
+  }
+
   async function runRelayAction(command) {
     if (!state.bridge) {
       return;
@@ -1914,7 +2221,7 @@
       await refreshDoctor();
       await loadEvents();
       if (state.activeSection === 'diagnostics') {
-        await loadLog();
+        await Promise.all([loadLog(), loadDiagnosticsStatus()]);
       }
       renderRuntime();
       renderActiveSection();
@@ -2043,6 +2350,10 @@
 
   function noteField(text) {
     return { type: 'note', text: text };
+  }
+
+  function presetApplyField(preset, label, note) {
+    return { type: 'preset-apply', preset: preset, label: label, note: note || '' };
   }
 
   function retentionApplyField() {
@@ -2672,7 +2983,7 @@
         return;
       }
       if (state.activeSection === 'diagnostics') {
-        await loadLog();
+        await Promise.all([loadLog(), loadDiagnosticsStatus()]);
         renderActiveSection();
       }
     } catch (error) {
@@ -2704,7 +3015,7 @@
       return;
     }
     if (state.activeSection === 'diagnostics') {
-      await loadLog();
+      await Promise.all([loadLog(), loadDiagnosticsStatus()]);
       renderActiveSection();
     }
   }

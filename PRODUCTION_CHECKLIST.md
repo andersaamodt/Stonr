@@ -70,17 +70,17 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] First-class background-on-close controls
 - [x] Menu bar / tray host support on macOS and Linux
 - [x] Event browser with search and live refresh
-- [ ] Surface real mirror/ingest health in the UI instead of only stored-event snapshots
-- [ ] Better operator-facing error presentation for long-running relay failures
+- [x] Surface real mirror/ingest health in the UI instead of only stored-event snapshots
+- [x] Better operator-facing error presentation for long-running relay failures
 
 ## Nostr-Blog Backend Readiness
 
 - [x] Mirror site-author `kind 30023` long-form posts
 - [x] Mirror `kind 1` comments by `#a` reference to mirrored posts
 - [x] Serve queried site content from a local file-backed store
-- [ ] Add integration tests against `nostr-blog`’s actual mirror-mode expectations
-- [ ] Add a documented first-class `nostr-blog` preset/setup flow
-- [ ] Decide and document whether `nostr-blog` must copy authoritative content out of Stonr or can rely on relay retention settings alone
+- [x] Add integration tests against `nostr-blog`'s actual mirror-mode expectations
+- [x] Add a documented first-class `nostr-blog` preset/setup flow
+- [x] Decide and document whether `nostr-blog` must copy authoritative content out of Stonr or can rely on relay retention settings alone
 
 ## Remaining Production Blockers
 
