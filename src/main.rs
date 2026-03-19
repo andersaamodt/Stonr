@@ -83,6 +83,11 @@ enum Commands {
     PrintConfig,
     /// Print per-upstream mirror health/status as JSON.
     MirrorStatus,
+    /// Inspect or repair a stored mirror cursor.
+    MirrorCursor {
+        #[command(subcommand)]
+        command: MirrorCursorCommand,
+    },
     /// Apply store retention limits immediately.
     PruneRetention,
     /// Recompute exact event count and byte stats from the store.
@@ -93,6 +98,33 @@ enum Commands {
     Verify {
         #[arg(long, default_value_t = 1000)]
         sample: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum MirrorCursorCommand {
+    /// Show the current stored cursor for one relay/scope.
+    Get {
+        #[arg(long)]
+        relay: String,
+        #[arg(long, default_value = "broad")]
+        scope: String,
+    },
+    /// Set the stored cursor to an explicit Unix timestamp.
+    Set {
+        #[arg(long)]
+        relay: String,
+        #[arg(long, default_value = "broad")]
+        scope: String,
+        #[arg(long)]
+        since: u64,
+    },
+    /// Clear the stored cursor so the next mirror run starts fresh.
+    Clear {
+        #[arg(long)]
+        relay: String,
+        #[arg(long, default_value = "broad")]
+        scope: String,
     },
 }
 
@@ -245,6 +277,43 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 )?
             );
         }
+        Commands::MirrorCursor { command } => match command {
+            MirrorCursorCommand::Get { relay, scope } => {
+                println!(
+                    "{}",
+                    serde_json::to_string(&crate::mirror::get_cursor(
+                        &cfg.store_root,
+                        &relay,
+                        &scope,
+                    ))?
+                );
+            }
+            MirrorCursorCommand::Set {
+                relay,
+                scope,
+                since,
+            } => {
+                println!(
+                    "{}",
+                    serde_json::to_string(&crate::mirror::set_cursor(
+                        &cfg.store_root,
+                        &relay,
+                        &scope,
+                        since,
+                    )?)?
+                );
+            }
+            MirrorCursorCommand::Clear { relay, scope } => {
+                println!(
+                    "{}",
+                    serde_json::to_string(&crate::mirror::clear_cursor(
+                        &cfg.store_root,
+                        &relay,
+                        &scope,
+                    )?)?
+                );
+            }
+        },
         Commands::PruneRetention => {
             store.init()?;
             store.enforce_retention()?;

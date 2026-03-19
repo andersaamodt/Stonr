@@ -26,6 +26,14 @@ use crate::{
     storage::{Query, Store},
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MirrorCursorValue {
+    pub relay: String,
+    pub scope: String,
+    pub cursor_key: String,
+    pub since: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MirrorStatus {
     pub cursor_key: String,
@@ -284,7 +292,7 @@ async fn mirror_site_posts_forever(
                     "error": e.to_string(),
                 }),
             );
-            let cursor_key = format!("{relay}::site-posts");
+            let cursor_key = cursor_key_for(&relay, "site-posts");
             let _ = write_mirror_error(
                 &cfg.store_root,
                 &cursor_key,
@@ -307,7 +315,7 @@ async fn mirror_site_posts_once(
         Some(author) if !author.is_empty() => author,
         _ => return Ok(()),
     };
-    let cursor_key = format!("{relay}::site-posts");
+    let cursor_key = cursor_key_for(&relay, "site-posts");
     write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-posts")?;
     let since = match cfg.filter_since_mode {
         SinceMode::Cursor => read_cursor(&cfg.store_root, &cursor_key).unwrap_or(0),
@@ -388,7 +396,7 @@ async fn mirror_site_comments_forever(
                     "error": e.to_string(),
                 }),
             );
-            let cursor_key = format!("{relay}::site-comments");
+            let cursor_key = cursor_key_for(&relay, "site-comments");
             let _ = write_mirror_error(
                 &cfg.store_root,
                 &cursor_key,
@@ -411,7 +419,7 @@ async fn mirror_site_comments_once(
         Some(author) if !author.is_empty() => author,
         _ => return Ok(()),
     };
-    let cursor_key = format!("{relay}::site-comments");
+    let cursor_key = cursor_key_for(&relay, "site-comments");
     write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-comments")?;
     let post_events = store.query_with_policy(
         Query {
@@ -664,6 +672,14 @@ fn cursor_path(root: &Path, relay: &str) -> PathBuf {
     root.join("cursor").join(format!("{}.since", hash))
 }
 
+pub fn cursor_key_for(relay: &str, scope: &str) -> String {
+    if scope.is_empty() || scope == "broad" {
+        relay.to_string()
+    } else {
+        format!("{relay}::{scope}")
+    }
+}
+
 /// Read the last seen timestamp for a relay.
 ///
 /// Returns `None` if no cursor file exists or if the contents fail to parse.
@@ -685,6 +701,41 @@ fn write_cursor(root: &Path, relay: &str, ts: u64) -> Result<()> {
     Ok(())
 }
 
+pub fn get_cursor(root: &Path, relay: &str, scope: &str) -> MirrorCursorValue {
+    let cursor_key = cursor_key_for(relay, scope);
+    MirrorCursorValue {
+        relay: relay.to_string(),
+        scope: normalized_scope(scope).to_string(),
+        cursor_key: cursor_key.clone(),
+        since: read_cursor(root, &cursor_key),
+    }
+}
+
+pub fn set_cursor(root: &Path, relay: &str, scope: &str, since: u64) -> Result<MirrorCursorValue> {
+    let cursor_key = cursor_key_for(relay, scope);
+    write_cursor(root, &cursor_key, since)?;
+    Ok(MirrorCursorValue {
+        relay: relay.to_string(),
+        scope: normalized_scope(scope).to_string(),
+        cursor_key,
+        since: Some(since),
+    })
+}
+
+pub fn clear_cursor(root: &Path, relay: &str, scope: &str) -> Result<MirrorCursorValue> {
+    let cursor_key = cursor_key_for(relay, scope);
+    let path = cursor_path(root, &cursor_key);
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(MirrorCursorValue {
+        relay: relay.to_string(),
+        scope: normalized_scope(scope).to_string(),
+        cursor_key,
+        since: None,
+    })
+}
+
 fn mirror_status_dir(root: &Path) -> PathBuf {
     root.join("runtime/mirror")
 }
@@ -703,6 +754,14 @@ fn read_status(root: &Path, cursor_key: &str) -> Result<Option<MirrorStatus>> {
     }
     let data = fs::read_to_string(path)?;
     Ok(Some(serde_json::from_str(&data)?))
+}
+
+fn normalized_scope(scope: &str) -> &str {
+    if scope.is_empty() {
+        "broad"
+    } else {
+        scope
+    }
 }
 
 pub(crate) fn write_status(root: &Path, status: &MirrorStatus) -> Result<()> {

@@ -172,11 +172,82 @@ fn cli_help_lists_commands() {
         "reindex",
         "query",
         "mirror-status",
+        "mirror-cursor",
         "prune-retention",
         "verify",
     ] {
         assert!(text.contains(cmd));
     }
+}
+
+#[test]
+fn mirror_cursor_cli_can_get_set_and_clear() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    let relay = "wss://relay.example";
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "mirror-cursor",
+            "get",
+            "--relay",
+            relay,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(body["relay"], relay);
+    assert_eq!(body["scope"], "broad");
+    assert!(body["since"].is_null());
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "mirror-cursor",
+            "set",
+            "--relay",
+            relay,
+            "--scope",
+            "site-posts",
+            "--since",
+            "123",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(body["scope"], "site-posts");
+    assert_eq!(body["since"], 123);
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "mirror-cursor",
+            "clear",
+            "--relay",
+            relay,
+            "--scope",
+            "site-posts",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(body["since"].is_null());
 }
 
 #[test]

@@ -49,7 +49,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] One-site mirror mode for a single site author
 - [x] Optional one-site comment mirroring by `#a` reference
 - [x] Per-upstream mirror health, lag, and last-success visibility
-- [ ] Repair tooling for broken cursors / replay from a chosen checkpoint
+- [x] Repair tooling for broken cursors / replay from a chosen checkpoint
 
 ## Storage Safety
 
