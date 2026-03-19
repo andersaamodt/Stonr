@@ -61,6 +61,17 @@ fn count_events_uses_event_log() {
 }
 
 #[test]
+fn retention_status_returns_structured_json() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    let output = run_backend(&["retention-status", &env_path]);
+    let body: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(body["state"], "disabled");
+    assert_eq!(body["current_events"], 0);
+}
+
+#[test]
 fn count_events_prefers_runtime_cache() {
     let dir = TempDir::new().unwrap();
     let env_path = write_env(&dir);

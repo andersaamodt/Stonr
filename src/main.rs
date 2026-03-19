@@ -83,10 +83,22 @@ enum Commands {
     PrintConfig,
     /// Print per-upstream mirror health/status as JSON.
     MirrorStatus,
+    /// Print structured retention/cap status as JSON.
+    RetentionStatus,
     /// Inspect or repair a stored mirror cursor.
     MirrorCursor {
         #[command(subcommand)]
         command: MirrorCursorCommand,
+    },
+    /// Create an authoritative snapshot of the relay store at DESTINATION.
+    Backup {
+        #[arg(long)]
+        destination: String,
+    },
+    /// Restore a previously created store snapshot from SOURCE.
+    Restore {
+        #[arg(long)]
+        source: String,
     },
     /// Apply store retention limits immediately.
     PruneRetention,
@@ -277,6 +289,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 )?
             );
         }
+        Commands::RetentionStatus => {
+            println!("{}", serde_json::to_string(&store.retention_status()?)?);
+        }
         Commands::MirrorCursor { command } => match command {
             MirrorCursorCommand::Get { relay, scope } => {
                 println!(
@@ -314,6 +329,19 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 );
             }
         },
+        Commands::Backup { destination } => {
+            store.init()?;
+            println!(
+                "{}",
+                serde_json::to_string(&store.backup_to(std::path::Path::new(&destination))?)?
+            );
+        }
+        Commands::Restore { source } => {
+            println!(
+                "{}",
+                serde_json::to_string(&store.restore_from(std::path::Path::new(&source))?)?
+            );
+        }
         Commands::PruneRetention => {
             store.init()?;
             store.enforce_retention()?;
@@ -388,6 +416,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                                 "failed to enforce retention",
                                 serde_json::json!({ "error": error.to_string() }),
                             );
+                            let _ = retention_store.report_retention_error(&error.to_string());
                         }
                         tokio::time::sleep(Duration::from_secs(60)).await;
                     }

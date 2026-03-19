@@ -29,6 +29,33 @@ pub struct Store {
     max_stored_event_bytes: Option<u64>,
 }
 
+/// Structured retention/size status stored under `runtime/`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RetentionStatus {
+    pub state: String,
+    pub current_events: usize,
+    pub current_bytes: u64,
+    pub max_events: Option<usize>,
+    pub max_bytes: Option<u64>,
+    pub over_event_limit: bool,
+    pub over_byte_limit: bool,
+    pub warning: Option<String>,
+    pub last_checked_at: u64,
+    pub last_prune_at: Option<u64>,
+    pub last_prune_removed: Option<usize>,
+    pub last_error_at: Option<u64>,
+    pub last_error: Option<String>,
+}
+
+/// Minimal authoritative store snapshot manifest used for backup/restore.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BackupManifest {
+    pub format: String,
+    pub version: String,
+    pub created_at: u64,
+    pub included_paths: Vec<String>,
+}
+
 impl Store {
     /// Create a new store rooted at `root`.
     #[allow(dead_code)]
@@ -81,6 +108,9 @@ impl Store {
             fs::create_dir_all(self.root.join(d))?;
         }
         self.files().init()?;
+        if !self.retention_status_path().exists() {
+            self.write_retention_status_from_counts(0, 0, None, None)?;
+        }
         Ok(())
     }
 
@@ -198,6 +228,8 @@ impl Store {
 
     fn enforce_retention_locked(&self) -> Result<usize> {
         if self.max_stored_events.is_none() && self.max_stored_event_bytes.is_none() {
+            let (current_events, current_bytes) = self.read_stats_cache()?.unwrap_or((0, 0));
+            self.write_retention_status_from_counts(current_events, current_bytes, None, None)?;
             return Ok(0);
         }
         let mut records = self.load_event_records()?;
@@ -233,6 +265,12 @@ impl Store {
         } else {
             self.write_stats_cache(total_events, total_bytes)?;
         }
+        self.write_retention_status_from_counts(
+            total_events,
+            total_bytes,
+            Some(current_unix_ts()),
+            Some(removed),
+        )?;
         Ok(removed)
     }
 
@@ -267,6 +305,96 @@ impl Store {
         }
         self.write_stats_cache(total_events, total_bytes)?;
         Ok((total_events, total_bytes))
+    }
+
+    /// Return the latest structured retention status.
+    pub fn retention_status(&self) -> Result<RetentionStatus> {
+        let path = self.retention_status_path();
+        if path.exists() {
+            return Ok(serde_json::from_str(&fs::read_to_string(path)?)?);
+        }
+        let (events, bytes) = self.read_stats_cache()?.unwrap_or((0, 0));
+        let status = self.write_retention_status_from_counts(events, bytes, None, None)?;
+        Ok(status)
+    }
+
+    /// Record a retention enforcement failure for operator visibility.
+    pub fn report_retention_error(&self, error: &str) -> Result<RetentionStatus> {
+        let (current_events, current_bytes) = self.read_stats_cache()?.unwrap_or((0, 0));
+        let mut status = self.build_retention_status(current_events, current_bytes);
+        status.state = "error".into();
+        status.last_error_at = Some(current_unix_ts());
+        status.last_error = Some(error.to_string());
+        self.write_retention_status_file(&status)?;
+        Ok(status)
+    }
+
+    /// Create a minimal authoritative snapshot of the store at `destination`.
+    pub fn backup_to(&self, destination: &Path) -> Result<BackupManifest> {
+        let _lock = self.mutation_lock()?;
+        if destination.exists() {
+            let mut entries = fs::read_dir(destination)?;
+            if entries.next().transpose()?.is_some() {
+                return Err(anyhow!("backup destination must be empty"));
+            }
+        } else {
+            fs::create_dir_all(destination)?;
+        }
+        for relative in authoritative_backup_paths() {
+            copy_tree(&self.root.join(relative), &destination.join(relative))?;
+        }
+        let manifest = BackupManifest {
+            format: "stonr-store-snapshot-v1".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            created_at: current_unix_ts(),
+            included_paths: authoritative_backup_paths()
+                .iter()
+                .map(|value| value.to_string())
+                .collect(),
+        };
+        fs::write(
+            destination.join("manifest.json"),
+            serde_json::to_vec_pretty(&manifest)?,
+        )?;
+        Ok(manifest)
+    }
+
+    /// Restore a previously created snapshot into the current store root.
+    pub fn restore_from(&self, source: &Path) -> Result<BackupManifest> {
+        let manifest_path = source.join("manifest.json");
+        let manifest: BackupManifest = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+        if manifest.format != "stonr-store-snapshot-v1" {
+            return Err(anyhow!("unsupported backup format"));
+        }
+        let _lock = self.mutation_lock()?;
+        fs::create_dir_all(&self.root)?;
+        for relative in [
+            "events",
+            "files",
+            "admin",
+            "cursor",
+            "index",
+            "latest",
+            "tombstones",
+            "mirror",
+            "log",
+        ] {
+            remove_path_if_exists(&self.root.join(relative))?;
+        }
+        self.clear_runtime_for_restore()?;
+        for relative in authoritative_backup_paths() {
+            copy_tree(&source.join(relative), &self.root.join(relative))?;
+        }
+        self.init()?;
+        self.rebuild_metadata()?;
+        let events = self
+            .load_event_records()?
+            .into_iter()
+            .map(|record| record.event)
+            .collect::<Vec<_>>();
+        self.files().rebuild_references(&events)?;
+        self.refresh_stats_cache()?;
+        Ok(manifest)
     }
 
     fn rebuild_metadata(&self) -> Result<()> {
@@ -374,6 +502,117 @@ impl Store {
             self.root.join("runtime/events-bytes.cache"),
             total_bytes.to_string(),
         )?;
+        self.write_retention_status_from_counts(total_events, total_bytes, None, None)?;
+        Ok(())
+    }
+
+    fn read_stats_cache(&self) -> Result<Option<(usize, u64)>> {
+        let count_path = self.root.join("runtime/events-count.cache");
+        let bytes_path = self.root.join("runtime/events-bytes.cache");
+        let count = fs::read_to_string(&count_path)
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok());
+        let bytes = fs::read_to_string(&bytes_path)
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok());
+        Ok(match (count, bytes) {
+            (Some(count), Some(bytes)) => Some((count, bytes)),
+            _ => None,
+        })
+    }
+
+    fn retention_status_path(&self) -> PathBuf {
+        self.root.join("runtime/retention-status.json")
+    }
+
+    fn build_retention_status(&self, current_events: usize, current_bytes: u64) -> RetentionStatus {
+        let over_event_limit = self
+            .max_stored_events
+            .map(|limit| current_events > limit)
+            .unwrap_or(false);
+        let over_byte_limit = self
+            .max_stored_event_bytes
+            .map(|limit| current_bytes > limit)
+            .unwrap_or(false);
+        let warning = retention_warning(
+            over_event_limit,
+            over_byte_limit,
+            self.max_stored_events,
+            self.max_stored_event_bytes,
+            current_events,
+            current_bytes,
+        );
+        let state = if self.max_stored_events.is_none() && self.max_stored_event_bytes.is_none() {
+            "disabled"
+        } else if warning.is_some() {
+            "warning"
+        } else {
+            "ok"
+        };
+        RetentionStatus {
+            state: state.into(),
+            current_events,
+            current_bytes,
+            max_events: self.max_stored_events,
+            max_bytes: self.max_stored_event_bytes,
+            over_event_limit,
+            over_byte_limit,
+            warning,
+            last_checked_at: current_unix_ts(),
+            last_prune_at: None,
+            last_prune_removed: None,
+            last_error_at: None,
+            last_error: None,
+        }
+    }
+
+    fn write_retention_status_from_counts(
+        &self,
+        current_events: usize,
+        current_bytes: u64,
+        last_prune_at: Option<u64>,
+        last_prune_removed: Option<usize>,
+    ) -> Result<RetentionStatus> {
+        let existing = self.read_retention_status_file().ok().flatten();
+        let mut status = self.build_retention_status(current_events, current_bytes);
+        if let Some(existing) = existing {
+            status.last_prune_at = last_prune_at.or(existing.last_prune_at);
+            status.last_prune_removed = last_prune_removed.or(existing.last_prune_removed);
+        } else {
+            status.last_prune_at = last_prune_at;
+            status.last_prune_removed = last_prune_removed;
+        }
+        self.write_retention_status_file(&status)?;
+        Ok(status)
+    }
+
+    fn read_retention_status_file(&self) -> Result<Option<RetentionStatus>> {
+        let path = self.retention_status_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(serde_json::from_str(&fs::read_to_string(path)?)?))
+    }
+
+    fn write_retention_status_file(&self, status: &RetentionStatus) -> Result<()> {
+        if let Some(parent) = self.retention_status_path().parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(self.retention_status_path(), serde_json::to_vec(status)?)?;
+        Ok(())
+    }
+
+    fn clear_runtime_for_restore(&self) -> Result<()> {
+        let runtime_dir = self.root.join("runtime");
+        fs::create_dir_all(&runtime_dir)?;
+        for entry in fs::read_dir(&runtime_dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            if name.to_string_lossy() == "store.lock" {
+                continue;
+            }
+            remove_path_if_exists(&entry.path())?;
+        }
         Ok(())
     }
 
@@ -995,6 +1234,72 @@ fn current_unix_ts() -> u64 {
         .as_secs()
 }
 
+fn authoritative_backup_paths() -> [&'static str; 4] {
+    ["events", "files", "admin", "cursor"]
+}
+
+fn retention_warning(
+    over_event_limit: bool,
+    over_byte_limit: bool,
+    max_events: Option<usize>,
+    max_bytes: Option<u64>,
+    current_events: usize,
+    current_bytes: u64,
+) -> Option<String> {
+    match (over_event_limit, over_byte_limit) {
+        (true, true) => Some(format!(
+            "Retention is over both caps (events: {} > {}, bytes: {} > {}).",
+            current_events,
+            max_events.unwrap_or_default(),
+            current_bytes,
+            max_bytes.unwrap_or_default()
+        )),
+        (true, false) => Some(format!(
+            "Retention is over the event cap ({} > {}).",
+            current_events,
+            max_events.unwrap_or_default()
+        )),
+        (false, true) => Some(format!(
+            "Retention is over the byte cap ({} > {}).",
+            current_bytes,
+            max_bytes.unwrap_or_default()
+        )),
+        (false, false) => None,
+    }
+}
+
+fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
+    if !source.exists() {
+        return Ok(());
+    }
+    for entry in walkdir::WalkDir::new(source) {
+        let entry = entry?;
+        let relative = entry.path().strip_prefix(source)?;
+        let target = destination.join(relative);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target)?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_path_if_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.is_dir() {
+        fs::remove_dir_all(path)?;
+    } else {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
 /// Recompute the Nostr event hash from its fields.
 pub(crate) fn event_hash(ev: &Event) -> Result<[u8; 32]> {
     let arr = serde_json::json!([0, ev.pubkey, ev.created_at, ev.kind, ev.tags, ev.content]);
@@ -1415,6 +1720,80 @@ mod tests {
                 .unwrap()
                 .trim(),
             "2"
+        );
+    }
+
+    #[test]
+    fn retention_status_records_last_prune_result() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(dir.path().to_path_buf(), false, Some(2), None);
+        store.init().unwrap();
+
+        store.ingest(&sample_event("aa11", "p1", 1, None, 10)).unwrap();
+        store.ingest(&sample_event("bb22", "p1", 1, None, 20)).unwrap();
+        store.ingest(&sample_event("cc33", "p1", 1, None, 30)).unwrap();
+
+        let status = store.retention_status().unwrap();
+        assert_eq!(status.state, "ok");
+        assert_eq!(status.current_events, 2);
+        assert_eq!(status.max_events, Some(2));
+        assert_eq!(status.last_prune_removed, Some(1));
+        assert!(status.last_prune_at.is_some());
+        assert!(status.warning.is_none());
+    }
+
+    #[test]
+    fn backup_and_restore_round_trip_authoritative_store_data() {
+        let dir = TempDir::new().unwrap();
+        let source_root = dir.path().join("source");
+        let restore_root = dir.path().join("restore");
+        let backup_root = dir.path().join("backup");
+
+        let source = Store::new(source_root.clone(), false);
+        source.init().unwrap();
+        let event = sample_event("aa11", "p1", 1, None, 10);
+        source.ingest(&event).unwrap();
+        fs::create_dir_all(source_root.join("admin")).unwrap();
+        fs::write(source_root.join("admin/pubkeys.allow"), "p1\n").unwrap();
+        fs::create_dir_all(source_root.join("cursor")).unwrap();
+        fs::write(source_root.join("cursor/example.since"), "123\n").unwrap();
+
+        let manifest = source.backup_to(&backup_root).unwrap();
+        assert_eq!(manifest.format, "stonr-store-snapshot-v1");
+        assert!(backup_root.join("events").exists());
+        assert!(backup_root.join("admin/pubkeys.allow").exists());
+        assert!(backup_root.join("cursor/example.since").exists());
+
+        let restored = Store::new(restore_root.clone(), false);
+        restored.restore_from(&backup_root).unwrap();
+        let events = restored
+            .query(Query {
+                authors: Some(vec!["p1".into()]),
+                kinds: Some(vec![1]),
+                d: None,
+                t: None,
+                tags: vec![],
+                search: None,
+                since: None,
+                until: None,
+                limit: Some(10),
+            })
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, "aa11");
+        assert_eq!(
+            fs::read_to_string(restore_root.join("admin/pubkeys.allow")).unwrap(),
+            "p1\n"
+        );
+        assert_eq!(
+            fs::read_to_string(restore_root.join("cursor/example.since")).unwrap(),
+            "123\n"
+        );
+        assert_eq!(
+            fs::read_to_string(restore_root.join("runtime/events-count.cache"))
+                .unwrap()
+                .trim(),
+            "1"
         );
     }
 

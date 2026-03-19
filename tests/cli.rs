@@ -172,12 +172,106 @@ fn cli_help_lists_commands() {
         "reindex",
         "query",
         "mirror-status",
+        "retention-status",
         "mirror-cursor",
+        "backup",
+        "restore",
         "prune-retention",
         "verify",
     ] {
         assert!(text.contains(cmd));
     }
+}
+
+#[test]
+fn retention_status_cli_reports_json() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", &env_path, "init"])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", &env_path, "retention-status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(body["state"], "disabled");
+    assert_eq!(body["current_events"], 0);
+}
+
+#[test]
+fn backup_and_restore_cli_round_trip() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let backup_path = dir.path().join("backup");
+    let restore_env = dir.path().join("restore.env");
+    let restore_root = dir.path().join("restored-store");
+    fs::write(
+        &restore_env,
+        format!(
+            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:0\nBIND_WS=127.0.0.1:0\nVERIFY_SIG=0\n",
+            restore_root.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", &env_path, "init"])
+        .assert()
+        .success();
+
+    let ev = signed_event_json();
+    let ev_path = dir.path().join("ev.json");
+    fs::write(&ev_path, serde_json::to_string(&ev).unwrap()).unwrap();
+    Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", &env_path, "ingest", ev_path.to_str().unwrap()])
+        .assert()
+        .success();
+
+    Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "backup",
+            "--destination",
+            backup_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            restore_env.to_str().unwrap(),
+            "restore",
+            "--source",
+            backup_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", restore_env.to_str().unwrap(), "query", "--limit", "10"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains(ev["id"].as_str().unwrap()));
 }
 
 #[test]

@@ -22,6 +22,7 @@ Commands:
   set-ui-pref KEY VALUE
   load-config [ENV_PATH]
   load-env [ENV_PATH]
+  retention-status [ENV_PATH]
   count-events [ENV_PATH]
   size-events [ENV_PATH]
   refresh-stats [ENV_PATH]
@@ -695,6 +696,11 @@ case "$cmd" in
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
     cat "$env_path"
+    ;;
+  retention-status)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    run_stonr --env "$env_path" retention-status
     ;;
   count-events)
     env_path=$(resolve_env_path "${1-}")

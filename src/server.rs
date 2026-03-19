@@ -22,7 +22,7 @@ use crate::{
     mirror::{read_statuses, MirrorStatus},
     nip98,
     policy::{apply_query_policy, client_actor_label, current_unix_ts, enforce_rate_limit, RateLimitAction},
-    storage::{Query, Store},
+    storage::{Query, RetentionStatus, Store},
 };
 
 #[derive(Clone)]
@@ -133,6 +133,7 @@ pub async fn serve_http(
     let app = Router::new()
         .route("/", get(relay_info))
         .route("/healthz", get(healthz))
+        .route("/retention-health", get(retention_health))
         .route("/mirror-health", get(mirror_health))
         .route("/query", get(query))
         .route("/count", get(count))
@@ -211,6 +212,31 @@ async fn mirror_health(State(state): State<Arc<AppState>>) -> Json<MirrorHealth>
         healthy,
         mirrors,
     })
+}
+
+async fn retention_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.store.retention_status() {
+        Ok(status) => Json(status).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(RetentionStatus {
+                state: "error".into(),
+                current_events: 0,
+                current_bytes: 0,
+                max_events: state.settings.max_stored_events,
+                max_bytes: state.settings.max_stored_event_bytes,
+                over_event_limit: false,
+                over_byte_limit: false,
+                warning: Some("Failed to read retention status.".into()),
+                last_checked_at: unix_now(),
+                last_prune_at: None,
+                last_prune_removed: None,
+                last_error_at: Some(unix_now()),
+                last_error: Some(error.to_string()),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 /// Minimal NIP-11 relay information document.
@@ -1836,6 +1862,28 @@ mod tests {
         assert_eq!(body.healthy, 1);
         assert_eq!(body.mirrors[0].relay, "wss://relay.example");
         assert_eq!(body.mirrors[0].scope, "broad");
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn retention_health_endpoint_reports_runtime_status() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(dir.path().to_path_buf(), false, Some(5), Some(1024));
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/retention-health", get(super::retention_health))
+            .with_state(test_state(store, dir.path()));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/retention-health", addr);
+        let body: RetentionStatus = reqwest::get(&url).await.unwrap().json().await.unwrap();
+        assert_eq!(body.state, "ok");
+        assert_eq!(body.current_events, 0);
         handle.abort();
     }
 
