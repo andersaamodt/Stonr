@@ -45,6 +45,7 @@ restore, and retention guidance lives in [docs/operations.md](docs/operations.md
 For one-site blog mirroring, see [docs/nostr-blog.md](docs/nostr-blog.md).
 Release-oriented performance smoke checks are documented in [docs/performance.md](docs/performance.md).
 Service supervision and deployment setup are documented in [docs/deployment.md](docs/deployment.md).
+Public TLS/reverse-proxy setup is documented in [docs/reverse-proxy.md](docs/reverse-proxy.md).
 
 ## Configuration
 Runtime settings are read from a `.env` file:
@@ -82,6 +83,7 @@ stonr reindex --env .env
 stonr retention-status --env .env
 stonr backup --env .env --destination /tmp/stonr-backup
 stonr restore --env .env --source /tmp/stonr-backup
+stonr print-proxy --env .env --manager caddy --domain relay.example.com
 stonr serve --env .env
 stonr verify --env .env --sample 1000
 ```

@@ -7,9 +7,20 @@ stonr exposes a minimal HTTP and WebSocket interface compatible with NIP-01.
 ### `GET /healthz`
 Returns `{ "status": "ok" }` when the relay is running.
 
+### `GET /readyz`
+Returns `200` with `{ "status": "ready", "issues": [] }` when the local store
+layout is present and the relay can read its retention/runtime state.
+
+Returns `503` with `{ "status": "not-ready", "issues": [...] }` when the store
+is missing required paths or runtime status cannot be read.
+
 ### `GET /retention-health`
 Returns structured retention status, including current stored event count/bytes,
 configured caps, and the most recent prune/error state.
+
+### `GET /mirror-health`
+Returns per-upstream mirror runtime status, including last success/error and
+lag-related timestamps.
 
 ### `GET /query`
 Returns matching events as newline-delimited JSON (NDJSON).
@@ -48,4 +59,5 @@ Once all events have been sent an end-of-stored-events marker is emitted:
 ["EOSE","sub1"]
 ```
 
-Close the TCP connection to terminate the subscription; `CLOSE` messages are ignored.
+Send `["CLOSE","sub1"]` to terminate one subscription without closing the whole
+socket.

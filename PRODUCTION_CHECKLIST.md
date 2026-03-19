@@ -88,6 +88,13 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Generated `launchd` service output from the CLI
 - [x] Documented service install and restart workflow
 
+## Readiness And Edge Proxy
+
+- [x] HTTP `/readyz`
+- [x] Generated Caddy reverse-proxy output from the CLI
+- [x] Generated Nginx reverse-proxy output from the CLI
+- [x] Documented public TLS / reverse-proxy workflow
+
 ## Remaining Production Blockers
 
 - [x] Structured production logging

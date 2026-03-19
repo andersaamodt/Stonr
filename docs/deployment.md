@@ -52,3 +52,5 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.stonr.relay.plist
 - Keep the `.env` file under config management separately from store backups.
 - Pair supervision with the operational checks in [operations.md](operations.md)
   and the release smoke checks in [performance.md](performance.md).
+- For public HTTPS exposure, pair supervision with the generated reverse proxy
+  configs in [reverse-proxy.md](reverse-proxy.md).
