@@ -44,6 +44,7 @@ See [docs/api.md](docs/api.md) for HTTP and WebSocket details,
 restore, and retention guidance lives in [docs/operations.md](docs/operations.md).
 For one-site blog mirroring, see [docs/nostr-blog.md](docs/nostr-blog.md).
 Release-oriented performance smoke checks are documented in [docs/performance.md](docs/performance.md).
+Service supervision and deployment setup are documented in [docs/deployment.md](docs/deployment.md).
 
 ## Configuration
 Runtime settings are read from a `.env` file:

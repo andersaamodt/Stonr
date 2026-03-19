@@ -176,6 +176,7 @@ fn cli_help_lists_commands() {
         "mirror-cursor",
         "backup",
         "restore",
+        "print-service",
         "prune-retention",
         "verify",
     ] {
@@ -391,4 +392,61 @@ fn query_cli_filters_and_counts() {
         .stdout
         .clone();
     assert_eq!(String::from_utf8(output).unwrap().trim(), "2");
+}
+
+#[test]
+fn print_service_systemd_contains_execstart() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "print-service",
+            "--manager",
+            "systemd",
+            "--label",
+            "stonr-prod",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("[Service]"));
+    assert!(text.contains("ExecStart="));
+    assert!(text.contains("--env"));
+    assert!(text.contains("serve"));
+    assert!(text.contains("stonr-prod"));
+}
+
+#[test]
+fn print_service_launchd_contains_program_arguments() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "print-service",
+            "--manager",
+            "launchd",
+            "--label",
+            "dev.stonr.prod",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("<key>ProgramArguments</key>"));
+    assert!(text.contains("<string>--env</string>"));
+    assert!(text.contains("<string>serve</string>"));
+    assert!(text.contains("dev.stonr.prod"));
 }

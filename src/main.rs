@@ -3,6 +3,7 @@
 //! relays, and signature verification.
 
 mod config;
+mod deploy;
 mod auth;
 mod blossom;
 mod event;
@@ -19,6 +20,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use clap::{Parser, Subcommand};
 use config::Settings;
+use deploy::ServiceManager;
 use policy::{apply_query_policy, current_unix_ts, validate_event_with_files};
 use serde_json::Value;
 use storage::Store;
@@ -99,6 +101,13 @@ enum Commands {
     Restore {
         #[arg(long)]
         source: String,
+    },
+    /// Print a service definition for a process supervisor.
+    PrintService {
+        #[arg(long, value_enum)]
+        manager: ServiceManager,
+        #[arg(long, default_value = "stonr")]
+        label: String,
     },
     /// Apply store retention limits immediately.
     PruneRetention,
@@ -341,6 +350,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 "{}",
                 serde_json::to_string(&store.restore_from(std::path::Path::new(&source))?)?
             );
+        }
+        Commands::PrintService { manager, label } => {
+            let exec_path = std::env::current_exe()?;
+            let env_path = std::path::PathBuf::from(&cli.env);
+            let rendered = crate::deploy::render_service(
+                manager,
+                &label,
+                &exec_path,
+                &env_path,
+                &cfg.store_root,
+            )?;
+            print!("{rendered}");
         }
         Commands::PruneRetention => {
             store.init()?;

@@ -82,6 +82,12 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Add a documented first-class `nostr-blog` preset/setup flow
 - [x] Decide and document whether `nostr-blog` must copy authoritative content out of Stonr or can rely on relay retention settings alone
 
+## Deployment And Supervision
+
+- [x] Generated `systemd` service output from the CLI
+- [x] Generated `launchd` service output from the CLI
+- [x] Documented service install and restart workflow
+
 ## Remaining Production Blockers
 
 - [x] Structured production logging
