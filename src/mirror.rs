@@ -860,6 +860,7 @@ mod tests {
         config::{MirrorMode, Settings, SinceMode},
         event::{Event, Tag},
     };
+    use std::time::Instant;
     use tempfile::TempDir;
     use tokio_tungstenite::{accept_async, tungstenite::Message as TMsg};
 
@@ -1516,5 +1517,80 @@ mod tests {
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
         assert!(!dir.path().join("events/ba/d0/bad.json").exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "performance smoke; run in release with --ignored --nocapture"]
+    async fn mirror_long_running_session_perf_smoke() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let total = 2_000usize;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await;
+            ws.send(TMsg::Text(json!(["EOSE", "mirror"]).to_string()))
+                .await
+                .unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            for idx in 0..total {
+                let event = Event {
+                    id: format!("{:064x}", idx + 1),
+                    pubkey: "mirror-author".into(),
+                    kind: 1,
+                    created_at: idx as u64 + 1,
+                    tags: vec![],
+                    content: format!("live event {}", idx),
+                    sig: String::new(),
+                };
+                ws.send(TMsg::Text(json!(["EVENT", "mirror", event]).to_string()))
+                    .await
+                    .unwrap();
+            }
+            ws.close(None).await.unwrap();
+        });
+
+        let relay_url = format!("ws://{}", addr);
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        cfg.filter_since_mode = SinceMode::Cursor;
+
+        let start = Instant::now();
+        mirror_relay_once(relay_url, cfg, store.clone(), test_events_tx())
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        server.await.unwrap();
+
+        let ingested = store
+            .query_with_policy(
+                Query {
+                    authors: None,
+                    kinds: Some(vec![1]),
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: Some(total + 10),
+                },
+                false,
+                false,
+            )
+            .unwrap();
+
+        println!(
+            "mirror_long_running_session_perf_smoke total_events={} elapsed_ms={}",
+            ingested.len(),
+            elapsed.as_millis()
+        );
+
+        assert_eq!(ingested.len(), total);
+        assert!(elapsed.as_secs_f64() < 10.0, "long-running mirror smoke too slow: {:?}", elapsed);
     }
 }

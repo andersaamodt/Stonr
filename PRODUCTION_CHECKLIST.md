@@ -85,7 +85,7 @@ This checklist tracks the real backend state, not just what the desktop app expo
 ## Remaining Production Blockers
 
 - [x] Structured production logging
-- [ ] Load/performance testing on large stores and long-running mirror sessions
+- [x] Load/performance testing on large stores and long-running mirror sessions
 
 ## Explicitly Not Planned Right Now
 

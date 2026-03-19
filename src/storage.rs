@@ -1331,7 +1331,7 @@ pub(crate) fn verify_signed_event(ev: &Event) -> Result<()> {
 mod tests {
     use super::*;
     use secp256k1::{Keypair, Message, Secp256k1};
-    use std::fs;
+    use std::{fs, time::Instant};
     use tempfile::TempDir;
 
     fn sample_event(id: &str, pubkey: &str, kind: u32, dtag: Option<&str>, created: u64) -> Event {
@@ -1936,5 +1936,99 @@ mod tests {
         let stored = store.ingest_with_policy(&expired, true, true).unwrap();
         assert!(!stored);
         assert!(!store.event_path("aa11").exists());
+    }
+
+    #[test]
+    #[ignore = "performance smoke; run in release with --ignored --nocapture"]
+    fn large_store_perf_smoke() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let total = 20_000usize;
+        for idx in 0..total {
+            let id = format!("{idx:064x}");
+            let created_at = idx as u64 + 1;
+            let mut event = Event {
+                id,
+                pubkey: "author".into(),
+                kind: if idx % 50 == 0 { 30023 } else { 1 },
+                created_at,
+                tags: vec![],
+                content: if idx % 97 == 0 {
+                    format!("keyword event payload {idx}")
+                } else {
+                    format!("plain event payload {idx}")
+                },
+                sig: String::new(),
+            };
+            if idx % 50 == 0 {
+                event.tags.push(Tag(vec!["d".into(), format!("slug-{idx}")]));
+            }
+            if idx % 17 == 0 {
+                event.tags.push(Tag(vec!["t".into(), "topic".into()]));
+            }
+            store.ingest(&event).unwrap();
+        }
+
+        let stats_start = Instant::now();
+        let (count, bytes) = store.refresh_stats_cache().unwrap();
+        let stats_elapsed = stats_start.elapsed();
+
+        let recent_start = Instant::now();
+        let recent = store
+            .query_with_policy(
+                Query {
+                    authors: None,
+                    kinds: None,
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: Some(60),
+                },
+                false,
+                false,
+            )
+            .unwrap();
+        let recent_elapsed = recent_start.elapsed();
+
+        let search_start = Instant::now();
+        let searched = store
+            .query_with_policy(
+                Query {
+                    authors: None,
+                    kinds: None,
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: Some("keyword".into()),
+                    since: None,
+                    until: None,
+                    limit: Some(60),
+                },
+                false,
+                false,
+            )
+            .unwrap();
+        let search_elapsed = search_start.elapsed();
+
+        println!(
+            "large_store_perf_smoke total_events={} total_bytes={} refresh_stats_ms={} recent_query_ms={} search_query_ms={}",
+            count,
+            bytes,
+            stats_elapsed.as_millis(),
+            recent_elapsed.as_millis(),
+            search_elapsed.as_millis()
+        );
+
+        assert_eq!(count, total);
+        assert_eq!(recent.len(), 60);
+        assert!(!searched.is_empty());
+        assert!(stats_elapsed.as_secs_f64() < 5.0, "refresh_stats_cache too slow: {:?}", stats_elapsed);
+        assert!(recent_elapsed.as_secs_f64() < 2.0, "recent query too slow: {:?}", recent_elapsed);
+        assert!(search_elapsed.as_secs_f64() < 4.0, "search query too slow: {:?}", search_elapsed);
     }
 }
