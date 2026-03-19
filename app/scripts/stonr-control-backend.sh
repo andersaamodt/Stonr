@@ -22,12 +22,14 @@ Commands:
   set-ui-pref KEY VALUE
   load-config [ENV_PATH]
   load-env [ENV_PATH]
+  mirror-status [ENV_PATH]
   retention-status [ENV_PATH]
   count-events [ENV_PATH]
   size-events [ENV_PATH]
   refresh-stats [ENV_PATH]
   purge-events [ENV_PATH]
   apply-retention [ENV_PATH]
+  apply-preset [ENV_PATH] PRESET
   query-events [ENV_PATH] [SEARCH] [LIMIT]
   save-env [ENV_PATH] KEY VALUE
   load-list [ENV_PATH] NAME
@@ -249,6 +251,36 @@ default_store_root() {
 
 default_relays_upstream() {
   printf '%s\n' "wss://relay.damus.io,wss://nos.lol,wss://purplepag.es,wss://relay.primal.net,wss://relay.nostr.band,wss://relay.snort.social,wss://relay.nsec.app"
+}
+
+apply_preset_nostr_blog() {
+  env_path=${1-}
+  normalize_env_file "$env_path"
+  ensure_runtime_dirs "$env_path"
+  set_kv_file "$env_path" ENABLE_MIRRORING 1
+  set_kv_file "$env_path" MIRROR_MODE site
+  set_kv_file "$env_path" MIRROR_SITE_INCLUDE_COMMENTS 1
+  set_kv_file "$env_path" FILTER_SINCE_MODE cursor
+  set_kv_file "$env_path" ENABLE_QUERY 1
+  set_kv_file "$env_path" ENABLE_COUNT 1
+  set_kv_file "$env_path" ENABLE_TAG_QUERIES 1
+  set_kv_file "$env_path" ENABLE_LIVE_SUBSCRIPTIONS 1
+  set_kv_file "$env_path" ENABLE_SEARCH 1
+  set_kv_file "$env_path" ENABLE_PUBLISH 0
+  set_kv_file "$env_path" FILTER_PRIVATE_MESSAGES 1
+  set_kv_file "$env_path" FILTER_AUTHORS ""
+  set_kv_file "$env_path" FILTER_KINDS ""
+  set_kv_file "$env_path" FILTER_TAG_A ""
+  set_kv_file "$env_path" FILTER_TAG_T ""
+  if upstream=$(env_get "$env_path" RELAYS_UPSTREAM 2>/dev/null); then
+    if [ -z "$upstream" ]; then
+      set_kv_file "$env_path" RELAYS_UPSTREAM "$(default_relays_upstream)"
+    fi
+  else
+    set_kv_file "$env_path" RELAYS_UPSTREAM "$(default_relays_upstream)"
+  fi
+  printf 'preset=nostr-blog\n'
+  printf 'env_path=%s\n' "$env_path"
 }
 
 normalize_env_file() {
@@ -697,6 +729,11 @@ case "$cmd" in
     normalize_env_file "$env_path"
     cat "$env_path"
     ;;
+  mirror-status)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    run_stonr --env "$env_path" mirror-status
+    ;;
   retention-status)
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
@@ -781,6 +818,19 @@ case "$cmd" in
       fi
     ) >/dev/null 2>&1 &
     printf 'started=1\n'
+    ;;
+  apply-preset)
+    env_path=$(resolve_env_path "${1-}")
+    preset=${2-}
+    case "$preset" in
+      nostr-blog)
+        apply_preset_nostr_blog "$env_path"
+        ;;
+      *)
+        printf '%s\n' "stonr-control-backend: unknown preset: $preset" >&2
+        exit 2
+        ;;
+    esac
     ;;
   query-events)
     env_path=$(resolve_env_path "${1-}")

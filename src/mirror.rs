@@ -1352,6 +1352,99 @@ mod tests {
         assert!(dir.path().join("events/aa/11/aa11.json").exists());
     }
 
+    #[tokio::test]
+    async fn site_post_mirror_matches_nostr_blog_author_scope() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let message = ws.next().await.unwrap().unwrap();
+            let TMsg::Text(text) = message else {
+                panic!("expected text request");
+            };
+            tx.send(text.to_string()).unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "site-posts"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.mirror_site_author = Some("site-author".into());
+        mirror_site_posts_once(
+            format!("ws://{}", addr),
+            cfg,
+            store,
+            test_events_tx(),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        let req: Value = serde_json::from_str(&rx.await.unwrap()).unwrap();
+        assert_eq!(req[0], "REQ");
+        assert_eq!(req[1], "site-posts");
+        assert_eq!(req[2]["authors"][0], "site-author");
+        assert_eq!(req[2]["kinds"][0], 30023);
+    }
+
+    #[tokio::test]
+    async fn site_comment_mirror_matches_nostr_blog_address_scope() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let post = Event {
+            id: "post1".into(),
+            pubkey: "site-author".into(),
+            kind: 30023,
+            created_at: 10,
+            tags: vec![Tag(vec!["d".into(), "hello-world".into()])],
+            content: "post".into(),
+            sig: String::new(),
+        };
+        store.ingest(&post).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let message = ws.next().await.unwrap().unwrap();
+            let TMsg::Text(text) = message else {
+                panic!("expected text request");
+            };
+            tx.send(text.to_string()).unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "site-comments"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.mirror_site_author = Some("site-author".into());
+        mirror_site_comments_once(
+            format!("ws://{}", addr),
+            cfg,
+            store,
+            test_events_tx(),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        let req: Value = serde_json::from_str(&rx.await.unwrap()).unwrap();
+        assert_eq!(req[0], "REQ");
+        assert_eq!(req[1], "site-comments");
+        assert_eq!(req[2]["kinds"][0], 1);
+        assert_eq!(req[2]["#a"][0], "30023:site-author:hello-world");
+    }
+
     #[test]
     fn cursor_round_trip() {
         let dir = TempDir::new().unwrap();

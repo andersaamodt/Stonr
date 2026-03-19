@@ -72,6 +72,16 @@ fn retention_status_returns_structured_json() {
 }
 
 #[test]
+fn mirror_status_returns_json_array() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    let output = run_backend(&["mirror-status", &env_path]);
+    let body: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(body, Value::Array(vec![]));
+}
+
+#[test]
 fn count_events_prefers_runtime_cache() {
     let dir = TempDir::new().unwrap();
     let env_path = write_env(&dir);
@@ -217,4 +227,33 @@ fn apply_retention_prunes_oldest_events() {
     assert!(!store_root.join("events/aa/11/aa11.json").exists());
     assert!(store_root.join("events/bb/22/bb22.json").exists());
     assert!(store_root.join("events/cc/33/cc33.json").exists());
+}
+
+#[test]
+fn apply_preset_nostr_blog_sets_site_mirror_defaults() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let store_root = dir.path().join("store");
+    fs::write(
+        &env_path,
+        format!(
+            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:7777\nBIND_WS=127.0.0.1:7778\nVERIFY_SIG=0\nENABLE_PUBLISH=1\nENABLE_MIRRORING=0\nMIRROR_MODE=broad\nRELAYS_UPSTREAM=\nFILTER_AUTHORS=abc\nFILTER_KINDS=1,7\nFILTER_TAG_A=30023:old:post\nFILTER_TAG_T=foo\n",
+            store_root.display()
+        ),
+    )
+    .unwrap();
+
+    run_backend(&["apply-preset", &env_path, "nostr-blog"]);
+    let env_text = fs::read_to_string(&env_path).unwrap();
+
+    assert!(env_text.contains("ENABLE_MIRRORING=1\n"));
+    assert!(env_text.contains("MIRROR_MODE=site\n"));
+    assert!(env_text.contains("MIRROR_SITE_INCLUDE_COMMENTS=1\n"));
+    assert!(env_text.contains("ENABLE_PUBLISH=0\n"));
+    assert!(env_text.contains("FILTER_PRIVATE_MESSAGES=1\n"));
+    assert!(env_text.contains("FILTER_AUTHORS=\n"));
+    assert!(env_text.contains("FILTER_KINDS=\n"));
+    assert!(env_text.contains("FILTER_TAG_A=\n"));
+    assert!(env_text.contains("FILTER_TAG_T=\n"));
+    assert!(env_text.contains("RELAYS_UPSTREAM=wss://relay.damus.io,wss://nos.lol"));
 }
