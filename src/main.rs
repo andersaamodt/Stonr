@@ -4,9 +4,12 @@
 
 mod config;
 mod auth;
+mod blossom;
 mod event;
+mod files;
 mod log;
 mod mirror;
+mod nip98;
 mod policy;
 mod server;
 mod storage;
@@ -16,7 +19,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use clap::{Parser, Subcommand};
 use config::Settings;
-use policy::{apply_query_policy, current_unix_ts, validate_event};
+use policy::{apply_query_policy, current_unix_ts, validate_event_with_files};
 use serde_json::Value;
 use storage::Store;
 use tokio::sync::broadcast;
@@ -167,16 +170,36 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::Ingest { files } => {
             // Load each JSON file and store it if not already present.
+            let file_store = store.files();
             for f in files {
                 let data = std::fs::read_to_string(&f)?;
                 let ev: event::Event = serde_json::from_str(&data)?;
-                validate_event(&cfg, &ev, current_unix_ts())?;
-                store.ingest_with_policy(&ev, cfg.delete_enabled(), cfg.expiration_enabled())?;
+                validate_event_with_files(&cfg, &file_store, &ev, current_unix_ts())?;
+                if store.ingest_with_policy(&ev, cfg.delete_enabled(), cfg.expiration_enabled())? {
+                    file_store.add_event_references(&ev)?;
+                }
             }
         }
         Commands::Reindex => {
             // Rebuild indexes and latest pointers from existing events.
             store.reindex()?;
+            let visible = store.query_with_policy(
+                storage::Query {
+                    authors: None,
+                    kinds: None,
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: None,
+                },
+                cfg.delete_enabled(),
+                cfg.expiration_enabled(),
+            )?;
+            store.files().rebuild_references(&visible)?;
+            store.files().prune(&cfg, false)?;
         }
         Commands::Query {
             authors,
@@ -225,6 +248,23 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::PruneRetention => {
             store.init()?;
             store.enforce_retention()?;
+            let visible = store.query_with_policy(
+                storage::Query {
+                    authors: None,
+                    kinds: None,
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: None,
+                },
+                cfg.delete_enabled(),
+                cfg.expiration_enabled(),
+            )?;
+            store.files().rebuild_references(&visible)?;
+            store.files().prune(&cfg, false)?;
         }
         Commands::RefreshStats => {
             store.init()?;
@@ -248,9 +288,32 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             });
             if cfg.max_stored_events.is_some() || cfg.max_stored_event_bytes.is_some() {
                 let retention_store = store.clone();
+                let retention_cfg = cfg.clone();
                 tokio::spawn(async move {
                     loop {
-                        if let Err(error) = retention_store.enforce_retention() {
+                        let result = retention_store
+                            .enforce_retention()
+                            .and_then(|_| {
+                                let visible = retention_store.query_with_policy(
+                                    storage::Query {
+                                        authors: None,
+                                        kinds: None,
+                                        d: None,
+                                        t: None,
+                                        tags: vec![],
+                                        search: None,
+                                        since: None,
+                                        until: None,
+                                        limit: None,
+                                    },
+                                    retention_cfg.delete_enabled(),
+                                    retention_cfg.expiration_enabled(),
+                                )?;
+                                retention_store.files().rebuild_references(&visible)?;
+                                retention_store.files().prune(&retention_cfg, false)?;
+                                Ok(())
+                            });
+                        if let Err(error) = result {
                             crate::log::warn(
                                 "retention",
                                 "failed to enforce retention",

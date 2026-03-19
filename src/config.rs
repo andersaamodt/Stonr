@@ -5,6 +5,12 @@ use std::{collections::HashMap, fs, path::PathBuf};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FileKeepMode {
+    Referenced,
+    All,
+}
+
 /// Runtime settings derived from environment variables.
 #[derive(Debug, Clone, Serialize)]
 pub struct Settings {
@@ -70,6 +76,14 @@ pub struct Settings {
     pub support_nip45: bool,
     /// Master switch for NIP-50.
     pub support_nip50: bool,
+    /// Master switch for NIP-94 file metadata events.
+    pub support_nip94: bool,
+    /// Master switch for NIP-96 compatibility file API.
+    pub support_nip96: bool,
+    /// Master switch for NIP-98 HTTP auth.
+    pub support_nip98: bool,
+    /// Master switch for NIP-B7 Blossom blob APIs.
+    pub support_nip_b7: bool,
     /// Reject encrypted private-message kinds before storing them.
     pub filter_private_messages: bool,
     /// Upstream relays to mirror events from.
@@ -112,6 +126,38 @@ pub struct Settings {
     pub max_counts_per_window: Option<usize>,
     /// Optional maximum publishes per actor within one rate-limit window.
     pub max_publishes_per_window: Option<usize>,
+    /// Store file metadata events such as kind 1063.
+    pub enable_file_metadata: bool,
+    /// Offer the `/files` compatibility upload API.
+    pub enable_file_api: bool,
+    /// Offer the Blossom blob API.
+    pub enable_blossom: bool,
+    /// Allow authenticated owners to list stored blobs.
+    pub enable_blossom_list: bool,
+    /// Allow the server to copy remote blobs into local storage.
+    pub enable_blossom_mirror: bool,
+    /// Require NIP-98 HTTP auth for compatibility uploads.
+    pub require_nip98_auth: bool,
+    /// Require Blossom auth for upload/delete/list/mirror actions.
+    pub require_blossom_auth: bool,
+    /// Require Blossom auth for blob downloads.
+    pub require_blossom_get_auth: bool,
+    /// Public compatibility API URL override.
+    pub file_api_url: Option<String>,
+    /// Public Blossom origin override.
+    pub blossom_public_url: Option<String>,
+    /// Maximum accepted upload size in bytes.
+    pub file_max_bytes: usize,
+    /// Allow only these MIME patterns when set.
+    pub file_allowed_mime: Option<Vec<String>>,
+    /// Always reject these MIME patterns when set.
+    pub file_blocked_mime: Option<Vec<String>>,
+    /// Exact blob hashes that should always be rejected.
+    pub file_hash_denylist: Option<Vec<String>>,
+    /// Storage retention policy for local blobs.
+    pub file_keep_mode: FileKeepMode,
+    /// Maximum stored blob bytes per owner pubkey.
+    pub max_blob_bytes_per_pubkey: Option<u64>,
 }
 
 /// Determines how the mirroring process derives the `since` value for subscriptions.
@@ -172,6 +218,10 @@ impl Settings {
         let support_nip40 = env_value(&env, "SUPPORT_NIP40").unwrap_or("1") == "1";
         let support_nip45 = env_value(&env, "SUPPORT_NIP45").unwrap_or("1") == "1";
         let support_nip50 = env_value(&env, "SUPPORT_NIP50").unwrap_or("1") == "1";
+        let support_nip94 = env_value(&env, "SUPPORT_NIP94").unwrap_or("1") == "1";
+        let support_nip96 = env_value(&env, "SUPPORT_NIP96").unwrap_or("1") == "1";
+        let support_nip98 = env_value(&env, "SUPPORT_NIP98").unwrap_or("1") == "1";
+        let support_nip_b7 = env_value(&env, "SUPPORT_NIP_B7").unwrap_or("1") == "1";
         let filter_private_messages = env_value(&env, "FILTER_PRIVATE_MESSAGES").unwrap_or("1") == "1";
         let relays_upstream = csv_strings(env_value(&env, "RELAYS_UPSTREAM").unwrap_or_default());
         let tor_socks = env_value(&env, "TOR_SOCKS").filter(|s| !s.is_empty()).map(str::to_string);
@@ -252,6 +302,39 @@ impl Settings {
         let max_publishes_per_window = env_value(&env, "MAX_PUBLISHES_PER_WINDOW")
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|value| *value > 0);
+        let enable_file_metadata = env_value(&env, "ENABLE_FILE_METADATA").unwrap_or("1") == "1";
+        let enable_file_api = env_value(&env, "ENABLE_FILE_API").unwrap_or("1") == "1";
+        let enable_blossom = env_value(&env, "ENABLE_BLOSSOM").unwrap_or("1") == "1";
+        let enable_blossom_list = env_value(&env, "ENABLE_BLOSSOM_LIST").unwrap_or("1") == "1";
+        let enable_blossom_mirror =
+            env_value(&env, "ENABLE_BLOSSOM_MIRROR").unwrap_or("0") == "1";
+        let require_nip98_auth =
+            env_value(&env, "REQUIRE_NIP98_AUTH").unwrap_or("0") == "1";
+        let require_blossom_auth =
+            env_value(&env, "REQUIRE_BLOSSOM_AUTH").unwrap_or("0") == "1";
+        let require_blossom_get_auth =
+            env_value(&env, "REQUIRE_BLOSSOM_GET_AUTH").unwrap_or("0") == "1";
+        let file_api_url = env_value(&env, "FILE_API_URL")
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string);
+        let blossom_public_url = env_value(&env, "BLOSSOM_PUBLIC_URL")
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string);
+        let file_max_bytes = env_value(&env, "FILE_MAX_BYTES")
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(32 * 1024 * 1024);
+        let file_allowed_mime = env_value(&env, "FILE_ALLOW_MIME")
+            .and_then(csv_strings_opt)
+            .map(|values| values.into_iter().map(|value| value.to_ascii_lowercase()).collect());
+        let file_blocked_mime = env_value(&env, "FILE_DENY_MIME")
+            .and_then(csv_strings_opt)
+            .map(|values| values.into_iter().map(|value| value.to_ascii_lowercase()).collect());
+        let file_hash_denylist = load_hash_denylist(&env);
+        let file_keep_mode = parse_file_keep_mode(env_value(&env, "FILE_KEEP_MODE"));
+        let max_blob_bytes_per_pubkey = env_value(&env, "MAX_BLOB_BYTES_PER_PUBKEY")
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0);
         Ok(Self {
             store_root,
             bind_http,
@@ -284,6 +367,10 @@ impl Settings {
             support_nip40,
             support_nip45,
             support_nip50,
+            support_nip94,
+            support_nip96,
+            support_nip98,
+            support_nip_b7,
             filter_private_messages,
             relays_upstream,
             tor_socks,
@@ -305,6 +392,22 @@ impl Settings {
             max_queries_per_window,
             max_counts_per_window,
             max_publishes_per_window,
+            enable_file_metadata,
+            enable_file_api,
+            enable_blossom,
+            enable_blossom_list,
+            enable_blossom_mirror,
+            require_nip98_auth,
+            require_blossom_auth,
+            require_blossom_get_auth,
+            file_api_url,
+            blossom_public_url,
+            file_max_bytes,
+            file_allowed_mime,
+            file_blocked_mime,
+            file_hash_denylist,
+            file_keep_mode,
+            max_blob_bytes_per_pubkey,
         })
     }
 
@@ -346,6 +449,60 @@ impl Settings {
 
     pub fn search_enabled(&self) -> bool {
         self.enable_search && self.support_nip50
+    }
+
+    pub fn file_metadata_enabled(&self) -> bool {
+        self.enable_file_metadata && self.support_nip94
+    }
+
+    pub fn file_api_enabled(&self) -> bool {
+        self.enable_file_api && self.support_nip96
+    }
+
+    pub fn blossom_enabled(&self) -> bool {
+        self.enable_blossom && self.support_nip_b7
+    }
+
+    pub fn blossom_list_enabled(&self) -> bool {
+        self.blossom_enabled() && self.enable_blossom_list
+    }
+
+    pub fn blossom_mirror_enabled(&self) -> bool {
+        self.blossom_enabled() && self.enable_blossom_mirror
+    }
+
+    pub fn nip98_auth_required(&self) -> bool {
+        self.file_api_enabled() && self.support_nip98 && self.require_nip98_auth
+    }
+
+    pub fn blossom_write_auth_required(&self) -> bool {
+        self.blossom_enabled() && self.require_blossom_auth
+    }
+
+    pub fn blossom_get_auth_required(&self) -> bool {
+        self.blossom_enabled() && self.require_blossom_get_auth
+    }
+
+    pub fn file_hash_allowed(&self, hash: &str) -> bool {
+        !self
+            .file_hash_denylist
+            .as_ref()
+            .is_some_and(|values| values.iter().any(|value| value.eq_ignore_ascii_case(hash)))
+    }
+
+    pub fn file_mime_allowed(&self, mime: &str) -> bool {
+        let mime = mime.trim().to_ascii_lowercase();
+        if self
+            .file_blocked_mime
+            .as_ref()
+            .is_some_and(|patterns| patterns.iter().any(|pattern| mime_pattern_matches(pattern, &mime)))
+        {
+            return false;
+        }
+        self.file_allowed_mime
+            .as_ref()
+            .map(|patterns| patterns.iter().any(|pattern| mime_pattern_matches(pattern, &mime)))
+            .unwrap_or(true)
     }
 
     pub fn query_auth_required(&self) -> bool {
@@ -424,6 +581,51 @@ fn csv_u32_opt(input: &str) -> Option<Vec<u32>> {
     } else {
         Some(values)
     }
+}
+
+fn load_hash_denylist(env: &HashMap<String, String>) -> Option<Vec<String>> {
+    let mut values = csv_strings(env_value(env, "FILE_HASH_DENYLIST").unwrap_or_default())
+        .into_iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if let Some(path) = env_value(env, "FILE_HASH_DENYLIST_PATH") {
+        if !path.trim().is_empty() {
+            match fs::read_to_string(path) {
+                Ok(data) => {
+                    for line in data.lines() {
+                        let line = line.trim();
+                        if line.is_empty() || line.starts_with('#') {
+                            continue;
+                        }
+                        values.push(line.to_ascii_lowercase());
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => {}
+            }
+        }
+    }
+    values.sort();
+    values.dedup();
+    (!values.is_empty()).then_some(values)
+}
+
+fn parse_file_keep_mode(value: Option<&str>) -> FileKeepMode {
+    match value.unwrap_or("referenced").trim().to_ascii_lowercase().as_str() {
+        "all" => FileKeepMode::All,
+        _ => FileKeepMode::Referenced,
+    }
+}
+
+fn mime_pattern_matches(pattern: &str, mime: &str) -> bool {
+    let pattern = pattern.trim().to_ascii_lowercase();
+    if pattern.is_empty() {
+        return false;
+    }
+    if let Some(prefix) = pattern.strip_suffix("/*") {
+        return mime.starts_with(&format!("{prefix}/"));
+    }
+    pattern == mime
 }
 
 #[cfg(test)]

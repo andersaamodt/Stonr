@@ -28,7 +28,7 @@ use crate::{
     event::{Event, Tag},
     policy::{
         apply_query_policy, client_actor_label, current_unix_ts, enforce_rate_limit,
-        validate_event, RateLimitAction,
+        validate_event_with_files, RateLimitAction,
     },
     storage::{event_hash, Query, Store},
 };
@@ -325,12 +325,13 @@ fn publish_event(state: &AppState, event: &Event) -> Result<()> {
     if calc_id != event.id {
         anyhow::bail!("id mismatch");
     }
-    validate_event(&state.settings, event, current_unix_ts())?;
+    validate_event_with_files(&state.settings, &state.store.files(), event, current_unix_ts())?;
     if state.store.ingest_with_policy(
         event,
         state.settings.delete_enabled(),
         state.settings.expiration_enabled(),
     )? {
+        state.store.files().add_event_references(event)?;
         let _ = state.events_tx.send(event.clone());
     }
     Ok(())
@@ -471,6 +472,10 @@ mod tests {
             support_nip40: true,
             support_nip45: true,
             support_nip50: true,
+            support_nip94: true,
+            support_nip96: true,
+            support_nip98: true,
+            support_nip_b7: true,
             filter_private_messages: true,
             relays_upstream: vec![],
             tor_socks: None,
@@ -492,6 +497,22 @@ mod tests {
             max_queries_per_window: None,
             max_counts_per_window: None,
             max_publishes_per_window: None,
+            enable_file_metadata: true,
+            enable_file_api: true,
+            enable_blossom: true,
+            enable_blossom_list: true,
+            enable_blossom_mirror: false,
+            require_nip98_auth: false,
+            require_blossom_auth: false,
+            require_blossom_get_auth: false,
+            file_api_url: None,
+            blossom_public_url: None,
+            file_max_bytes: 32 * 1024 * 1024,
+            file_allowed_mime: None,
+            file_blocked_mime: None,
+            file_hash_denylist: None,
+            file_keep_mode: crate::config::FileKeepMode::Referenced,
+            max_blob_bytes_per_pubkey: None,
         }
     }
 

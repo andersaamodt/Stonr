@@ -17,6 +17,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 use crate::event::{Event, Tag};
+use crate::files::FileStore;
 use std::os::unix::fs as unix_fs;
 
 /// Persistent store for events and indexes rooted at `root`.
@@ -79,7 +80,13 @@ impl Store {
         for d in dirs {
             fs::create_dir_all(self.root.join(d))?;
         }
+        self.files().init()?;
         Ok(())
+    }
+
+    /// Return the blob/file store rooted under the same relay root.
+    pub fn files(&self) -> FileStore {
+        FileStore::new(self.root.clone())
     }
 
     /// Ingest an event if it doesn't already exist on disk.
@@ -997,7 +1004,7 @@ pub(crate) fn event_hash(ev: &Event) -> Result<[u8; 32]> {
 }
 
 /// Verify an event's ID and Schnorr signature.
-fn verify_event(ev: &Event) -> Result<()> {
+pub fn verify_event(ev: &Event) -> Result<()> {
     let hash = event_hash(ev)?;
     let calc_id = hex::encode(hash);
     if calc_id != ev.id {

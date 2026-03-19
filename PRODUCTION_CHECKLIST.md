@@ -24,7 +24,21 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Empty-filter queries return recent stored events instead of an empty set
 - [x] Max read result cap enforced across HTTP, WebSocket, and CLI queries
 - [x] Relay-side text search over stored event content
-- [x] NIP-11 relay info reflects configured name/description and active basic relay capabilities
+- [x] NIP-11 relay info reflects configured name/description and active relay/file capabilities, including `NIP-94`, `NIP-96`, and `NIP-98`
+
+## File And Blob Surface
+
+- [x] `NIP-94` file metadata events enforced and validated against local blobs
+- [x] `NIP-96` relay compatibility API info document
+- [x] `NIP-96` upload / owner list / download / delete routes
+- [x] `NIP-98` HTTP auth enforced for compatibility API where configured
+- [x] Blossom (`NIP-B7`) upload / head / get / delete / owner list / remote mirror routes
+- [x] Blob MIME allow/deny rules enforced
+- [x] Blob hash denylist enforced
+- [x] Blob max upload size enforced
+- [x] Blob per-owner quota enforced
+- [x] Blob retention keep mode enforced
+- [x] Blob reference rebuild on reindex / retention passes
 
 ## Mirroring
 
@@ -70,8 +84,6 @@ This checklist tracks the real backend state, not just what the desktop app expo
 
 ## Remaining Production Blockers
 
-- [ ] Backend file/blob policy enforcement for all desktop-exposed controls
-- [ ] Consistent capability advertisement across the remaining unimplemented relay/file/auth surfaces
 - [x] Structured production logging
 - [ ] Load/performance testing on large stores and long-running mirror sessions
 

@@ -22,7 +22,7 @@ use url::Url;
 use crate::{
     config::{MirrorMode, Settings, SinceMode},
     event::{Event, Tag},
-    policy::{current_unix_ts, validate_event},
+    policy::{current_unix_ts, validate_event_with_files},
     storage::{Query, Store},
 };
 
@@ -538,8 +538,9 @@ where
                             Some("EVENT") if arr.len() >= 3 => {
                                 if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone()) {
                                     latest = latest.max(ev.created_at);
-                                    if validate_event(
+                                    if validate_event_with_files(
                                         options.settings,
+                                        &store.files(),
                                         &ev,
                                         current_unix_ts(),
                                     )
@@ -572,7 +573,10 @@ where
                                                 "error": e.to_string(),
                                             }),
                                         );
-                                    } else if store
+                                    } else {
+                                        let _ = store.files().add_event_references(&ev);
+                                    }
+                                    if store
                                         .event_visible_with_policy(
                                             &ev,
                                             options.delete_enabled,
@@ -838,6 +842,10 @@ mod tests {
             support_nip40: true,
             support_nip45: true,
             support_nip50: true,
+            support_nip94: true,
+            support_nip96: true,
+            support_nip98: true,
+            support_nip_b7: true,
             filter_private_messages: false,
             relays_upstream: vec![],
             tor_socks: None,
@@ -859,6 +867,22 @@ mod tests {
             max_queries_per_window: None,
             max_counts_per_window: None,
             max_publishes_per_window: None,
+            enable_file_metadata: true,
+            enable_file_api: true,
+            enable_blossom: true,
+            enable_blossom_list: true,
+            enable_blossom_mirror: false,
+            require_nip98_auth: false,
+            require_blossom_auth: false,
+            require_blossom_get_auth: false,
+            file_api_url: None,
+            blossom_public_url: None,
+            file_max_bytes: 32 * 1024 * 1024,
+            file_allowed_mime: None,
+            file_blocked_mime: None,
+            file_hash_denylist: None,
+            file_keep_mode: crate::config::FileKeepMode::Referenced,
+            max_blob_bytes_per_pubkey: None,
         }
     }
 

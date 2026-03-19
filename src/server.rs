@@ -3,17 +3,24 @@
 use anyhow::Result;
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Query as AxumQuery, State},
-    http::header,
-    routing::get,
+    extract::{ConnectInfo, Multipart, OriginalUri, Path, Query as AxumQuery, RawQuery, Request, State},
+    http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
+    response::{IntoResponse, Response},
+    routing::{get, options},
     Json, Router,
 };
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::{future::Future, net::SocketAddr, sync::Arc};
+use std::{collections::BTreeMap, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use tokio::io::AsyncWriteExt;
+use url::{form_urlencoded, Url};
 
 use crate::{
+    blossom::{self, Action as BlossomAction, VerifiedAuth},
     config::Settings,
+    files::{self, BlobInfo, BlobMeta, UploadCandidate},
     mirror::{read_statuses, MirrorStatus},
+    nip98,
     policy::{apply_query_policy, client_actor_label, current_unix_ts, enforce_rate_limit, RateLimitAction},
     storage::{Query, Store},
 };
@@ -62,6 +69,59 @@ struct MirrorHealthEntry {
     last_error: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct Nip96Info {
+    api_url: String,
+    download_url: String,
+    supported_nips: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_types: Option<Vec<String>>,
+    plans: BTreeMap<String, Nip96Plan>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Nip96Plan {
+    name: String,
+    is_nip98_required: bool,
+    max_byte_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Nip94EventDoc {
+    tags: Vec<Vec<String>>,
+    content: String,
+    created_at: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FileApiResponse {
+    status: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nip94_event: Option<Nip94EventDoc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    processing_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FileListResponse {
+    count: usize,
+    total: usize,
+    page: usize,
+    files: Vec<Nip94EventDoc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MirrorRequest {
+    url: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Pagination {
+    count: usize,
+    page: usize,
+}
+
 /// Start an HTTP server exposing `/healthz`, `/query`, and relay info.
 pub async fn serve_http(
     addr: SocketAddr,
@@ -76,6 +136,27 @@ pub async fn serve_http(
         .route("/mirror-health", get(mirror_health))
         .route("/query", get(query))
         .route("/count", get(count))
+        .route("/.well-known/nostr/nip96.json", get(nip96_info))
+        .route("/files", options(cors_preflight).get(list_files).post(upload_file))
+        .route(
+            "/files/:blob_id",
+            options(cors_preflight).get(download_file).delete(delete_file),
+        )
+        .route(
+            "/upload",
+            options(cors_preflight)
+                .head(blossom_check_upload)
+                .put(blossom_upload),
+        )
+        .route("/list/:pubkey", options(cors_preflight).get(blossom_list))
+        .route("/mirror", options(cors_preflight).put(blossom_mirror))
+        .route(
+            "/:blob_id",
+            options(cors_preflight)
+                .head(blossom_head_blob)
+                .get(blossom_get_blob)
+                .delete(blossom_delete_blob),
+        )
         .with_state(Arc::new(AppState { store, settings }));
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(shutdown)
@@ -178,6 +259,15 @@ async fn relay_info(
     }
     if state.settings.search_enabled() {
         supported_nips.push(50);
+    }
+    if state.settings.file_metadata_enabled() {
+        supported_nips.push(94);
+    }
+    if state.settings.file_api_enabled() {
+        supported_nips.push(96);
+    }
+    if state.settings.file_api_enabled() && state.settings.support_nip98 {
+        supported_nips.push(98);
     }
     axum::response::Response::builder()
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
@@ -388,6 +478,1189 @@ async fn count(
         .unwrap()
 }
 
+async fn nip96_info(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if !state.settings.file_api_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let api_url = advertised_file_api_url(&headers, &state.settings);
+    let mut plans = BTreeMap::new();
+    plans.insert(
+        "free".into(),
+        Nip96Plan {
+            name: "free".into(),
+            is_nip98_required: state.settings.nip98_auth_required(),
+            max_byte_size: state.settings.file_max_bytes,
+        },
+    );
+    let content_types = state.settings.file_allowed_mime.as_ref().map(|values| {
+        let mut values = values.clone();
+        values.sort();
+        values
+    });
+    json_response(
+        StatusCode::OK,
+        Nip96Info {
+            api_url: api_url.clone(),
+            download_url: api_url,
+            supported_nips: if state.settings.file_api_enabled() && state.settings.support_nip98 {
+                vec![98]
+            } else {
+                vec![]
+            },
+            content_types,
+            plans,
+        },
+    )
+}
+
+async fn cors_preflight() -> axum::response::Response {
+    Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static(
+                "Authorization, Content-Type, Content-Length, X-Content-Length, X-Content-Type, X-SHA-256",
+            ),
+        )
+        .header(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("GET,HEAD,PUT,POST,DELETE,OPTIONS"),
+        )
+        .body(Body::empty())
+        .unwrap()
+}
+
+async fn upload_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+    mut multipart: Multipart,
+) -> axum::response::Response {
+    if !state.settings.file_api_enabled() {
+        return file_api_error(StatusCode::FORBIDDEN, "blocked: file API disabled");
+    }
+    if headers.contains_key(header::AUTHORIZATION) && !state.settings.support_nip98 {
+        return file_api_error(
+            StatusCode::FORBIDDEN,
+            "blocked: NIP-98 auth support disabled",
+        );
+    }
+    let file_store = state.store.files();
+    if let Err(error) = file_store.init() {
+        return internal_file_api_error(error);
+    }
+
+    let temp_path = temp_upload_path(&state);
+    let mut file_seen = false;
+    let mut file_name = None;
+    let mut detected_mime = None;
+    let mut bytes_written = 0usize;
+    let mut text_fields = vec![];
+
+    loop {
+        let next = match multipart.next_field().await {
+            Ok(next) => next,
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                return file_api_error(
+                    StatusCode::BAD_REQUEST,
+                    &format!("invalid: multipart parse failed: {error}"),
+                );
+            }
+        };
+        let Some(mut field) = next else {
+            break;
+        };
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "file" {
+            if file_seen {
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                return file_api_error(StatusCode::BAD_REQUEST, "invalid: multiple file fields");
+            }
+            file_seen = true;
+            file_name = field.file_name().map(ToString::to_string);
+            detected_mime = field.content_type().map(ToString::to_string);
+
+            let file = match tokio::fs::File::create(&temp_path).await {
+                Ok(file) => file,
+                Err(error) => return internal_file_api_error(error.into()),
+            };
+            let mut writer = tokio::io::BufWriter::new(file);
+            loop {
+                match field.chunk().await {
+                    Ok(Some(chunk)) => {
+                        bytes_written += chunk.len();
+                        if bytes_written > state.settings.file_max_bytes {
+                            let _ = tokio::fs::remove_file(&temp_path).await;
+                            return file_api_error(
+                                StatusCode::PAYLOAD_TOO_LARGE,
+                                "blocked: file exceeds max size",
+                            );
+                        }
+                        if let Err(error) = writer.write_all(&chunk).await {
+                            let _ = tokio::fs::remove_file(&temp_path).await;
+                            return internal_file_api_error(error.into());
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = tokio::fs::remove_file(&temp_path).await;
+                        return file_api_error(
+                            StatusCode::BAD_REQUEST,
+                            &format!("invalid: multipart read failed: {error}"),
+                        );
+                    }
+                }
+            }
+            if let Err(error) = writer.flush().await {
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                return internal_file_api_error(error.into());
+            }
+        } else {
+            match field.text().await {
+                Ok(value) => text_fields.push((name, value)),
+                Err(error) => {
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    return file_api_error(
+                        StatusCode::BAD_REQUEST,
+                        &format!("invalid: failed to read form field: {error}"),
+                    );
+                }
+            }
+        }
+    }
+
+    if !file_seen {
+        return file_api_error(StatusCode::BAD_REQUEST, "invalid: missing file field");
+    }
+
+    let fields = files::parse_text_fields(&text_fields);
+    let expires_at = match optional_u64_field(&fields, "expiration") {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return file_api_error(StatusCode::BAD_REQUEST, &error.to_string());
+        }
+    };
+    let mime = fields
+        .get("content_type")
+        .cloned()
+        .or(detected_mime)
+        .unwrap_or_else(|| "application/octet-stream".into());
+
+    let (payload_hash, _) = match files::hash_file(&temp_path) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return internal_file_api_error(error);
+        }
+    };
+    let request_url = request_absolute_url(&headers, &uri);
+    let owner = match optional_auth_pubkey(
+        state.settings.nip98_auth_required(),
+        &headers,
+        "POST",
+        &request_url,
+        Some(&payload_hash),
+    ) {
+        Ok(owner) => owner,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return file_api_error(StatusCode::UNAUTHORIZED, &error.to_string());
+        }
+    };
+    let existed = match file_store.load_meta(&payload_hash) {
+        Ok(meta) => meta.is_some(),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return internal_file_api_error(error);
+        }
+    };
+    let advertised_url = advertised_file_api_url(&headers, &state.settings);
+    let info = match file_store.store_upload(
+        UploadCandidate {
+            temp_path: temp_path.clone(),
+            filename: file_name.or_else(|| fields.get("filename").cloned()),
+            mime,
+            owner,
+            expires_at,
+        },
+        &state.settings,
+        &advertised_url,
+    ) {
+        Ok(info) => info,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return file_api_error(status_for_file_error(&error), &error.to_string());
+        }
+    };
+    let meta = match file_store.load_meta(&info.sha256) {
+        Ok(Some(meta)) => meta,
+        Ok(None) => return internal_file_api_error(anyhow::anyhow!("missing blob metadata after upload")),
+        Err(error) => return internal_file_api_error(error),
+    };
+    json_response(
+        if existed {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        },
+        FileApiResponse {
+            status: "success".into(),
+            message: if existed {
+                "file already present".into()
+            } else {
+                "upload accepted".into()
+            },
+            nip94_event: Some(blob_to_nip94_event(&info, &meta, &fields)),
+            processing_url: None,
+        },
+    )
+}
+
+async fn list_files(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+    RawQuery(raw): RawQuery,
+) -> axum::response::Response {
+    if !state.settings.file_api_enabled() {
+        return file_api_error(StatusCode::FORBIDDEN, "blocked: file API disabled");
+    }
+    if !state.settings.support_nip98 {
+        return file_api_error(
+            StatusCode::FORBIDDEN,
+            "blocked: NIP-98 auth support disabled",
+        );
+    }
+    let request_url = request_absolute_url(&headers, &uri);
+    let owner = match optional_auth_pubkey(true, &headers, "GET", &request_url, None) {
+        Ok(Some(owner)) => owner,
+        Ok(None) => unreachable!(),
+        Err(error) => return file_api_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+    };
+    let page = params_to_pagination(raw.as_deref(), &state.settings);
+    let base_url = advertised_file_api_url(&headers, &state.settings);
+    let mut files = vec![];
+    let listed = match state.store.files().list(&base_url) {
+        Ok(files) => files,
+        Err(error) => return internal_file_api_error(error),
+    };
+    for info in listed {
+        let Ok(Some(meta)) = state.store.files().load_meta(&info.sha256) else {
+            continue;
+        };
+        if !meta.owners.contains(&owner) {
+            continue;
+        }
+        files.push(blob_to_nip94_event(&info, &meta, &Default::default()));
+    }
+    files.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    let total = files.len();
+    let start = page.page.saturating_mul(page.count).min(total);
+    let end = start.saturating_add(page.count).min(total);
+    json_response(
+        StatusCode::OK,
+        FileListResponse {
+            count: end.saturating_sub(start),
+            total,
+            page: page.page,
+            files: files[start..end].to_vec(),
+        },
+    )
+}
+
+async fn download_file(
+    State(state): State<Arc<AppState>>,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    if !state.settings.file_api_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let hash = match normalize_blob_id(&blob_id) {
+        Ok(hash) => hash,
+        Err(error) => return file_api_error(StatusCode::BAD_REQUEST, &error.to_string()),
+    };
+    let meta = match state.store.files().load_meta(&hash) {
+        Ok(Some(meta)) => meta,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_file_api_error(error),
+    };
+    if meta.expires_at.is_some_and(|ts| ts <= unix_now()) {
+        return StatusCode::GONE.into_response();
+    }
+    if !state.settings.file_hash_allowed(&hash) || !state.settings.file_mime_allowed(&meta.mime) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let data = match tokio::fs::read(state.store.files().blob_path(&hash)).await {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return StatusCode::NOT_FOUND.into_response()
+        }
+        Err(error) => return internal_file_api_error(error.into()),
+    };
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("Authorization, Content-Type"),
+        )
+        .header(header::CACHE_CONTROL, HeaderValue::from_static("public, immutable"))
+        .header(header::CONTENT_TYPE, meta.mime.as_str());
+    if let Some(name) = meta.original_name.as_deref() {
+        builder = builder.header(
+            header::CONTENT_DISPOSITION,
+            format!("inline; filename=\"{}\"", sanitized_filename(name)),
+        );
+    }
+    builder.body(Body::from(data)).unwrap()
+}
+
+async fn delete_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    if !state.settings.file_api_enabled() {
+        return file_api_error(StatusCode::FORBIDDEN, "blocked: file API disabled");
+    }
+    if !state.settings.support_nip98 {
+        return file_api_error(
+            StatusCode::FORBIDDEN,
+            "blocked: NIP-98 auth support disabled",
+        );
+    }
+    let hash = match normalize_blob_id(&blob_id) {
+        Ok(hash) => hash,
+        Err(error) => return file_api_error(StatusCode::BAD_REQUEST, &error.to_string()),
+    };
+    let request_url = request_absolute_url(&headers, &uri);
+    let owner = match optional_auth_pubkey(true, &headers, "DELETE", &request_url, None) {
+        Ok(Some(owner)) => owner,
+        Ok(None) => unreachable!(),
+        Err(error) => return file_api_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+    };
+    match state.store.files().delete_for_owner(&hash, &owner, &state.settings) {
+        Ok(true) => json_response(
+            StatusCode::OK,
+            FileApiResponse {
+                status: "success".into(),
+                message: "file deleted".into(),
+                nip94_event: None,
+                processing_url: None,
+            },
+        ),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => file_api_error(status_for_file_error(&error), &error.to_string()),
+    }
+}
+
+async fn blossom_check_upload(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if !state.settings.blossom_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let host_domain = request_host_domain(&headers);
+    let auth = match blossom_optional_auth(
+        state.settings.blossom_write_auth_required(),
+        &headers,
+        BlossomAction::Upload,
+        &host_domain,
+    ) {
+        Ok(auth) => auth,
+        Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+    };
+    let Some(hash) = header_string(&headers, "x-sha-256") else {
+        return blossom_error(StatusCode::BAD_REQUEST, "invalid: missing X-SHA-256 header");
+    };
+    let Some(mime) = header_string(&headers, "x-content-type") else {
+        return blossom_error(StatusCode::BAD_REQUEST, "invalid: missing X-Content-Type header");
+    };
+    let Some(length) = header_string(&headers, "x-content-length") else {
+        return blossom_error(StatusCode::BAD_REQUEST, "invalid: missing X-Content-Length header");
+    };
+    let length = match length.parse::<u64>() {
+        Ok(length) => length,
+        Err(_) => {
+            return blossom_error(
+                StatusCode::BAD_REQUEST,
+                "invalid: X-Content-Length must be an integer",
+            )
+        }
+    };
+    if let Some(auth) = &auth {
+        if let Err(error) = auth.require_hash(&hash) {
+            return blossom_error(StatusCode::FORBIDDEN, &error.to_string());
+        }
+    }
+    if let Err(error) = validate_upload_requirements(&state.settings, &hash, &mime, length) {
+        return blossom_error(status_for_file_error(&error), &error.to_string());
+    }
+    blossom_head_ok("upload permitted")
+}
+
+async fn blossom_upload(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    request: Request,
+) -> axum::response::Response {
+    if !state.settings.blossom_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let file_store = state.store.files();
+    if let Err(error) = file_store.init() {
+        return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+    }
+    let Some(expected_hash) = header_string(&headers, "x-sha-256") else {
+        return blossom_error(StatusCode::BAD_REQUEST, "invalid: missing X-SHA-256 header");
+    };
+    let mime = header_string(&headers, header::CONTENT_TYPE.as_str())
+        .unwrap_or_else(|| "application/octet-stream".into());
+    let declared_len = header_string(&headers, header::CONTENT_LENGTH.as_str())
+        .and_then(|value| value.parse::<u64>().ok());
+    if let Some(length) = declared_len {
+        if let Err(error) = validate_upload_requirements(&state.settings, &expected_hash, &mime, length) {
+            return blossom_error(status_for_file_error(&error), &error.to_string());
+        }
+    } else if !is_valid_hash(&expected_hash) {
+        return blossom_error(
+            StatusCode::BAD_REQUEST,
+            "invalid: X-SHA-256 must be 64 hex chars",
+        );
+    }
+    let host_domain = request_host_domain(&headers);
+    let auth = match blossom_optional_auth(
+        state.settings.blossom_write_auth_required(),
+        &headers,
+        BlossomAction::Upload,
+        &host_domain,
+    ) {
+        Ok(auth) => auth,
+        Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+    };
+    if let Some(auth) = &auth {
+        if let Err(error) = auth.require_hash(&expected_hash) {
+            return blossom_error(StatusCode::FORBIDDEN, &error.to_string());
+        }
+    }
+    let temp_path = temp_upload_path(&state);
+    match write_request_body_to_temp(request, &temp_path, state.settings.file_max_bytes).await {
+        Ok(_) => {}
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(status_for_file_error(&error), &error.to_string());
+        }
+    }
+    let (actual_hash, _) = match files::hash_file(&temp_path) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+        }
+    };
+    if actual_hash != expected_hash.to_ascii_lowercase() {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return blossom_error(
+            StatusCode::BAD_REQUEST,
+            "invalid: uploaded bytes do not match X-SHA-256",
+        );
+    }
+    let existed = match file_store.load_meta(&actual_hash) {
+        Ok(meta) => meta.is_some(),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+        }
+    };
+    let origin = advertised_blossom_origin(&headers, &state.settings);
+    if let Err(error) = file_store.store_upload(
+        UploadCandidate {
+            temp_path: temp_path.clone(),
+            filename: None,
+            mime,
+            owner: auth.map(|auth| auth.pubkey),
+            expires_at: None,
+        },
+        &state.settings,
+        &origin,
+    ) {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return blossom_error(status_for_file_error(&error), &error.to_string());
+    }
+    let meta = match file_store.load_meta(&actual_hash) {
+        Ok(Some(meta)) => meta,
+        Ok(None) => {
+            return blossom_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "missing blob metadata after upload",
+            )
+        }
+        Err(error) => return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    };
+    blossom_json_response(
+        if existed {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        },
+        blossom::descriptor(&meta, &origin),
+    )
+}
+
+async fn blossom_list(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(pubkey): Path<String>,
+    RawQuery(raw): RawQuery,
+) -> axum::response::Response {
+    if !state.settings.blossom_list_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let host_domain = request_host_domain(&headers);
+    let auth = match blossom_optional_auth(
+        true,
+        &headers,
+        BlossomAction::List,
+        &host_domain,
+    ) {
+        Ok(auth) => auth,
+        Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+    };
+    if let Some(auth) = &auth {
+        if auth.pubkey != pubkey {
+            return blossom_error(StatusCode::FORBIDDEN, "blocked: auth pubkey mismatch");
+        }
+    }
+    let page = params_to_pagination(raw.as_deref(), &state.settings);
+    let origin = advertised_blossom_origin(&headers, &state.settings);
+    let mut descriptors = match state.store.files().all_meta() {
+        Ok(metas) => metas
+            .into_iter()
+            .filter(|meta| meta.owners.contains(&pubkey))
+            .map(|meta| blossom::descriptor(&meta, &origin))
+            .collect::<Vec<_>>(),
+        Err(error) => return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    };
+    descriptors.sort_by(|left, right| {
+        right
+            .uploaded
+            .cmp(&left.uploaded)
+            .then_with(|| right.sha256.cmp(&left.sha256))
+    });
+    let start = page.page.saturating_mul(page.count).min(descriptors.len());
+    let end = start.saturating_add(page.count).min(descriptors.len());
+    blossom_json_response(StatusCode::OK, descriptors[start..end].to_vec())
+}
+
+async fn blossom_mirror(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<MirrorRequest>,
+) -> axum::response::Response {
+    if !state.settings.blossom_mirror_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let file_store = state.store.files();
+    if let Err(error) = file_store.init() {
+        return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+    }
+    let host_domain = request_host_domain(&headers);
+    let auth = match blossom_optional_auth(
+        true,
+        &headers,
+        BlossomAction::Upload,
+        &host_domain,
+    ) {
+        Ok(auth) => auth,
+        Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+    };
+    let source = match Url::parse(&body.url) {
+        Ok(url) if matches!(url.scheme(), "http" | "https") => url,
+        _ => {
+            return blossom_error(
+                StatusCode::BAD_REQUEST,
+                "invalid: mirror url must be http or https",
+            )
+        }
+    };
+    let response = match reqwest::Client::new().get(source.clone()).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            return blossom_error(
+                StatusCode::BAD_GATEWAY,
+                &format!("invalid: mirror fetch failed: {error}"),
+            )
+        }
+    };
+    if !response.status().is_success() {
+        return blossom_error(
+            StatusCode::BAD_GATEWAY,
+            &format!("invalid: mirror source returned {}", response.status()),
+        );
+    }
+    if let Some(length) = response.content_length() {
+        if length > state.settings.file_max_bytes as u64 {
+            return blossom_error(StatusCode::PAYLOAD_TOO_LARGE, "blocked: file exceeds max size");
+        }
+    }
+    let mime = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .unwrap_or_else(|| "application/octet-stream".into());
+    if !state.settings.file_mime_allowed(&mime) {
+        return blossom_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "blocked: MIME type not allowed");
+    }
+    let temp_path = temp_upload_path(&state);
+    let mut writer = match tokio::fs::File::create(&temp_path).await {
+        Ok(file) => tokio::io::BufWriter::new(file),
+        Err(error) => return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    };
+    let mut written = 0usize;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                return blossom_error(
+                    StatusCode::BAD_GATEWAY,
+                    &format!("invalid: mirror stream failed: {error}"),
+                );
+            }
+        };
+        written += chunk.len();
+        if written > state.settings.file_max_bytes {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(StatusCode::PAYLOAD_TOO_LARGE, "blocked: file exceeds max size");
+        }
+        if let Err(error) = writer.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+        }
+    }
+    if let Err(error) = writer.flush().await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+    }
+    let (hash, _) = match files::hash_file(&temp_path) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+        }
+    };
+    if let Some(auth) = &auth {
+        if let Err(error) = auth.require_hash(&hash) {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(StatusCode::FORBIDDEN, &error.to_string());
+        }
+    }
+    let existed = match file_store.load_meta(&hash) {
+        Ok(meta) => meta.is_some(),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+        }
+    };
+    let origin = advertised_blossom_origin(&headers, &state.settings);
+    if let Err(error) = file_store.store_upload(
+        UploadCandidate {
+            temp_path: temp_path.clone(),
+            filename: filename_from_url(&source),
+            mime,
+            owner: auth.map(|auth| auth.pubkey),
+            expires_at: None,
+        },
+        &state.settings,
+        &origin,
+    ) {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return blossom_error(status_for_file_error(&error), &error.to_string());
+    }
+    let meta = match file_store.load_meta(&hash) {
+        Ok(Some(meta)) => meta,
+        Ok(None) => {
+            return blossom_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "missing blob metadata after mirror",
+            )
+        }
+        Err(error) => return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    };
+    blossom_json_response(
+        if existed {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        },
+        blossom::descriptor(&meta, &origin),
+    )
+}
+
+async fn blossom_get_blob(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    blossom_blob_response(state, headers, blob_id, false).await
+}
+
+async fn blossom_head_blob(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    blossom_blob_response(state, headers, blob_id, true).await
+}
+
+async fn blossom_delete_blob(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    if !state.settings.blossom_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let hash = match normalize_blob_id(&blob_id) {
+        Ok(hash) => hash,
+        Err(error) => return blossom_error(StatusCode::BAD_REQUEST, &error.to_string()),
+    };
+    let meta = match state.store.files().load_meta(&hash) {
+        Ok(Some(meta)) => meta,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    };
+    let host_domain = request_host_domain(&headers);
+    let auth = match blossom::verify_auth(&headers, BlossomAction::Delete, &host_domain) {
+        Ok(auth) => auth,
+        Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+    };
+    if let Err(error) = auth.require_hash(&hash) {
+        return blossom_error(StatusCode::FORBIDDEN, &error.to_string());
+    }
+    match state
+        .store
+        .files()
+        .delete_for_owner(&hash, &auth.pubkey, &state.settings)
+    {
+        Ok(true) => blossom_json_response(
+            StatusCode::OK,
+            blossom::descriptor(&meta, &advertised_blossom_origin(&headers, &state.settings)),
+        ),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => blossom_error(status_for_file_error(&error), &error.to_string()),
+    }
+}
+
+async fn blossom_blob_response(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    blob_id: String,
+    head_only: bool,
+) -> axum::response::Response {
+    if !state.settings.blossom_enabled() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let hash = match normalize_blob_id(&blob_id) {
+        Ok(hash) => hash,
+        Err(error) => return blossom_error(StatusCode::BAD_REQUEST, &error.to_string()),
+    };
+    let meta = match state.store.files().load_meta(&hash) {
+        Ok(Some(meta)) => meta,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    };
+    if meta.expires_at.is_some_and(|ts| ts <= unix_now()) {
+        return StatusCode::GONE.into_response();
+    }
+    if !state.settings.file_hash_allowed(&hash) || !state.settings.file_mime_allowed(&meta.mime) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if state.settings.blossom_get_auth_required() || headers.contains_key(header::AUTHORIZATION) {
+        let host_domain = request_host_domain(&headers);
+        let auth = match blossom::verify_auth(&headers, BlossomAction::Get, &host_domain) {
+            Ok(auth) => auth,
+            Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
+        };
+        if !auth.hashes.is_empty() {
+            if let Err(error) = auth.require_hash(&hash) {
+                return blossom_error(StatusCode::FORBIDDEN, &error.to_string());
+            }
+        }
+    }
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static(
+                "Authorization, Content-Type, Content-Length, X-Content-Length, X-Content-Type, X-SHA-256",
+            ),
+        )
+        .header(header::CONTENT_TYPE, meta.mime.as_str())
+        .header(header::CONTENT_LENGTH, meta.size.to_string())
+        .header("X-Content-Type-Options", HeaderValue::from_static("nosniff"))
+        .header(header::CACHE_CONTROL, HeaderValue::from_static("public, immutable"));
+    if let Some(name) = meta.original_name.as_deref() {
+        builder = builder.header(
+            header::CONTENT_DISPOSITION,
+            format!("inline; filename=\"{}\"", sanitized_filename(name)),
+        );
+    }
+    if head_only {
+        return builder.body(Body::empty()).unwrap();
+    }
+    let data = match tokio::fs::read(state.store.files().blob_path(&hash)).await {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return StatusCode::NOT_FOUND.into_response()
+        }
+        Err(error) => return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    };
+    builder.body(Body::from(data)).unwrap()
+}
+
+fn params_to_pagination(raw: Option<&str>, settings: &Settings) -> Pagination {
+    let max = settings.max_limit.unwrap_or(200).max(1);
+    let mut page = 0usize;
+    let mut count = 50usize.min(max);
+    if let Some(raw) = raw {
+        for (key, value) in form_urlencoded::parse(raw.as_bytes()) {
+            match key.as_ref() {
+                "page" => page = value.parse::<usize>().unwrap_or(0),
+                "count" => count = value.parse::<usize>().unwrap_or(count).clamp(1, max),
+                _ => {}
+            }
+        }
+    }
+    Pagination { count, page }
+}
+
+fn optional_auth_pubkey(
+    required: bool,
+    headers: &HeaderMap,
+    method: &str,
+    url: &str,
+    payload_hash_hex: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    let has_auth = headers.contains_key(header::AUTHORIZATION);
+    if !required && !has_auth {
+        return Ok(None);
+    }
+    Ok(Some(nip98::verify_http_auth(
+        headers,
+        method,
+        url,
+        payload_hash_hex,
+    )?))
+}
+
+fn blossom_optional_auth(
+    required: bool,
+    headers: &HeaderMap,
+    action: BlossomAction,
+    host_domain: &str,
+) -> anyhow::Result<Option<VerifiedAuth>> {
+    let has_auth = headers.contains_key(header::AUTHORIZATION);
+    if !required && !has_auth {
+        return Ok(None);
+    }
+    Ok(Some(blossom::verify_auth(headers, action, host_domain)?))
+}
+
+fn validate_upload_requirements(
+    settings: &Settings,
+    hash: &str,
+    mime: &str,
+    length: u64,
+) -> anyhow::Result<()> {
+    if !is_valid_hash(hash) {
+        return Err(anyhow::anyhow!("invalid: X-SHA-256 must be 64 hex chars"));
+    }
+    if length > settings.file_max_bytes as u64 {
+        return Err(anyhow::anyhow!("blocked: file exceeds max size"));
+    }
+    if !settings.file_mime_allowed(mime) {
+        return Err(anyhow::anyhow!("blocked: MIME type not allowed"));
+    }
+    if !settings.file_hash_allowed(hash) {
+        return Err(anyhow::anyhow!("blocked: file hash denylisted"));
+    }
+    Ok(())
+}
+
+fn optional_u64_field(
+    fields: &std::collections::HashMap<String, String>,
+    name: &str,
+) -> anyhow::Result<Option<u64>> {
+    match fields.get(name) {
+        Some(value) if value.trim().is_empty() => Ok(None),
+        Some(value) => value
+            .parse::<u64>()
+            .map(Some)
+            .map_err(|_| anyhow::anyhow!("invalid: field {name} must be a unix timestamp")),
+        None => Ok(None),
+    }
+}
+
+fn blob_to_nip94_event(
+    info: &BlobInfo,
+    meta: &BlobMeta,
+    fields: &std::collections::HashMap<String, String>,
+) -> Nip94EventDoc {
+    let mut tags = files::nip94_tags(info);
+    if let Some(expires_at) = meta.expires_at {
+        tags.push(vec!["expiration".into(), expires_at.to_string()]);
+    }
+    if let Some(alt) = fields.get("alt").filter(|value| !value.trim().is_empty()) {
+        tags.push(vec!["alt".into(), alt.clone()]);
+    }
+    tags.push(vec!["service".into(), "NIP-96".into()]);
+    Nip94EventDoc {
+        tags,
+        content: fields.get("caption").cloned().unwrap_or_default(),
+        created_at: meta.uploaded_at,
+    }
+}
+
+fn request_absolute_url(headers: &HeaderMap, uri: &Uri) -> String {
+    let scheme = forwarded_value(headers, "x-forwarded-proto").unwrap_or("http");
+    let host = forwarded_value(headers, "x-forwarded-host")
+        .or_else(|| forwarded_value(headers, header::HOST.as_str()))
+        .unwrap_or("localhost");
+    let path = uri
+        .path_and_query()
+        .map(axum::http::uri::PathAndQuery::as_str)
+        .unwrap_or("/");
+    format!("{scheme}://{host}{path}")
+}
+
+fn advertised_file_api_url(headers: &HeaderMap, settings: &Settings) -> String {
+    settings
+        .file_api_url
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}/files", request_origin(headers)))
+}
+
+fn advertised_blossom_origin(headers: &HeaderMap, settings: &Settings) -> String {
+    settings
+        .blossom_public_url
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| request_origin(headers))
+}
+
+fn request_origin(headers: &HeaderMap) -> String {
+    let scheme = forwarded_value(headers, "x-forwarded-proto").unwrap_or("http");
+    let host = forwarded_value(headers, "x-forwarded-host")
+        .or_else(|| forwarded_value(headers, header::HOST.as_str()))
+        .unwrap_or("localhost");
+    format!("{scheme}://{host}")
+}
+
+fn request_host_domain(headers: &HeaderMap) -> String {
+    let raw = forwarded_value(headers, "x-forwarded-host")
+        .or_else(|| forwarded_value(headers, header::HOST.as_str()))
+        .unwrap_or("localhost");
+    Url::parse(&format!("http://{raw}"))
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .unwrap_or_else(|| raw.split(':').next().unwrap_or("localhost").to_string())
+        .to_ascii_lowercase()
+}
+
+fn forwarded_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_blob_id(blob_id: &str) -> anyhow::Result<String> {
+    let hash = blob_id
+        .split_once('.')
+        .map(|(hash, _)| hash)
+        .unwrap_or(blob_id)
+        .trim();
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(anyhow::anyhow!("invalid: blob id must be a 64-byte hex sha256"));
+    }
+    Ok(hash.to_ascii_lowercase())
+}
+
+fn is_valid_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn temp_upload_path(state: &AppState) -> PathBuf {
+    state
+        .store
+        .files()
+        .temp_dir()
+        .join(format!("upload-{}-{}", std::process::id(), now_nanos()))
+}
+
+async fn write_request_body_to_temp(
+    request: Request,
+    temp_path: &std::path::Path,
+    max_bytes: usize,
+) -> anyhow::Result<usize> {
+    let file = tokio::fs::File::create(temp_path).await?;
+    let mut writer = tokio::io::BufWriter::new(file);
+    let mut stream = request.into_body().into_data_stream();
+    let mut written = 0usize;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        written += chunk.len();
+        if written > max_bytes {
+            return Err(anyhow::anyhow!("blocked: file exceeds max size"));
+        }
+        writer.write_all(&chunk).await?;
+    }
+    writer.flush().await?;
+    Ok(written)
+}
+
+fn header_string(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn filename_from_url(url: &Url) -> Option<String> {
+    url.path_segments()
+        .and_then(|mut segments| segments.next_back())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn sanitized_filename(name: &str) -> String {
+    name.chars()
+        .map(|ch| match ch {
+            '"' | '\\' | '\n' | '\r' => '_',
+            _ => ch,
+        })
+        .collect()
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+fn status_for_file_error(error: &anyhow::Error) -> StatusCode {
+    let message = error.to_string();
+    if message.contains("max size") {
+        StatusCode::PAYLOAD_TOO_LARGE
+    } else if message.contains("missing Authorization")
+        || message.contains("unsupported Authorization")
+        || message.contains("auth ")
+    {
+        StatusCode::UNAUTHORIZED
+    } else if message.starts_with("invalid:") {
+        StatusCode::BAD_REQUEST
+    } else if message.starts_with("blocked:") {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+fn json_response<T: Serialize>(status: StatusCode, payload: T) -> axum::response::Response {
+    let body = serde_json::to_vec(&payload).unwrap();
+    Response::builder()
+        .status(status)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("Authorization, Content-Type"),
+        )
+        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
+        .body(Body::from(body))
+        .unwrap()
+}
+
+fn blossom_json_response<T: Serialize>(status: StatusCode, payload: T) -> axum::response::Response {
+    let body = serde_json::to_vec(&payload).unwrap();
+    Response::builder()
+        .status(status)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static(
+                "Authorization, Content-Type, Content-Length, X-Content-Length, X-Content-Type, X-SHA-256",
+            ),
+        )
+        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
+        .body(Body::from(body))
+        .unwrap()
+}
+
+fn blossom_head_ok(reason: &str) -> axum::response::Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static(
+                "Authorization, Content-Type, Content-Length, X-Content-Length, X-Content-Type, X-SHA-256",
+            ),
+        )
+        .header("X-Reason", reason)
+        .body(Body::empty())
+        .unwrap()
+}
+
+fn file_api_error(status: StatusCode, message: &str) -> axum::response::Response {
+    json_response(
+        status,
+        FileApiResponse {
+            status: "error".into(),
+            message: message.into(),
+            nip94_event: None,
+            processing_url: None,
+        },
+    )
+}
+
+fn internal_file_api_error(error: anyhow::Error) -> axum::response::Response {
+    file_api_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string())
+}
+
+fn blossom_error(status: StatusCode, message: &str) -> axum::response::Response {
+    Response::builder()
+        .status(status)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static(
+                "Authorization, Content-Type, Content-Length, X-Content-Length, X-Content-Type, X-SHA-256",
+            ),
+        )
+        .header("X-Reason", message)
+        .body(Body::from(message.to_string()))
+        .unwrap()
+}
+
 fn unix_now() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -411,7 +1684,7 @@ fn mirror_status_is_healthy(status: &MirrorStatus, now: u64) -> bool {
 mod tests {
     use super::*;
     use crate::{event::Event, mirror::{MirrorStatus, write_status}};
-    use reqwest::{self, header::ACCESS_CONTROL_ALLOW_ORIGIN};
+    use reqwest::{self, header::ACCESS_CONTROL_ALLOW_ORIGIN, multipart::{Form, Part}};
     use tempfile::TempDir;
     use tokio::task;
 
@@ -448,6 +1721,10 @@ mod tests {
             support_nip40: true,
             support_nip45: true,
             support_nip50: true,
+            support_nip94: true,
+            support_nip96: true,
+            support_nip98: true,
+            support_nip_b7: true,
             filter_private_messages: true,
             relays_upstream: vec![],
             tor_socks: None,
@@ -469,6 +1746,22 @@ mod tests {
             max_queries_per_window: None,
             max_counts_per_window: None,
             max_publishes_per_window: None,
+            enable_file_metadata: true,
+            enable_file_api: true,
+            enable_blossom: true,
+            enable_blossom_list: true,
+            enable_blossom_mirror: false,
+            require_nip98_auth: false,
+            require_blossom_auth: false,
+            require_blossom_get_auth: false,
+            file_api_url: None,
+            blossom_public_url: None,
+            file_max_bytes: 32 * 1024 * 1024,
+            file_allowed_mime: None,
+            file_blocked_mime: None,
+            file_hash_denylist: None,
+            file_keep_mode: crate::config::FileKeepMode::Referenced,
+            max_blob_bytes_per_pubkey: None,
         }
     }
 
@@ -570,7 +1863,7 @@ mod tests {
         let info: super::RelayInfo = resp.json().await.unwrap();
         assert_eq!(info.name, "stonr");
         assert_eq!(info.description, "File-backed Nostr relay");
-        assert_eq!(info.supported_nips, vec![11, 9, 12, 40, 45, 50]);
+        assert_eq!(info.supported_nips, vec![11, 9, 12, 40, 45, 50, 94, 96, 98]);
         handle.abort();
     }
 
@@ -594,6 +1887,109 @@ mod tests {
         let url = format!("http://{}/", addr);
         let resp = reqwest::get(&url).await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn nip96_info_endpoint_reports_file_policy() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.require_nip98_auth = true;
+        settings.file_allowed_mime = Some(vec!["image/*".into(), "application/pdf".into()]);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/.well-known/nostr/nip96.json", get(super::nip96_info))
+            .with_state(Arc::new(AppState { store, settings }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/.well-known/nostr/nip96.json", addr);
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let body: super::Nip96Info = resp.json().await.unwrap();
+        assert_eq!(body.api_url, format!("http://{addr}/files"));
+        assert_eq!(body.supported_nips, vec![98]);
+        assert!(body.plans["free"].is_nip98_required);
+        assert_eq!(
+            body.content_types.unwrap(),
+            vec!["application/pdf".to_string(), "image/*".to_string()]
+        );
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn file_api_upload_and_download_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/files", options(super::cors_preflight).post(super::upload_file))
+            .route("/files/:blob_id", get(super::download_file))
+            .with_state(test_state(store, dir.path()));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let upload_url = format!("http://{addr}/files");
+        let form = Form::new().part(
+            "file",
+            Part::bytes(b"hello world".to_vec())
+                .file_name("hello.txt")
+                .mime_str("text/plain")
+                .unwrap(),
+        );
+        let response = client.post(&upload_url).multipart(form).send().await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+        let body: super::FileApiResponse = response.json().await.unwrap();
+        let hash = body
+            .nip94_event
+            .unwrap()
+            .tags
+            .into_iter()
+            .find(|tag| tag.first().map(String::as_str) == Some("x"))
+            .and_then(|tag| tag.get(1).cloned())
+            .unwrap();
+
+        let download_url = format!("http://{addr}/files/{hash}");
+        let response = client.get(&download_url).send().await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            response.headers().get(reqwest::header::CONTENT_TYPE).unwrap(),
+            "text/plain"
+        );
+        assert_eq!(response.bytes().await.unwrap().as_ref(), b"hello world");
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn file_owner_routes_require_nip98_support() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let mut settings = test_settings(dir.path());
+        settings.support_nip98 = false;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/files", get(super::list_files))
+            .with_state(Arc::new(AppState { store, settings }));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let response = reqwest::get(&format!("http://{addr}/files")).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+        assert!(response.text().await.unwrap().contains("NIP-98 auth support disabled"));
         handle.abort();
     }
 

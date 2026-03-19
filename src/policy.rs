@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use serde_json::to_vec;
 use sha1::{Digest, Sha1};
 
-use crate::{config::Settings, event::Event, storage::Query};
+use crate::{config::Settings, event::Event, files::FileStore, storage::Query};
 
 #[derive(Clone, Copy)]
 pub enum RateLimitAction {
@@ -101,6 +101,19 @@ pub fn validate_event(settings: &Settings, event: &Event, now: u64) -> Result<()
         if event.created_at > now.saturating_add(max_event_future_secs) {
             return Err(anyhow!("event is too far in the future"));
         }
+    }
+    Ok(())
+}
+
+pub fn validate_event_with_files(
+    settings: &Settings,
+    file_store: &FileStore,
+    event: &Event,
+    now: u64,
+) -> Result<()> {
+    validate_event(settings, event, now)?;
+    if event.kind == 1063 {
+        file_store.validate_metadata_event(event, settings)?;
     }
     Ok(())
 }
@@ -227,6 +240,10 @@ mod tests {
             support_nip40: true,
             support_nip45: true,
             support_nip50: true,
+            support_nip94: true,
+            support_nip96: true,
+            support_nip98: true,
+            support_nip_b7: true,
             filter_private_messages: true,
             relays_upstream: vec![],
             tor_socks: None,
@@ -248,6 +265,22 @@ mod tests {
             max_queries_per_window: None,
             max_counts_per_window: None,
             max_publishes_per_window: None,
+            enable_file_metadata: true,
+            enable_file_api: true,
+            enable_blossom: true,
+            enable_blossom_list: true,
+            enable_blossom_mirror: false,
+            require_nip98_auth: false,
+            require_blossom_auth: false,
+            require_blossom_get_auth: false,
+            file_api_url: None,
+            blossom_public_url: None,
+            file_max_bytes: 32 * 1024 * 1024,
+            file_allowed_mime: None,
+            file_blocked_mime: None,
+            file_hash_denylist: None,
+            file_keep_mode: crate::config::FileKeepMode::Referenced,
+            max_blob_bytes_per_pubkey: None,
         }
     }
 
