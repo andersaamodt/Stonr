@@ -177,6 +177,7 @@ fn cli_help_lists_commands() {
         "backup",
         "restore",
         "print-service",
+        "print-proxy",
         "prune-retention",
         "verify",
     ] {
@@ -449,4 +450,59 @@ fn print_service_launchd_contains_program_arguments() {
     assert!(text.contains("<string>--env</string>"));
     assert!(text.contains("<string>serve</string>"));
     assert!(text.contains("dev.stonr.prod"));
+}
+
+#[test]
+fn print_proxy_caddy_contains_http_and_ws_upstreams() {
+    let dir = TempDir::new().unwrap();
+    let env_path = dir.path().join("env");
+    fs::write(
+        &env_path,
+        format!(
+            "STORE_ROOT={}\nBIND_HTTP=127.0.0.1:7777\nBIND_WS=127.0.0.1:7778\nVERIFY_SIG=0\n",
+            dir.path().display()
+        ),
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            env_path.to_str().unwrap(),
+            "print-proxy",
+            "--manager",
+            "caddy",
+            "--domain",
+            "relay.example.com",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("relay.example.com"));
+    assert!(text.contains("reverse_proxy @websocket 127.0.0.1:7778"));
+    assert!(text.contains("reverse_proxy 127.0.0.1:7777"));
+}
+
+#[test]
+fn print_proxy_nginx_requires_tls_paths() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+
+    Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "print-proxy",
+            "--manager",
+            "nginx",
+            "--domain",
+            "relay.example.com",
+        ])
+        .assert()
+        .failure();
 }

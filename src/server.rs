@@ -41,6 +41,13 @@ struct Health {
     last_mirror_success_at: Option<u64>,
 }
 
+/// Response body for the `/readyz` endpoint.
+#[derive(Serialize, Deserialize)]
+struct Readiness {
+    status: String,
+    issues: Vec<String>,
+}
+
 /// Response body for the `/count` endpoint.
 #[derive(Serialize, Deserialize)]
 struct CountResponse {
@@ -133,6 +140,7 @@ pub async fn serve_http(
     let app = Router::new()
         .route("/", get(relay_info))
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .route("/retention-health", get(retention_health))
         .route("/mirror-health", get(mirror_health))
         .route("/query", get(query))
@@ -180,6 +188,24 @@ async fn healthz(State(state): State<Arc<AppState>>) -> Json<Health> {
     })
 }
 
+async fn readyz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let issues = readiness_issues(&state);
+    let status = if issues.is_empty() {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    let body = Readiness {
+        status: if status == StatusCode::OK {
+            "ready".into()
+        } else {
+            "not-ready".into()
+        },
+        issues,
+    };
+    (status, Json(body))
+}
+
 async fn mirror_health(State(state): State<Arc<AppState>>) -> Json<MirrorHealth> {
     let now = unix_now();
     let statuses = read_statuses(&state.settings.store_root).unwrap_or_default();
@@ -212,6 +238,31 @@ async fn mirror_health(State(state): State<Arc<AppState>>) -> Json<MirrorHealth>
         healthy,
         mirrors,
     })
+}
+
+fn readiness_issues(state: &AppState) -> Vec<String> {
+    let mut issues = Vec::new();
+    for rel in ["events", "log", "latest", "index", "cursor", "runtime"] {
+        let path = state.settings.store_root.join(rel);
+        if !path.is_dir() {
+            issues.push(format!("missing store path: {rel}"));
+        }
+    }
+    if state.settings.file_metadata_enabled()
+        || state.settings.file_api_enabled()
+        || state.settings.blossom_enabled()
+    {
+        for rel in ["files/blobs", "files/meta", "files/refs", "files/tmp", "files/quarantine"] {
+            let path = state.settings.store_root.join(rel);
+            if !path.is_dir() {
+                issues.push(format!("missing file path: {rel}"));
+            }
+        }
+    }
+    if let Err(error) = state.store.retention_status() {
+        issues.push(format!("retention status unreadable: {error}"));
+    }
+    issues
 }
 
 async fn retention_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -1820,6 +1871,55 @@ mod tests {
         assert_eq!(body.mirrors_total, 0);
         assert_eq!(body.mirrors_healthy, 0);
         assert!(body.last_mirror_success_at.is_none());
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ready_endpoint_reports_ready_for_initialized_store() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/readyz", get(super::readyz))
+            .with_state(test_state(store, dir.path()));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/readyz", addr);
+        let resp = reqwest::get(&url).await.unwrap();
+        let status = resp.status();
+        let body: super::Readiness = resp.json().await.unwrap();
+        assert_eq!(status, reqwest::StatusCode::OK);
+        assert_eq!(body.status, "ready");
+        assert!(body.issues.is_empty());
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ready_endpoint_reports_missing_store_paths() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/readyz", get(super::readyz))
+            .with_state(test_state(store, dir.path()));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = task::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("http://{}/readyz", addr);
+        let resp = reqwest::get(&url).await.unwrap();
+        let status = resp.status();
+        let body: super::Readiness = resp.json().await.unwrap();
+        assert_eq!(status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body.status, "not-ready");
+        assert!(body.issues.iter().any(|issue| issue.contains("missing store path: events")));
         handle.abort();
     }
 

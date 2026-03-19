@@ -9,6 +9,12 @@ pub enum ServiceManager {
     Launchd,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ProxyManager {
+    Caddy,
+    Nginx,
+}
+
 pub fn render_service(
     manager: ServiceManager,
     label: &str,
@@ -19,6 +25,20 @@ pub fn render_service(
     Ok(match manager {
         ServiceManager::Systemd => render_systemd_service(label, exec_path, env_path, working_dir),
         ServiceManager::Launchd => render_launchd_service(label, exec_path, env_path, working_dir),
+    })
+}
+
+pub fn render_proxy(
+    manager: ProxyManager,
+    domain: &str,
+    http_upstream: &str,
+    ws_upstream: &str,
+    tls_cert: Option<&str>,
+    tls_key: Option<&str>,
+) -> Result<String> {
+    Ok(match manager {
+        ProxyManager::Caddy => render_caddy_proxy(domain, http_upstream, ws_upstream),
+        ProxyManager::Nginx => render_nginx_proxy(domain, http_upstream, ws_upstream, tls_cert, tls_key)?,
     })
 }
 
@@ -73,6 +93,34 @@ fn render_launchd_service(
     )
 }
 
+fn render_caddy_proxy(domain: &str, http_upstream: &str, ws_upstream: &str) -> String {
+    format!(
+        "{domain} {{\n  encode zstd gzip\n\n  @websocket {{\n    header Connection *Upgrade*\n    header Upgrade websocket\n  }}\n\n  reverse_proxy @websocket {ws_upstream}\n  reverse_proxy {http_upstream}\n\n  header {{\n    Strict-Transport-Security \"max-age=31536000; includeSubDomains; preload\"\n  }}\n}}\n",
+        domain = domain,
+        http_upstream = http_upstream,
+        ws_upstream = ws_upstream,
+    )
+}
+
+fn render_nginx_proxy(
+    domain: &str,
+    http_upstream: &str,
+    ws_upstream: &str,
+    tls_cert: Option<&str>,
+    tls_key: Option<&str>,
+) -> Result<String> {
+    let tls_cert = tls_cert.ok_or_else(|| anyhow::anyhow!("--tls-cert is required for nginx"))?;
+    let tls_key = tls_key.ok_or_else(|| anyhow::anyhow!("--tls-key is required for nginx"))?;
+    Ok(format!(
+        "map $http_upgrade $stonr_connection_upgrade {{\n    default upgrade;\n    '' close;\n}}\n\nmap $http_upgrade $stonr_upstream {{\n    default {ws_upstream};\n    '' {http_upstream};\n}}\n\nserver {{\n    listen 443 ssl http2;\n    server_name {domain};\n\n    ssl_certificate {tls_cert};\n    ssl_certificate_key {tls_key};\n\n    location / {{\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto https;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $stonr_connection_upgrade;\n        proxy_pass http://$stonr_upstream;\n    }}\n}}\n",
+        domain = domain,
+        http_upstream = http_upstream,
+        ws_upstream = ws_upstream,
+        tls_cert = tls_cert,
+        tls_key = tls_key,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +153,52 @@ mod tests {
         assert!(output.contains("<key>ProgramArguments</key>"));
         assert!(output.contains("Stonr &amp; Relay.app"));
         assert!(output.contains("<string>serve</string>"));
+    }
+
+    #[test]
+    fn caddy_proxy_routes_websocket_and_http() {
+        let output = render_proxy(
+            ProxyManager::Caddy,
+            "relay.example.com",
+            "127.0.0.1:7777",
+            "127.0.0.1:7778",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(output.contains("@websocket"));
+        assert!(output.contains("reverse_proxy @websocket 127.0.0.1:7778"));
+        assert!(output.contains("reverse_proxy 127.0.0.1:7777"));
+    }
+
+    #[test]
+    fn nginx_proxy_requires_tls_paths() {
+        let error = render_proxy(
+            ProxyManager::Nginx,
+            "relay.example.com",
+            "127.0.0.1:7777",
+            "127.0.0.1:7778",
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("--tls-cert"));
+    }
+
+    #[test]
+    fn nginx_proxy_includes_tls_and_upgrade_routing() {
+        let output = render_proxy(
+            ProxyManager::Nginx,
+            "relay.example.com",
+            "127.0.0.1:7777",
+            "127.0.0.1:7778",
+            Some("/etc/letsencrypt/live/relay.example.com/fullchain.pem"),
+            Some("/etc/letsencrypt/live/relay.example.com/privkey.pem"),
+        )
+        .unwrap();
+        assert!(output.contains("map $http_upgrade $stonr_upstream"));
+        assert!(output.contains("default 127.0.0.1:7778;"));
+        assert!(output.contains("'' 127.0.0.1:7777;"));
+        assert!(output.contains("ssl_certificate /etc/letsencrypt/live/relay.example.com/fullchain.pem;"));
     }
 }

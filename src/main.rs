@@ -20,7 +20,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use clap::{Parser, Subcommand};
 use config::Settings;
-use deploy::ServiceManager;
+use deploy::{ProxyManager, ServiceManager};
 use policy::{apply_query_policy, current_unix_ts, validate_event_with_files};
 use serde_json::Value;
 use storage::Store;
@@ -108,6 +108,17 @@ enum Commands {
         manager: ServiceManager,
         #[arg(long, default_value = "stonr")]
         label: String,
+    },
+    /// Print a reverse-proxy config that fronts the HTTP and WS ports together.
+    PrintProxy {
+        #[arg(long, value_enum)]
+        manager: ProxyManager,
+        #[arg(long)]
+        domain: String,
+        #[arg(long)]
+        tls_cert: Option<String>,
+        #[arg(long)]
+        tls_key: Option<String>,
     },
     /// Apply store retention limits immediately.
     PruneRetention,
@@ -360,6 +371,22 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 &exec_path,
                 &env_path,
                 &cfg.store_root,
+            )?;
+            print!("{rendered}");
+        }
+        Commands::PrintProxy {
+            manager,
+            domain,
+            tls_cert,
+            tls_key,
+        } => {
+            let rendered = crate::deploy::render_proxy(
+                manager,
+                &domain,
+                &cfg.bind_http,
+                &cfg.bind_ws,
+                tls_cert.as_deref(),
+                tls_key.as_deref(),
             )?;
             print!("{rendered}");
         }
