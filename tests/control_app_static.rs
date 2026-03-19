@@ -34,6 +34,7 @@ fn checkbox_labels_are_click_targets() {
     let style_css = read_file(&format!("{}/app/style.css", env!("CARGO_MANIFEST_DIR")));
     assert!(app_js.contains("function bindCheckboxLabel(label, input)"));
     assert!(app_js.contains("label.htmlFor = inputId;"));
+    assert!(app_js.contains("if (checked) {\n          state.backgroundMode = true;\n        }"));
     assert!(style_css.contains(".field.checkbox-field label {"));
     assert!(style_css.contains("cursor: pointer;"));
 }

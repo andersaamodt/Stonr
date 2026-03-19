@@ -1277,9 +1277,11 @@
       state.menuBarIcon,
       function (checked) {
         state.menuBarIcon = checked;
+        if (checked) {
+          state.backgroundMode = true;
+        }
       },
-      'Show a menu bar or tray icon so you can reopen the window or quit while the relay keeps running.',
-      !state.backgroundMode
+      'Show a menu bar or tray icon so you can reopen the window or quit while the relay keeps running.'
     ));
 
     card.appendChild(grid);
