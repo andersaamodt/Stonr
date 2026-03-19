@@ -1068,6 +1068,7 @@
         wrap.appendChild(nipPill);
       }
       wrap.appendChild(label);
+      bindCheckboxLabel(label, input);
       if (nipSummary) {
         wrap.appendChild(nipSummary);
       }
@@ -1143,6 +1144,19 @@
     label.htmlFor = field.envKey;
     label.title = helpText;
     return label;
+  }
+
+  function bindCheckboxLabel(label, input) {
+    if (!label || !input || label.tagName !== 'LABEL') {
+      return;
+    }
+    label.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (input.disabled) {
+        return;
+      }
+      input.click();
+    });
   }
 
   function createFieldNipSummary(field, sectionId) {
@@ -1278,14 +1292,21 @@
     if (forceDisabled) {
       wrap.classList.add('field-disabled');
     }
+    var inputId = 'desktop-toggle-' + String(labelText || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
     var input = document.createElement('input');
     input.type = 'checkbox';
+    input.id = inputId;
     input.checked = !!checked;
     input.disabled = !state.bridge || !!forceDisabled;
     var label = document.createElement('label');
+    label.htmlFor = inputId;
     label.textContent = labelText;
     label.title = helpText;
     input.title = helpText;
+    bindCheckboxLabel(label, input);
     input.addEventListener('change', function () {
       onChange(input.checked);
       saveDesktopPrefs().then(function () {
