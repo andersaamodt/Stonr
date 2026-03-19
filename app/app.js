@@ -41,6 +41,11 @@
     events: [],
     eventsTotal: 0,
     eventsBytes: 0,
+    diagnosticsLoading: false,
+    diagnosticsLoadedOnce: false,
+    diagnosticsMirror: [],
+    diagnosticsRetention: null,
+    diagnosticsError: '',
     backgroundMode: false,
     menuBarIcon: false,
     moderationLists: {
