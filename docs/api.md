@@ -7,6 +7,10 @@ stonr exposes a minimal HTTP and WebSocket interface compatible with NIP-01.
 ### `GET /healthz`
 Returns `{ "status": "ok" }` when the relay is running.
 
+### `GET /retention-health`
+Returns structured retention status, including current stored event count/bytes,
+configured caps, and the most recent prune/error state.
+
 ### `GET /query`
 Returns matching events as newline-delimited JSON (NDJSON).
 Parameters mirror Nostr filter fields:

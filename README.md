@@ -40,7 +40,8 @@ curl "http://localhost:7777/query?authors=npub1&kinds=1"
 
 See [docs/api.md](docs/api.md) for HTTP and WebSocket details,
 [docs/mirroring.md](docs/mirroring.md) for mirroring setups, and
-[docs/onion.md](docs/onion.md) for Tor deployment.
+[docs/onion.md](docs/onion.md) for Tor deployment. Operational backup,
+restore, and retention guidance lives in [docs/operations.md](docs/operations.md).
 
 ## Configuration
 Runtime settings are read from a `.env` file:
@@ -75,6 +76,9 @@ FILTER_SINCE_MODE=cursor
 stonr init --env .env
 stonr ingest events/*.json
 stonr reindex --env .env
+stonr retention-status --env .env
+stonr backup --env .env --destination /tmp/stonr-backup
+stonr restore --env .env --source /tmp/stonr-backup
 stonr serve --env .env
 stonr verify --env .env --sample 1000
 ```

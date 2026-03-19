@@ -61,8 +61,8 @@ This checklist tracks the real backend state, not just what the desktop app expo
 - [x] Event-size, oldest-event, and future-skew safety checks enforced on publish, mirror ingest, and CLI ingest
 - [x] File-backed read/count/publish rate limits enforced on HTTP and WebSocket client surfaces
 - [x] Stats cache refresh from the real event tree
-- [ ] Clear operator warnings/metrics when retention is not meeting expectations
-- [ ] Backup/restore documentation and tested operational workflow
+- [x] Clear operator warnings/metrics when retention is not meeting expectations
+- [x] Backup/restore documentation and tested operational workflow
 
 ## Desktop Control App
 
