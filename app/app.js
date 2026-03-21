@@ -449,6 +449,7 @@
         console.error(error);
       });
     });
+    document.addEventListener('keydown', handleGlobalKeydown, true);
     renderSectionList();
     startRefreshLoop();
     loadAll();
@@ -484,6 +485,33 @@
         console.error(error);
       });
     }
+  }
+
+  function handleGlobalKeydown(event) {
+    if (!event || event.defaultPrevented) {
+      return;
+    }
+    if (event.key !== 'Tab' || !event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+    event.preventDefault();
+    cycleSection(event.shiftKey ? -1 : 1);
+  }
+
+  function cycleSection(direction) {
+    var total = sections.length;
+    if (!total) {
+      return;
+    }
+    var currentIndex = sections.findIndex(function (section) {
+      return section.id === state.activeSection;
+    });
+    if (currentIndex < 0) {
+      currentIndex = 0;
+    }
+    var delta = direction < 0 ? -1 : 1;
+    var nextIndex = (currentIndex + delta + total) % total;
+    setActiveSection(sections[nextIndex].id, true);
   }
 
   function inferAppDir() {
