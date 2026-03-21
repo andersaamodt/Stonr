@@ -385,7 +385,6 @@
     runtimePanel: document.querySelector('.runtime-panel'),
     runtimeGrid: document.getElementById('runtime-grid'),
     relayPill: document.getElementById('relay-pill'),
-    activeEyebrow: document.getElementById('active-eyebrow'),
     activeTitle: document.getElementById('active-title'),
     activeSubtitle: document.getElementById('active-subtitle'),
     toast: document.getElementById('toast'),
@@ -969,7 +968,6 @@
     var section = sections.find(function (item) {
       return item.id === state.activeSection;
     }) || sections[0];
-    els.activeEyebrow.textContent = section.eyebrow;
     els.activeTitle.textContent = section.title;
     els.activeSubtitle.hidden = true;
     els.activeSubtitle.textContent = '';

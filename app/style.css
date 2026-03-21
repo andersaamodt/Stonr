@@ -587,16 +587,11 @@ h4 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
-    "eyebrow actions"
     "title actions"
     "subtitle actions";
   gap: 0.25rem 0.85rem;
   align-items: start;
   padding: 0.15rem 0 0;
-}
-
-#active-eyebrow {
-  grid-area: eyebrow;
 }
 
 #active-title {
