@@ -666,7 +666,7 @@
       return;
     }
     var hostState = await readHostStatusItemState();
-    if (matchesBool(hostState.has_status_item || '')) {
+    if (hostStatusItemHealthy(hostState)) {
       return;
     }
     await new Promise(function (resolve) {
@@ -674,9 +674,19 @@
     });
     await execArgv(argv);
     hostState = await readHostStatusItemState();
-    if (!matchesBool(hostState.has_status_item || '')) {
+    if (!hostStatusItemHealthy(hostState)) {
       toast('Menu bar icon did not activate in host.', 'bad');
     }
+  }
+
+  function hostStatusItemHealthy(hostState) {
+    if (!hostState || typeof hostState !== 'object') {
+      return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(hostState, 'status_item_rendered')) {
+      return matchesBool(hostState.status_item_rendered || '');
+    }
+    return matchesBool(hostState.has_status_item || '');
   }
 
   async function readHostStatusItemState() {
