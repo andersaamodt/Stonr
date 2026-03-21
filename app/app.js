@@ -405,6 +405,9 @@
 
   function init() {
     state.bridge = bridgeAvailable();
+    window.stonrHostAction = function (actionName) {
+      handleHostAction(actionName);
+    };
     [els.envPath, els.relayToggle, els.openStoreRoot].forEach(function (button) {
       button.disabled = !state.bridge;
     });
@@ -449,6 +452,38 @@
     renderSectionList();
     startRefreshLoop();
     loadAll();
+  }
+
+  function handleHostAction(actionName) {
+    var action = String(actionName || '').trim().toLowerCase();
+    if (!action) {
+      return;
+    }
+    if (action === 'refresh') {
+      refreshLiveState().catch(function (error) {
+        console.error(error);
+      });
+      return;
+    }
+    if (action === 'show-events') {
+      setActiveSection('events', true);
+      return;
+    }
+    if (action === 'show-relay') {
+      setActiveSection('relay', true);
+      return;
+    }
+    if (action === 'open-store-root') {
+      openStoreRoot().catch(function (error) {
+        console.error(error);
+      });
+      return;
+    }
+    if (action === 'toggle-relay') {
+      runRelayToggle().catch(function (error) {
+        console.error(error);
+      });
+    }
   }
 
   function inferAppDir() {
@@ -757,6 +792,21 @@
     }
   }
 
+  function setActiveSection(sectionId, resetScroll) {
+    var section = sections.find(function (item) {
+      return item.id === sectionId;
+    });
+    if (!section) {
+      return;
+    }
+    state.activeSection = section.id;
+    renderSectionList();
+    renderActiveSection(resetScroll !== false);
+    if (section.id === 'diagnostics') {
+      queueDiagnosticsLoad();
+    }
+  }
+
   function renderSectionList() {
     els.sectionList.innerHTML = '';
     sections.forEach(function (section) {
@@ -767,12 +817,7 @@
       button.setAttribute('aria-selected', state.activeSection === section.id ? 'true' : 'false');
       button.textContent = section.label;
       button.addEventListener('click', function () {
-        state.activeSection = section.id;
-        renderSectionList();
-        renderActiveSection(true);
-        if (section.id === 'diagnostics') {
-          queueDiagnosticsLoad();
-        }
+        setActiveSection(section.id, true);
       });
       els.sectionList.appendChild(button);
     });
