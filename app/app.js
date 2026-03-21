@@ -1005,8 +1005,6 @@
   function renderFieldSection(section) {
     var card = document.createElement('section');
     card.className = 'section-panel autosave-panel';
-    var head = renderCardHead(section.label, '');
-    card.appendChild(head);
 
     var grid = document.createElement('div');
     grid.className = 'field-grid';
