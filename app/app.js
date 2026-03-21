@@ -656,11 +656,36 @@
     if (!state.bridge) {
       return;
     }
-    await execArgv([
+    var argv = [
       '__wizardry_host_set_background_mode',
       state.backgroundMode ? '1' : '0',
       state.menuBarIcon ? '1' : '0'
-    ]);
+    ];
+    await execArgv(argv);
+    if (!state.menuBarIcon) {
+      return;
+    }
+    var hostState = await readHostStatusItemState();
+    if (matchesBool(hostState.has_status_item || '')) {
+      return;
+    }
+    await new Promise(function (resolve) {
+      setTimeout(resolve, 120);
+    });
+    await execArgv(argv);
+    hostState = await readHostStatusItemState();
+    if (!matchesBool(hostState.has_status_item || '')) {
+      toast('Menu bar icon did not activate in host.', 'bad');
+    }
+  }
+
+  async function readHostStatusItemState() {
+    try {
+      var result = await execArgv(['__wizardry_host_status_item_state']);
+      return parseKv(String(result.stdout || ''));
+    } catch (_error) {
+      return {};
+    }
   }
 
   async function loadAll() {
