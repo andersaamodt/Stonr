@@ -90,7 +90,7 @@
         groupField('Identity'),
         textField('RELAY_NAME', 'policy.relay_name', 'Relay name', '', null, null, 'Name shown to clients when they browse or save this relay.'),
         textField('RELAY_DESCRIPTION', 'policy.relay_description', 'Relay description', '', null, null, 'Short summary shown beside the relay name in client UIs.'),
-        groupField('Mirror Mode'),
+        groupField('Relay Mode'),
         radioField('MIRROR_MODE', 'mirror_mode', 'Mirror mode', [
           { value: 'broad', label: 'General relay' },
           { value: 'site', label: 'One-site mirror' }
