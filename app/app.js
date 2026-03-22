@@ -1769,11 +1769,16 @@
   }
 
   function applyInputToState(field, input) {
+    var serialized = serializeInput(field, input);
     if (field.type === 'bool') {
       setConfigValue(field, input.checked);
     } else {
-      setConfigValue(field, serializeInput(field, input));
+      setConfigValue(field, serialized);
     }
+    if (!state.envValues || typeof state.envValues !== 'object') {
+      state.envValues = {};
+    }
+    state.envValues[field.envKey] = serialized;
     state.configEditSeq += 1;
   }
 
