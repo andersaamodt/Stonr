@@ -38,3 +38,11 @@ fn checkbox_labels_are_click_targets() {
     assert!(style_css.contains(".field.checkbox-field label {"));
     assert!(style_css.contains("cursor: pointer;"));
 }
+
+#[test]
+fn splash_uses_stonr_logo_asset() {
+    let index_html = read_file(&format!("{}/app/index.html", env!("CARGO_MANIFEST_DIR")));
+    assert!(index_html.contains("class=\"boot-splash\""));
+    assert!(index_html.contains("assets/icons/web/icon-192.png"));
+    assert!(!index_html.contains("<div class=\"boot-mark\">\n      <svg"));
+}
