@@ -1054,8 +1054,7 @@
     header.innerHTML = [
       '<span class="nip-col nip-col-nip">NIP</span>',
       '<span class="nip-col nip-col-feature">Feature</span>',
-      '<span class="nip-col nip-col-summary">Description</span>',
-      '<span class="nip-col nip-col-enabled">Enabled</span>'
+      '<span class="nip-col nip-col-summary">Description</span>'
     ].join('');
     return header;
   }

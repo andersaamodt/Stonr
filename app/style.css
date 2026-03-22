@@ -993,13 +993,8 @@ h4 {
 }
 
 .field.checkbox-field.nip-master-field {
-  grid-template-columns: max-content minmax(10rem, 12rem) minmax(0, 1fr) auto;
-  grid-template-areas: "pill label summary enabled";
-}
-
-.field.checkbox-field.nip-master-field input {
-  grid-area: enabled;
-  justify-self: end;
+  grid-template-columns: auto max-content minmax(10rem, 12rem) minmax(0, 1fr);
+  grid-template-areas: "input pill label summary";
 }
 
 .field.checkbox-field.has-hint {
@@ -1103,10 +1098,10 @@ h4 {
 .nip-support-head {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: max-content minmax(10rem, 12rem) minmax(0, 1fr) auto;
+  grid-template-columns: max-content minmax(10rem, 12rem) minmax(0, 1fr);
   align-items: center;
   column-gap: 0.7rem;
-  padding: 0 0.35rem 0.2rem 0;
+  padding: 0 0.35rem 0.2rem 1.8rem;
   margin-bottom: -0.2rem;
   border-bottom: 1px solid var(--line);
 }
@@ -1114,10 +1109,6 @@ h4 {
 .nip-col {
   font-size: 0.72rem;
   color: var(--muted);
-}
-
-.nip-col-enabled {
-  justify-self: end;
 }
 
 .field.checkbox-field .hint {
