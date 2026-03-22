@@ -1120,7 +1120,45 @@ h4 {
 .field.checkbox-field.nip-child-field input {
   width: 0.96rem;
   height: 0.96rem;
-  accent-color: color-mix(in srgb, var(--accent) 58%, white);
+  align-self: start;
+  margin-top: 0.06rem;
+}
+
+.field.checkbox-field.nip-child-field input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, white);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--accent) 10%, white);
+  display: grid;
+  place-content: center;
+}
+
+.field.checkbox-field.nip-child-field input[type="checkbox"]::before {
+  content: "";
+  width: 0.56rem;
+  height: 0.56rem;
+  transform: scale(0);
+  clip-path: polygon(14% 52%, 0 66%, 42% 100%, 100% 22%, 84% 8%, 42% 66%);
+  background: color-mix(in srgb, var(--accent) 42%, white);
+}
+
+.field.checkbox-field.nip-child-field input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+
+.field.checkbox-field.nip-child-field input[type="checkbox"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, white);
+  outline-offset: 1px;
+}
+
+.field.checkbox-field.nip-child-field input[type="checkbox"]:disabled {
+  border-color: color-mix(in srgb, var(--line) 65%, white);
+  background: color-mix(in srgb, var(--line) 40%, white);
+}
+
+.field.checkbox-field.nip-child-field input[type="checkbox"]:disabled::before {
+  background: color-mix(in srgb, var(--muted) 40%, white);
 }
 
 .field.checkbox-field.nip-child-field label,
@@ -1128,6 +1166,7 @@ h4 {
 .field.checkbox-field.nip-child-field .field-link {
   min-height: 0.96rem;
   color: color-mix(in srgb, var(--muted) 70%, var(--accent) 30%);
+  align-self: start;
 }
 
 .field.checkbox-field.nip-child-field .checkbox-label-row {
