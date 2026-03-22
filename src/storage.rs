@@ -200,7 +200,10 @@ impl Store {
         for entry in walkdir::WalkDir::new(self.root.join("events")) {
             let entry = entry?;
             if entry.file_type().is_file() {
-                paths.push(entry.into_path());
+                let path = entry.into_path();
+                if Self::is_event_json_file(&path) {
+                    paths.push(path);
+                }
             }
         }
         let mut rng = thread_rng();
@@ -283,7 +286,7 @@ impl Store {
                 continue;
             }
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            if !Self::is_event_json_file(path) {
                 continue;
             }
             match fs::metadata(path) {
@@ -638,7 +641,7 @@ impl Store {
             let entry = entry?;
             if entry.file_type().is_file() {
                 let path = entry.into_path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                if !Self::is_event_json_file(&path) {
                     continue;
                 }
                 let size_bytes = fs::metadata(&path)?.len();
@@ -894,7 +897,7 @@ impl Store {
                 continue;
             }
             let path = entry.into_path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            if !Self::is_event_json_file(&path) {
                 continue;
             }
             let data = match fs::read_to_string(&path) {
@@ -906,6 +909,13 @@ impl Store {
             }
         }
         Ok(events)
+    }
+
+    fn is_event_json_file(path: &Path) -> bool {
+        if path.file_name().and_then(|name| name.to_str()) == Some(".DS_Store") {
+            return false;
+        }
+        path.extension().and_then(|ext| ext.to_str()) == Some("json")
     }
 
     fn filter_sort_and_limit(
@@ -1536,6 +1546,22 @@ mod tests {
         let path = store.event_path(&bad.id);
         fs::write(path, serde_json::to_string(&bad).unwrap()).unwrap();
         assert!(store.verify_sample(10).is_err());
+    }
+
+    #[test]
+    fn verify_sample_ignores_ds_store_files() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let ev1 = signed_event(1);
+        let ev2 = signed_event(2);
+        store.ingest(&ev1).unwrap();
+        store.ingest(&ev2).unwrap();
+        fs::write(dir.path().join("events/.DS_Store"), [0xff, 0xfe]).unwrap();
+        fs::create_dir_all(dir.path().join("events/00")).unwrap();
+        fs::write(dir.path().join("events/00/.DS_Store"), [0xff, 0xfe]).unwrap();
+
+        assert_eq!(store.verify_sample(10).unwrap(), 2);
     }
 
     #[test]
