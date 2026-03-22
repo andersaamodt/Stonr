@@ -205,55 +205,6 @@
           'When ON, this relay can run the NIP-42 AUTH challenge flow. When OFF, clients cannot authenticate through relay login.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
-          'ENABLE_NIP42',
-          'policy.enable_nip42',
-          'Enable relay login flow',
-          '',
-          null,
-          'When ON, relay login is active for clients. When OFF, no NIP-42 login session can be established.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'REQUIRE_AUTH_FOR_QUERY',
-          'policy.require_auth_for_query',
-          'Require login for reads',
-          '',
-          relayLoginDependsOn,
-          'When ON, unauthenticated clients cannot read events. When OFF, reads are allowed without login.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'REQUIRE_AUTH_FOR_COUNT',
-          'policy.require_auth_for_count',
-          'Require login for counts',
-          '',
-          relayLoginDependsOn,
-          'When ON, unauthenticated clients cannot run COUNT queries. When OFF, COUNT requests do not require login.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'REQUIRE_AUTH_FOR_PUBLISH',
-          'policy.require_auth_for_publish',
-          'Require login for writes',
-          '',
-          relayLoginDependsOn,
-          'When ON, publishing requires an authenticated login. When OFF, clients can publish without logging in.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'AUTH_MUST_MATCH_EVENT_PUBKEY',
-          'policy.auth_must_match_event_pubkey',
-          'Require writer pubkey to match login',
-          '',
-          relayLoginDependsOn,
-          'When ON, logged-in pubkey must match the event author pubkey. When OFF, logged-in clients may publish for a different pubkey.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(numberField(
-          'AUTH_MAX_AGE_SECS',
-          'policy.auth_max_age_secs',
-          'Maximum login proof age',
-          '',
-          null,
-          relayLoginDependsOn,
-          'Maximum age, in seconds, for an AUTH proof. Older proofs are rejected.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
           'SUPPORT_NIP94',
           'policy.support_nip94',
           'File metadata events',
@@ -261,14 +212,6 @@
           null,
           'When ON, the relay accepts and serves NIP-94 file metadata events. When OFF, file metadata events are not supported.'
         ), { nipMaster: true }),
-        withFieldUi(boolField(
-          'ENABLE_FILE_METADATA',
-          'policy.enable_file_metadata',
-          'Store file metadata records',
-          '',
-          null,
-          'When ON, file metadata events such as kind 1063 are stored and served. When OFF, metadata records are not stored.'
-        ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP96',
           'policy.support_nip96',
@@ -278,23 +221,6 @@
           'When ON, clients can use the legacy NIP-96 `/files` API. When OFF, compatibility uploads and related API routes are disabled.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
-          'ENABLE_FILE_API',
-          'policy.enable_file_api',
-          'Enable compatibility API routes',
-          '',
-          null,
-          'When ON, `/files` compatibility routes are active. When OFF, those routes are not served.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(textField(
-          'FILE_API_URL',
-          'policy.file_api_url',
-          'Compatibility API URL',
-          'Leave blank to use the local default',
-          null,
-          ['ENABLE_FILE_API'],
-          'Public URL clients should use for the `/files` API.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
           'SUPPORT_NIP98',
           'policy.support_nip98',
           'HTTP request authentication',
@@ -303,70 +229,13 @@
           'When ON, the relay can verify signed NIP-98 HTTP auth headers. When OFF, NIP-98 auth verification is disabled.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
-          'REQUIRE_NIP98_AUTH',
-          'policy.require_nip98_auth',
-          'Require auth for compatibility API',
-          '',
-          null,
-          'When ON, compatibility uploads and deletes require valid NIP-98 auth. When OFF, unsigned compatibility API requests are allowed.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
           'SUPPORT_NIP_B7',
           'policy.support_nip_b7',
           'Blossom blob API',
           '',
           null,
           'When ON, clients can use Blossom routes for hash-addressed blobs. When OFF, Blossom API endpoints are disabled.'
-        ), { nipMaster: true }),
-        withFieldUi(boolField(
-          'ENABLE_BLOSSOM',
-          'policy.enable_blossom',
-          'Enable Blossom API routes',
-          '',
-          null,
-          'When ON, Blossom routes accept and serve blobs. When OFF, Blossom endpoints are not served.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'ENABLE_BLOSSOM_LIST',
-          'policy.enable_blossom_list',
-          'Allow owner blob listings',
-          '',
-          ['ENABLE_BLOSSOM'],
-          'When ON, owners can list blobs they own. When OFF, owner list endpoints are disabled.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'ENABLE_BLOSSOM_MIRROR',
-          'policy.enable_blossom_mirror',
-          'Allow remote blob import',
-          '',
-          ['ENABLE_BLOSSOM'],
-          'When ON, the relay may mirror remote blobs into local storage. When OFF, remote mirror import is blocked.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'REQUIRE_BLOSSOM_AUTH',
-          'policy.require_blossom_auth',
-          'Require login for Blossom writes',
-          '',
-          ['ENABLE_BLOSSOM'],
-          'When ON, Blossom uploads, deletes, mirrors, and owner routes require authentication. When OFF, those writes do not require login.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(boolField(
-          'REQUIRE_BLOSSOM_GET_AUTH',
-          'policy.require_blossom_get_auth',
-          'Require login for Blossom downloads',
-          '',
-          ['ENABLE_BLOSSOM'],
-          'When ON, blob download-by-hash requires authentication. When OFF, hash downloads are public.'
-        ), { nipChild: true, hideNipPill: true }),
-        withFieldUi(textField(
-          'BLOSSOM_PUBLIC_URL',
-          'policy.blossom_public_url',
-          'Blossom public URL',
-          'Leave blank to use the local default',
-          null,
-          ['ENABLE_BLOSSOM'],
-          'Public URL clients should use for Blossom routes.'
-        ), { nipChild: true, hideNipPill: true })
+        ), { nipMaster: true })
       ]
     },
     {
@@ -399,9 +268,19 @@
       label: 'Auth',
       eyebrow: 'Auth',
       title: 'Authentication',
-      detail: 'Authentication switches are managed in NIP policies.',
+      detail: 'Relay login and auth requirements for reads, writes, and file APIs.',
       fields: [
-        noteField('Authentication toggles now live in NIP policies under NIP-42, NIP-96, NIP-98, and NIP-B7.')
+        groupField('Relay Login'),
+        boolField('ENABLE_NIP42', 'policy.enable_nip42', 'Enable relay login flow', '', null, 'When ON, relay login is active for clients. When OFF, no NIP-42 login session can be established.'),
+        boolField('REQUIRE_AUTH_FOR_QUERY', 'policy.require_auth_for_query', 'Require login for reads', '', relayLoginDependsOn, 'When ON, unauthenticated clients cannot read events. When OFF, reads are allowed without login.'),
+        boolField('REQUIRE_AUTH_FOR_COUNT', 'policy.require_auth_for_count', 'Require login for counts', '', relayLoginDependsOn, 'When ON, unauthenticated clients cannot run COUNT queries. When OFF, COUNT requests do not require login.'),
+        boolField('REQUIRE_AUTH_FOR_PUBLISH', 'policy.require_auth_for_publish', 'Require login for writes', '', relayLoginDependsOn, 'When ON, publishing requires an authenticated login. When OFF, clients can publish without logging in.'),
+        boolField('AUTH_MUST_MATCH_EVENT_PUBKEY', 'policy.auth_must_match_event_pubkey', 'Require writer pubkey to match login', '', relayLoginDependsOn, 'When ON, logged-in pubkey must match the event author pubkey. When OFF, logged-in clients may publish for a different pubkey.'),
+        numberField('AUTH_MAX_AGE_SECS', 'policy.auth_max_age_secs', 'Maximum login proof age', '', null, relayLoginDependsOn, 'Maximum age, in seconds, for an AUTH proof. Older proofs are rejected.'),
+        groupField('HTTP And Blob Auth'),
+        boolField('REQUIRE_NIP98_AUTH', 'policy.require_nip98_auth', 'Require auth for compatibility API', '', null, 'When ON, compatibility uploads and deletes require valid NIP-98 auth. When OFF, unsigned compatibility API requests are allowed.'),
+        boolField('REQUIRE_BLOSSOM_AUTH', 'policy.require_blossom_auth', 'Require login for Blossom writes', '', ['ENABLE_BLOSSOM'], 'When ON, Blossom uploads, deletes, mirrors, and owner routes require authentication. When OFF, those writes do not require login.'),
+        boolField('REQUIRE_BLOSSOM_GET_AUTH', 'policy.require_blossom_get_auth', 'Require login for Blossom downloads', '', ['ENABLE_BLOSSOM'], 'When ON, blob download-by-hash requires authentication. When OFF, hash downloads are public.')
       ]
     },
     {
@@ -411,7 +290,15 @@
       title: 'Files And Blob APIs',
       detail: 'Disk-backed file features, public URLs, and retention behavior.',
         fields: [
-        noteField('Protocol feature toggles and public API URLs are managed in NIP policies.'),
+        groupField('Feature Switches'),
+        boolField('ENABLE_FILE_METADATA', 'policy.enable_file_metadata', 'Store file metadata records', '', null, 'When ON, file metadata events such as kind 1063 are stored and served. When OFF, metadata records are not stored.'),
+        boolField('ENABLE_BLOSSOM', 'policy.enable_blossom', 'Enable Blossom API routes', '', null, 'When ON, Blossom routes accept and serve blobs. When OFF, Blossom endpoints are not served.'),
+        boolField('ENABLE_FILE_API', 'policy.enable_file_api', 'Enable compatibility API routes', '', null, 'When ON, `/files` compatibility routes are active. When OFF, those routes are not served.'),
+        boolField('ENABLE_BLOSSOM_LIST', 'policy.enable_blossom_list', 'Allow owner blob listings', '', ['ENABLE_BLOSSOM'], 'When ON, owners can list blobs they own. When OFF, owner list endpoints are disabled.'),
+        boolField('ENABLE_BLOSSOM_MIRROR', 'policy.enable_blossom_mirror', 'Allow remote blob import', '', ['ENABLE_BLOSSOM'], 'When ON, the relay may mirror remote blobs into local storage. When OFF, remote mirror import is blocked.'),
+        groupField('Advertised URLs'),
+        textField('FILE_API_URL', 'policy.file_api_url', 'Compatibility API URL', 'Leave blank to use the local default', null, ['ENABLE_FILE_API'], 'Public URL clients should use for the `/files` API.'),
+        textField('BLOSSOM_PUBLIC_URL', 'policy.blossom_public_url', 'Blossom public URL', 'Leave blank to use the local default', null, ['ENABLE_BLOSSOM'], 'Public URL clients should use for Blossom routes.'),
         groupField('Storage Rules'),
         numberField('FILE_MAX_BYTES', 'policy.file_max_bytes', 'Max upload size', '', null, null, 'Largest file upload this relay will accept.'),
         textField('FILE_ALLOW_MIME', 'policy.file_allowed_mime', 'Allowed file types', 'Comma-separated MIME patterns, for example: image/*,application/pdf', formatList, null, 'If set, only these MIME patterns are allowed, for example `image/*` or `application/pdf`.'),
