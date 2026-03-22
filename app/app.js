@@ -1123,6 +1123,7 @@
     }
     if (section.id === 'general') {
       els.sectionContent.appendChild(renderDesktopSection());
+      els.sectionContent.appendChild(renderGeneralRuntimeSection());
     }
     if (section.custom === 'moderation') {
       els.sectionContent.appendChild(renderModerationSection());
@@ -1141,7 +1142,7 @@
   }
 
   function syncRuntimePanelVisibility() {
-    els.runtimePanel.classList.toggle('hidden', state.activeSection !== 'relay');
+    els.runtimePanel.classList.add('hidden');
   }
 
   function renderFieldSection(section) {
@@ -1533,6 +1534,34 @@
         ? (state.startupServicePendingAction === 'disable' ? 'Disabling...' : 'Enabling...')
         : ''
     ));
+
+    card.appendChild(grid);
+    return card;
+  }
+
+  function renderGeneralRuntimeSection() {
+    var card = document.createElement('section');
+    card.className = 'section-panel';
+    card.appendChild(renderCardHead('Runtime', 'Live relay process state and active paths.'));
+
+    var grid = document.createElement('div');
+    grid.className = 'kv-grid';
+
+    var status = state.status || {};
+    var runtimeStatus = status.status || 'stopped';
+    var pidValue = status.pid ? String(status.pid) : '';
+    var pidOptions = null;
+    if (runtimeStatus !== 'running' && !pidValue) {
+      pidValue = 'not running';
+      pidOptions = { empty: true };
+    }
+
+    grid.appendChild(renderKv('Status', runtimeStatus));
+    grid.appendChild(renderKv('PID', pidValue, pidOptions));
+    grid.appendChild(renderKv('Env', state.envPath || ''));
+    grid.appendChild(renderKv('Store root', status.store_root || ''));
+    grid.appendChild(renderKv('PID file', status.pid_path || ''));
+    grid.appendChild(renderKv('Log file', status.log_path || ''));
 
     card.appendChild(grid);
     return card;
@@ -2449,6 +2478,9 @@
     try {
       state.status = parseKv(await backend('relay-status', [state.envPath]));
       renderRuntime();
+      if (state.activeSection === 'general') {
+        renderActiveSection(false);
+      }
     } catch (error) {
       console.error(error);
       els.relayPill.textContent = 'Relay: status unavailable';
