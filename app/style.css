@@ -1111,6 +1111,21 @@ h4 {
     "input pill hint";
 }
 
+.field.checkbox-field.nip-master-field.has-hint input {
+  align-self: start;
+  margin-top: 0.06rem;
+}
+
+.field.checkbox-field.nip-master-field.has-hint .scope-pill {
+  align-self: start;
+  margin-top: 0.04rem;
+}
+
+.field.checkbox-field.nip-master-field.has-hint label,
+.field.checkbox-field.nip-master-field.has-hint .field-link {
+  align-self: start;
+}
+
 .field.checkbox-field.nip-child-field.has-hint {
   grid-template-areas:
     "input label"

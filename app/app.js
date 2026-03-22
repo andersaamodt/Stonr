@@ -117,7 +117,7 @@
           'Relay profile document',
           '',
           null,
-          'When ON, clients can discover this relay\'s profile and capability list over NIP-11. When OFF, that machine-readable relay profile is not advertised.'
+          'Publishes relay metadata and capability discovery for clients.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'ENABLE_NIP11',
@@ -126,7 +126,7 @@
           '',
           null,
           {
-            tooltip: 'When ON, this relay serves its profile document at the root endpoint. When OFF, the profile endpoint is not served even if support is advertised.',
+            tooltip: 'Serves the live relay profile endpoint at the HTTP root.',
             viewCommand: 'open-relay-profile',
             viewLabel: 'View',
             viewHint: 'Open the live relay profile document.'
@@ -138,7 +138,7 @@
           'Tag-based event filters',
           '',
           null,
-          'When ON, clients can filter reads by tags like `#e`, `#p`, and `#t`. When OFF, those tag-filter queries are rejected.'
+          'Allows tag-filter queries such as `#e`, `#p`, and `#t`.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'ENABLE_TAG_QUERIES',
@@ -146,7 +146,7 @@
           'Allow tag-filter reads',
           '',
           null,
-          'When ON, the relay applies tag filters during reads. When OFF, tag filters are disabled for read requests.'
+          'Applies tag filters during read requests.'
         ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP45',
@@ -154,7 +154,7 @@
           'Count-only queries',
           '',
           null,
-          'When ON, clients can ask for counts without downloading matching events. When OFF, COUNT requests are rejected.'
+          'Enables count-only queries without returning full event payloads.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'ENABLE_COUNT',
@@ -162,7 +162,7 @@
           'Allow COUNT requests',
           '',
           null,
-          'When ON, clients can run COUNT queries. When OFF, COUNT is disabled even if the relay stores matching events.'
+          'Accepts COUNT requests from clients.'
         ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP50',
@@ -170,7 +170,7 @@
           'Text search',
           '',
           null,
-          'When ON, clients can search event content by words and phrases. When OFF, full-text search queries are rejected.'
+          'Enables relay-side full-text search across stored events.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'ENABLE_SEARCH',
@@ -178,7 +178,7 @@
           'Allow relay text search',
           '',
           null,
-          'When ON, the relay indexes and answers text-search queries. When OFF, search requests are disabled.'
+          'Allows clients to run search queries.'
         ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP09',
@@ -186,7 +186,7 @@
           'Deletion events',
           '',
           null,
-          'When ON, author deletion requests are applied to previously stored events. When OFF, delete events do not remove stored content.'
+          'Honors deletion events so authors can remove prior content.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP40',
@@ -194,7 +194,7 @@
           'Expiration handling',
           '',
           null,
-          'When ON, expired events are hidden or rejected based on expiration tags. When OFF, expiration tags are ignored.'
+          'Applies expiration tags to hide or reject expired events.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP42',
@@ -202,7 +202,7 @@
           'Relay login',
           '',
           null,
-          'When ON, this relay can run the NIP-42 AUTH challenge flow. When OFF, clients cannot authenticate through relay login.'
+          'Exposes the relay-auth challenge flow for authenticated clients.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP94',
@@ -210,7 +210,7 @@
           'File metadata events',
           '',
           null,
-          'When ON, the relay accepts and serves NIP-94 file metadata events. When OFF, file metadata events are not supported.'
+          'Supports file metadata events such as kind 1063.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP96',
@@ -218,7 +218,7 @@
           'Compatibility file API',
           '',
           null,
-          'When ON, clients can use the legacy NIP-96 `/files` API. When OFF, compatibility uploads and related API routes are disabled.'
+          'Enables the legacy `/files` compatibility API surface.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP98',
@@ -226,7 +226,7 @@
           'HTTP request authentication',
           '',
           null,
-          'When ON, the relay can verify signed NIP-98 HTTP auth headers. When OFF, NIP-98 auth verification is disabled.'
+          'Accepts and verifies signed HTTP authentication headers.'
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP_B7',
@@ -234,7 +234,7 @@
           'Blossom blob API',
           '',
           null,
-          'When ON, clients can use Blossom routes for hash-addressed blobs. When OFF, Blossom API endpoints are disabled.'
+          'Enables Blossom routes for hash-addressed blob storage.'
         ), { nipMaster: true })
       ]
     },
