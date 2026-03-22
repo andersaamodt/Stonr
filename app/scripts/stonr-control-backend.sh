@@ -35,6 +35,7 @@ Commands:
   load-list [ENV_PATH] NAME
   save-list [ENV_PATH] NAME BASE64_TEXT
   open-store-root [ENV_PATH]
+  open-relay-profile [ENV_PATH]
   relay-status [ENV_PATH]
   relay-start [ENV_PATH]
   relay-stop [ENV_PATH]
@@ -438,6 +439,27 @@ relay_running() {
     return 0
   fi
   return 1
+}
+
+relay_profile_url() {
+  env_path=${1-}
+  bind_http=$(env_get "$env_path" BIND_HTTP "127.0.0.1:7777")
+  host_port=$bind_http
+  case "$host_port" in
+    http://*|https://*)
+      printf '%s\n' "$host_port"
+      return 0
+      ;;
+  esac
+  case "$host_port" in
+    0.0.0.0:*)
+      host_port=127.0.0.1:${host_port#0.0.0.0:}
+      ;;
+    \[::\]:*)
+      host_port=127.0.0.1:${host_port#\[::\]:}
+      ;;
+  esac
+  printf 'http://%s/\n' "$host_port"
 }
 
 resolve_repo_root() {
@@ -923,6 +945,20 @@ json.dump(events, sys.stdout)
       exit 1
     fi
     printf '%s\n' "$root"
+    ;;
+  open-relay-profile)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    url=$(relay_profile_url "$env_path")
+    if command -v open >/dev/null 2>&1; then
+      open "$url"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$url"
+    else
+      printf '%s\n' "stonr-control-backend: no URL opener available" >&2
+      exit 1
+    fi
+    printf '%s\n' "$url"
     ;;
   relay-status)
     env_path=$(resolve_env_path "${1-}")

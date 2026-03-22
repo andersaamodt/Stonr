@@ -1033,10 +1033,37 @@ h4 {
   cursor: pointer;
 }
 
+.field.checkbox-field .checkbox-label-row {
+  grid-area: label;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.48rem;
+  min-height: 1.1rem;
+  min-width: 0;
+}
+
 .field.checkbox-field .field-link {
   grid-area: label;
   min-height: 1.1rem;
   align-self: center;
+}
+
+.field-view-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #356fd6;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.field-view-link:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration: none;
 }
 
 .nip-brief {

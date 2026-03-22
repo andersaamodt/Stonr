@@ -79,7 +79,19 @@
         textField('RELAY_NAME', 'policy.relay_name', 'Relay name', '', null, null, 'Name shown to clients when they browse or save this relay.'),
         textField('RELAY_DESCRIPTION', 'policy.relay_description', 'Relay description', '', null, null, 'Short summary shown beside the relay name in client UIs.'),
         groupField('Feature Switches'),
-        boolField('ENABLE_NIP11', 'policy.enable_nip11', 'Relay profile (recommended)', '', null, 'Publish a NIP-11 relay info document at the HTTP root.'),
+        boolField(
+          'ENABLE_NIP11',
+          'policy.enable_nip11',
+          'Relay profile (recommended)',
+          '',
+          null,
+          {
+            tooltip: 'Publish a NIP-11 relay info document at the HTTP root.',
+            viewCommand: 'open-relay-profile',
+            viewLabel: 'View',
+            viewHint: 'Open the live relay profile document.'
+          }
+        ),
         boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', '', null, 'Allow clients to read stored events with REQ filters.'),
         boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', '', null, 'Allow clients to publish new events to this relay.'),
         boolField('ENABLE_LIVE_SUBSCRIPTIONS', 'policy.enable_live_subscriptions', 'Live updates (recommended)', '', null, 'Keep subscriptions open and push new matching events as they arrive.'),
@@ -1151,6 +1163,13 @@
     hint.title = helpText;
 
     if (field.type === 'bool') {
+      var labelRow = document.createElement('div');
+      labelRow.className = 'checkbox-label-row';
+      labelRow.appendChild(label);
+      var viewLink = createFieldViewLink(field);
+      if (viewLink) {
+        labelRow.appendChild(viewLink);
+      }
       wrap.appendChild(input);
       if (nipPill) {
         if (sectionId === 'nips') {
@@ -1174,7 +1193,7 @@
         }
         wrap.appendChild(nipPill);
       }
-      wrap.appendChild(label);
+      wrap.appendChild(labelRow);
       bindCheckboxLabel(label, input);
       if (nipSummary) {
         wrap.appendChild(nipSummary);
@@ -1251,6 +1270,30 @@
     label.htmlFor = field.envKey;
     label.title = helpText;
     return label;
+  }
+
+  function createFieldViewLink(field) {
+    if (!field || !field.viewCommand) {
+      return null;
+    }
+    var link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'field-view-link';
+    link.textContent = field.viewLabel || 'View';
+    link.disabled = !state.bridge;
+    link.title = field.viewHint || ('Open ' + field.label);
+    link.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!state.bridge) {
+        return;
+      }
+      backend(field.viewCommand, [state.envPath]).catch(function (error) {
+        console.error(error);
+        toast(summarizeBackendError(error, 'Failed to open view'), 'bad');
+      });
+    });
+    return link;
   }
 
   function bindCheckboxLabel(label, input) {
@@ -2446,8 +2489,25 @@
   }
 
   function boolField(envKey, path, label, hint, dependsOn) {
-    var tooltip = arguments[5];
-    return { envKey: envKey, path: path, label: label, hint: hint, type: 'bool', dependsOn: dependsOn || [], tooltip: tooltip || '' };
+    var extra = arguments[5];
+    var opts;
+    if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
+      opts = extra;
+    } else {
+      opts = { tooltip: extra || '' };
+    }
+    return {
+      envKey: envKey,
+      path: path,
+      label: label,
+      hint: hint,
+      type: 'bool',
+      dependsOn: dependsOn || [],
+      tooltip: opts.tooltip || '',
+      viewCommand: opts.viewCommand || '',
+      viewLabel: opts.viewLabel || '',
+      viewHint: opts.viewHint || ''
+    };
   }
 
   function textareaField(envKey, path, label, hint, format, dependsOn) {
