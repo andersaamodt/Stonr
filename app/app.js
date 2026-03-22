@@ -2040,17 +2040,19 @@
 
   function renderDiagnosticsSection() {
     var wrap = document.createElement('div');
-    wrap.className = 'section-stack';
+    wrap.className = 'section-panel autosave-panel';
+    var stack = document.createElement('div');
+    stack.className = 'section-stack diagnostics-stack';
 
     if (state.diagnosticsError) {
       var alert = document.createElement('p');
       alert.className = 'diagnostics-alert';
       alert.textContent = state.diagnosticsError;
-      wrap.appendChild(alert);
+      stack.appendChild(alert);
     }
 
-    wrap.appendChild(renderMirrorHealthPanel());
-    wrap.appendChild(renderRetentionHealthPanel());
+    stack.appendChild(renderMirrorHealthPanel());
+    stack.appendChild(renderRetentionHealthPanel());
 
     var actions = document.createElement('section');
     actions.className = 'section-panel';
@@ -2066,7 +2068,7 @@
       ),
       '<pre id="diagnostics-doctor" class="mono">' + escapeHtml(state.doctor.trim() || 'No doctor output.') + '</pre>'
     ].join('');
-    wrap.appendChild(actions);
+    stack.appendChild(actions);
 
     var log = document.createElement('section');
     log.className = 'section-panel log-panel';
@@ -2075,7 +2077,7 @@
       '<textarea id="relay-log" spellcheck="false" readonly></textarea>'
     ].join('');
     log.querySelector('#relay-log').value = state.log || 'Log is empty.';
-    wrap.appendChild(log);
+    stack.appendChild(log);
 
     actions.querySelector('#verify-run').disabled = !state.bridge;
     actions.querySelector('#verify-run').addEventListener('click', async function () {
@@ -2087,6 +2089,7 @@
         toast(error.message || 'Verification failed', 'bad');
       }
     });
+    wrap.appendChild(stack);
     return wrap;
   }
 
