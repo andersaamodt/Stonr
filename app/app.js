@@ -1871,6 +1871,13 @@
       return input.checked ? '1' : '0';
     }
     if (field.type === 'radio') {
+      if (input && input.type === 'radio') {
+        if (input.checked) {
+          return String(input.value || '');
+        }
+        var checked = document.querySelector('input[type="radio"][name="' + field.envKey + '"]:checked');
+        return checked ? String(checked.value || '') : '';
+      }
       var selected = input.querySelector('input[type="radio"]:checked');
       return selected ? String(selected.value || '') : '';
     }
