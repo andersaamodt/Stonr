@@ -830,11 +830,13 @@
       state.envValues = parseKv(await backend('load-env', [state.envPath]));
       state.status = parseKv(await backend('relay-status', [state.envPath]));
       await syncDesktopHostSettings();
+      await loadConfigForBootFrame(state.configEditSeq);
+      syncFieldDependencies();
       renderRuntime();
       renderActiveSection();
       revealBootUi();
       queuePostBootEventsLoad();
-      hydrateAfterBoot();
+      hydrateAfterBoot(true);
     } catch (error) {
       console.error(error);
       toast(summarizeBackendError(error, 'Failed to load relay state'), 'bad');
@@ -3155,15 +3157,19 @@
   }
 
   async function hydrateAfterBoot() {
+    var skipConfigReload = !!arguments[0];
     var editSeq = state.configEditSeq;
     try {
-      var loadedConfig = JSON.parse(await backend('load-config', [state.envPath]));
+      if (!skipConfigReload) {
+        await loadConfigForBootFrame(editSeq);
+      }
       if (editSeq !== state.configEditSeq) {
         return;
       }
-      state.config = loadedConfig;
       syncFieldDependencies();
-      renderActiveSection();
+      if (!skipConfigReload) {
+        renderActiveSection();
+      }
       await loadModerationLists();
       if (state.activeSection === 'moderation') {
         renderActiveSection();
@@ -3181,6 +3187,15 @@
       syncFieldDependencies();
       renderActiveSection();
     }
+  }
+
+  async function loadConfigForBootFrame(editSeq) {
+    var loadedConfig = JSON.parse(await backend('load-config', [state.envPath]));
+    if (editSeq !== state.configEditSeq) {
+      return false;
+    }
+    state.config = loadedConfig;
+    return true;
   }
 
   function queueModerationSave(name, delay) {
