@@ -2069,7 +2069,25 @@
       return card;
     }
     if (!state.diagnosticsMirror.length) {
-      card.appendChild(renderDiagnosticsEmpty('No mirror status yet. Start the relay and let at least one upstream connection complete.'));
+      var mirroringEnabled = !!getPath(state.config || {}, 'policy.enable_mirroring');
+      var upstreamRelays = getPath(state.config || {}, 'relays_upstream');
+      var upstreamCount = 0;
+      if (Array.isArray(upstreamRelays)) {
+        upstreamCount = upstreamRelays.filter(function (relay) {
+          return String(relay || '').trim().length > 0;
+        }).length;
+      } else if (typeof upstreamRelays === 'string') {
+        upstreamCount = upstreamRelays.split(',').filter(function (relay) {
+          return String(relay || '').trim().length > 0;
+        }).length;
+      }
+      if (!mirroringEnabled) {
+        card.appendChild(renderDiagnosticsEmpty('Mirror import is disabled. Turn on Import from relays in Relay settings.'));
+      } else if (upstreamCount === 0) {
+        card.appendChild(renderDiagnosticsEmpty('No Source relays configured. Add at least one relay in Network settings.'));
+      } else {
+        card.appendChild(renderDiagnosticsEmpty('Waiting for first upstream mirror status. Keep relay running until at least one source relay connection completes.'));
+      }
       return card;
     }
 
