@@ -432,6 +432,12 @@ launchd_plist_path() {
   printf '%s\n' "$HOME/Library/LaunchAgents/$(service_label).plist"
 }
 
+launchd_label_disabled() {
+  label=${1-}
+  [ -n "$label" ] || return 1
+  launchctl print-disabled "$(launchd_domain)" 2>/dev/null | grep -F "\"$label\" => disabled" >/dev/null 2>&1
+}
+
 systemd_unit_name() {
   printf 'stonr-relay.service\n'
 }
@@ -454,7 +460,11 @@ service_autostart_status() {
       path=$(launchd_plist_path)
       if [ -f "$path" ]; then
         installed=1
-        enabled=1
+        if launchd_label_disabled "$label"; then
+          enabled=0
+        else
+          enabled=1
+        fi
       fi
       if launchctl print "$(launchd_domain)/$label" >/dev/null 2>&1; then
         loaded=1
@@ -498,9 +508,14 @@ service_autostart_enable() {
       plist_path=$(launchd_plist_path)
       mkdir -p "$(dirname "$plist_path")"
       run_stonr --env "$env_path" print-service --manager launchd --label "$label" > "$plist_path"
+      if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+        /usr/libexec/PlistBuddy -c 'Delete :WorkingDirectory' "$plist_path" >/dev/null 2>&1 || :
+        /usr/libexec/PlistBuddy -c 'Delete :StandardOutPath' "$plist_path" >/dev/null 2>&1 || :
+        /usr/libexec/PlistBuddy -c 'Delete :StandardErrorPath' "$plist_path" >/dev/null 2>&1 || :
+      fi
+      launchctl enable "$(launchd_domain)/$label" >/dev/null 2>&1 || :
       launchctl bootout "$(launchd_domain)" "$plist_path" >/dev/null 2>&1 || :
       launchctl bootstrap "$(launchd_domain)" "$plist_path"
-      launchctl enable "$(launchd_domain)/$label" >/dev/null 2>&1 || :
       launchctl kickstart -k "$(launchd_domain)/$label" >/dev/null 2>&1 || :
       ;;
     systemd)
