@@ -235,7 +235,7 @@
       id: 'nips',
       label: 'NIPs',
       eyebrow: 'NIPs',
-      title: 'Supported NIPs',
+      title: 'NIP Support',
       detail: 'Enable or disable relay-wide support for specific NIPs.',
       fields: [
         groupField('Relay And Query'),
