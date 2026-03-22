@@ -471,7 +471,6 @@
       detail: 'Read the relay log, inspect backend status, and run verification.',
       fields: [],
       custom: 'diagnostics'
-    },
     }
   ];
 
