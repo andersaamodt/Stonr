@@ -1261,25 +1261,11 @@
 
     var grid = document.createElement('div');
     grid.className = 'field-grid';
-    if (section.id === 'policies') {
-      grid.appendChild(renderNipSupportHeader());
-    }
     section.fields.forEach(function (field) {
       grid.appendChild(renderField(field, section.id));
     });
     card.appendChild(grid);
     return card;
-  }
-
-  function renderNipSupportHeader() {
-    var header = document.createElement('div');
-    header.className = 'nip-support-head';
-    header.innerHTML = [
-      '<span class="nip-col nip-col-nip">NIP</span>',
-      '<span class="nip-col nip-col-feature">Toggle</span>',
-      '<span class="nip-col nip-col-summary">What This Controls</span>'
-    ].join('');
-    return header;
   }
 
   function renderField(field, sectionId) {
@@ -1300,7 +1286,12 @@
     if (field.nipChild) {
       wrap.classList.add('nip-child-field');
     }
-    var showHint = !!field.hint && (field.type === 'text' || field.type === 'textarea');
+    var showHint = false;
+    if (field.type === 'text' || field.type === 'textarea') {
+      showHint = !!field.hint;
+    } else if (field.type === 'bool' && sectionId === 'policies') {
+      showHint = !!(field.hint || field.tooltip);
+    }
     if (field.type === 'bool' && showHint) {
       wrap.classList.add('has-hint');
     }
@@ -1413,7 +1404,7 @@
 
     var hint = document.createElement('p');
     hint.className = 'hint';
-    appendNipText(hint, field.hint || '');
+    appendNipText(hint, field.hint || (sectionId === 'policies' ? (field.tooltip || '') : ''));
     hint.title = helpText;
 
     if (field.type === 'bool') {
@@ -1567,15 +1558,7 @@
   }
 
   function createFieldNipSummary(field, sectionId) {
-    var nipToken = fieldNipByField[field.envKey];
-    if (sectionId !== 'policies' || !field.nipMaster || !nipToken || !nipBriefSummaries[nipToken]) {
-      return null;
-    }
-    var summary = document.createElement('span');
-    summary.className = 'nip-brief';
-    summary.textContent = nipBriefSummaries[nipToken];
-    summary.title = nipSummaries[nipToken] || nipBriefSummaries[nipToken];
-    return summary;
+    return null;
   }
 
   function renderGroupField(field) {
