@@ -126,7 +126,7 @@
           '',
           null,
           {
-            tooltip: 'Serves the live relay profile endpoint at the HTTP root.',
+            tooltip: '',
             viewCommand: 'open-relay-profile',
             viewLabel: 'View',
             viewHint: 'Open the live relay profile document.'
@@ -138,7 +138,7 @@
           'Tag-based event filters',
           '',
           null,
-          'Allows tag-filter queries such as `#e`, `#p`, and `#t`.'
+          ''
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'ENABLE_TAG_QUERIES',
@@ -146,7 +146,7 @@
           'Allow tag-filter reads',
           '',
           null,
-          'Applies tag filters during read requests.'
+          ''
         ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP45',
@@ -162,7 +162,7 @@
           'Allow COUNT requests',
           '',
           null,
-          'Accepts COUNT requests from clients.'
+          ''
         ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP50',
@@ -170,7 +170,7 @@
           'Text search',
           '',
           null,
-          'Enables relay-side full-text search across stored events.'
+          ''
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'ENABLE_SEARCH',
@@ -178,7 +178,7 @@
           'Allow relay text search',
           '',
           null,
-          'Allows clients to run search queries.'
+          ''
         ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP09',
@@ -186,7 +186,7 @@
           'Deletion events',
           '',
           null,
-          'Honors deletion events so authors can remove prior content.'
+          ''
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP40',
@@ -194,7 +194,7 @@
           'Expiration handling',
           '',
           null,
-          'Applies expiration tags to hide or reject expired events.'
+          ''
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP42',
@@ -202,7 +202,7 @@
           'Relay login',
           '',
           null,
-          'Exposes the relay-auth challenge flow for authenticated clients.'
+          ''
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP94',
@@ -210,7 +210,7 @@
           'File metadata events',
           '',
           null,
-          'Supports file metadata events such as kind 1063.'
+          ''
         ), { nipMaster: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP96',
