@@ -236,7 +236,7 @@
       label: 'NIPs',
       eyebrow: 'NIPs',
       title: 'Supported NIPs',
-      detail: 'Master switches for the Nostr specs this relay exposes.',
+      detail: 'Enable or disable relay-wide support for specific NIPs.',
       fields: [
         groupField('Relay And Query'),
         boolField('SUPPORT_NIP11', 'policy.support_nip11', 'Relay profile', '', null, 'Master switch for the NIP-11 relay information document.'),
@@ -976,8 +976,13 @@
       return item.id === state.activeSection;
     }) || sections[0];
     els.activeTitle.textContent = section.title;
-    els.activeSubtitle.hidden = true;
-    els.activeSubtitle.textContent = '';
+    if (section.id === 'nips') {
+      els.activeSubtitle.hidden = false;
+      els.activeSubtitle.textContent = section.detail || '';
+    } else {
+      els.activeSubtitle.hidden = true;
+      els.activeSubtitle.textContent = '';
+    }
     syncRuntimePanelVisibility();
     els.sectionContent.innerHTML = '';
     state.fieldNodes = {};
