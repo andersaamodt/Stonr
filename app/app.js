@@ -94,38 +94,278 @@
           { value: 'site', label: 'One-site mirror' }
         ], null, 'Choose whether this relay mirrors broad upstream traffic or only one site author and that site\'s comments.'),
         textField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkey', 'Hex pubkey for the site owner', null, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Hex pubkey whose long-form posts define the one-site mirror scope.'),
-        boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.')
+        boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.'),
+        groupField('Core Behavior'),
+        boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', '', null, 'Allow clients to read stored events with REQ filters.'),
+        boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', '', null, 'Allow clients to publish new events to this relay.'),
+        boolField('ENABLE_LIVE_SUBSCRIPTIONS', 'policy.enable_live_subscriptions', 'Live updates (recommended)', '', null, 'Keep subscriptions open and push new matching events as they arrive.'),
+        boolField('VERIFY_SIG', 'verify_sig', 'Signature checks (recommended)', '', null, 'Reject events whose signatures do not match their claimed author.'),
+        boolField('ENABLE_MIRRORING', 'policy.enable_mirroring', 'Import from relays', '', null, 'Pull events from upstream relays into local storage.')
       ]
     },
     {
       id: 'policies',
-      label: 'Policies',
-      eyebrow: 'Policies',
-      title: 'Relay Policies',
-      detail: 'Enable and disable core relay behavior and client capabilities.',
+      label: 'NIP policies',
+      eyebrow: 'NIPs',
+      title: 'NIP Policies',
+      detail: 'Turn each NIP on or off, then tune the extra behavior that NIP unlocks.',
       fields: [
-        groupField('Feature Switches'),
-        boolField(
+        withFieldUi(boolField(
+          'SUPPORT_NIP11',
+          'policy.support_nip11',
+          'Relay profile document',
+          '',
+          null,
+          'When ON, clients can discover this relay\'s profile and capability list over NIP-11. When OFF, that machine-readable relay profile is not advertised.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
           'ENABLE_NIP11',
           'policy.enable_nip11',
-          'Relay profile (recommended)',
+          'Publish relay profile endpoint',
           '',
           null,
           {
-            tooltip: 'Publish a NIP-11 relay info document at the HTTP root.',
+            tooltip: 'When ON, this relay serves its profile document at the root endpoint. When OFF, the profile endpoint is not served even if support is advertised.',
             viewCommand: 'open-relay-profile',
             viewLabel: 'View',
             viewHint: 'Open the live relay profile document.'
           }
-        ),
-        boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', '', null, 'Allow clients to read stored events with REQ filters.'),
-        boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', '', null, 'Allow clients to publish new events to this relay.'),
-        boolField('ENABLE_LIVE_SUBSCRIPTIONS', 'policy.enable_live_subscriptions', 'Live updates (recommended)', '', null, 'Keep subscriptions open and push new matching events as they arrive.'),
-        boolField('ENABLE_COUNT', 'policy.enable_count', 'Count queries (recommended)', '', null, 'Allow COUNT requests that return only how many events match.'),
-        boolField('ENABLE_TAG_QUERIES', 'policy.enable_tag_queries', 'Tag filters (recommended)', '', null, 'Allow queries that filter by tags like `#e`, `#p`, or `#t`.'),
-        boolField('ENABLE_SEARCH', 'policy.enable_search', 'Text search (recommended)', '', null, 'Allow clients to search event text on the relay.'),
-        boolField('VERIFY_SIG', 'verify_sig', 'Signature checks (recommended)', '', null, 'Reject events whose signatures do not match their claimed author.'),
-        boolField('ENABLE_MIRRORING', 'policy.enable_mirroring', 'Import from relays', '', null, 'Pull events from upstream relays into local storage.')
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP12',
+          'policy.support_nip12',
+          'Tag-based event filters',
+          '',
+          null,
+          'When ON, clients can filter reads by tags like `#e`, `#p`, and `#t`. When OFF, those tag-filter queries are rejected.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'ENABLE_TAG_QUERIES',
+          'policy.enable_tag_queries',
+          'Allow tag-filter reads',
+          '',
+          null,
+          'When ON, the relay applies tag filters during reads. When OFF, tag filters are disabled for read requests.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP45',
+          'policy.support_nip45',
+          'Count-only queries',
+          '',
+          null,
+          'When ON, clients can ask for counts without downloading matching events. When OFF, COUNT requests are rejected.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'ENABLE_COUNT',
+          'policy.enable_count',
+          'Allow COUNT requests',
+          '',
+          null,
+          'When ON, clients can run COUNT queries. When OFF, COUNT is disabled even if the relay stores matching events.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP50',
+          'policy.support_nip50',
+          'Text search',
+          '',
+          null,
+          'When ON, clients can search event content by words and phrases. When OFF, full-text search queries are rejected.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'ENABLE_SEARCH',
+          'policy.enable_search',
+          'Allow relay text search',
+          '',
+          null,
+          'When ON, the relay indexes and answers text-search queries. When OFF, search requests are disabled.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP09',
+          'policy.support_nip09',
+          'Deletion events',
+          '',
+          null,
+          'When ON, author deletion requests are applied to previously stored events. When OFF, delete events do not remove stored content.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP40',
+          'policy.support_nip40',
+          'Expiration handling',
+          '',
+          null,
+          'When ON, expired events are hidden or rejected based on expiration tags. When OFF, expiration tags are ignored.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP42',
+          'policy.support_nip42',
+          'Relay login',
+          '',
+          null,
+          'When ON, this relay can run the NIP-42 AUTH challenge flow. When OFF, clients cannot authenticate through relay login.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'ENABLE_NIP42',
+          'policy.enable_nip42',
+          'Enable relay login flow',
+          '',
+          null,
+          'When ON, relay login is active for clients. When OFF, no NIP-42 login session can be established.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'REQUIRE_AUTH_FOR_QUERY',
+          'policy.require_auth_for_query',
+          'Require login for reads',
+          '',
+          relayLoginDependsOn,
+          'When ON, unauthenticated clients cannot read events. When OFF, reads are allowed without login.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'REQUIRE_AUTH_FOR_COUNT',
+          'policy.require_auth_for_count',
+          'Require login for counts',
+          '',
+          relayLoginDependsOn,
+          'When ON, unauthenticated clients cannot run COUNT queries. When OFF, COUNT requests do not require login.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'REQUIRE_AUTH_FOR_PUBLISH',
+          'policy.require_auth_for_publish',
+          'Require login for writes',
+          '',
+          relayLoginDependsOn,
+          'When ON, publishing requires an authenticated login. When OFF, clients can publish without logging in.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'AUTH_MUST_MATCH_EVENT_PUBKEY',
+          'policy.auth_must_match_event_pubkey',
+          'Require writer pubkey to match login',
+          '',
+          relayLoginDependsOn,
+          'When ON, logged-in pubkey must match the event author pubkey. When OFF, logged-in clients may publish for a different pubkey.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(numberField(
+          'AUTH_MAX_AGE_SECS',
+          'policy.auth_max_age_secs',
+          'Maximum login proof age',
+          '',
+          null,
+          relayLoginDependsOn,
+          'Maximum age, in seconds, for an AUTH proof. Older proofs are rejected.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP94',
+          'policy.support_nip94',
+          'File metadata events',
+          '',
+          null,
+          'When ON, the relay accepts and serves NIP-94 file metadata events. When OFF, file metadata events are not supported.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'ENABLE_FILE_METADATA',
+          'policy.enable_file_metadata',
+          'Store file metadata records',
+          '',
+          null,
+          'When ON, file metadata events such as kind 1063 are stored and served. When OFF, metadata records are not stored.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP96',
+          'policy.support_nip96',
+          'Compatibility file API',
+          '',
+          null,
+          'When ON, clients can use the legacy NIP-96 `/files` API. When OFF, compatibility uploads and related API routes are disabled.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'ENABLE_FILE_API',
+          'policy.enable_file_api',
+          'Enable compatibility API routes',
+          '',
+          null,
+          'When ON, `/files` compatibility routes are active. When OFF, those routes are not served.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(textField(
+          'FILE_API_URL',
+          'policy.file_api_url',
+          'Compatibility API URL',
+          'Leave blank to use the local default',
+          null,
+          ['ENABLE_FILE_API'],
+          'Public URL clients should use for the `/files` API.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP98',
+          'policy.support_nip98',
+          'HTTP request authentication',
+          '',
+          null,
+          'When ON, the relay can verify signed NIP-98 HTTP auth headers. When OFF, NIP-98 auth verification is disabled.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'REQUIRE_NIP98_AUTH',
+          'policy.require_nip98_auth',
+          'Require auth for compatibility API',
+          '',
+          null,
+          'When ON, compatibility uploads and deletes require valid NIP-98 auth. When OFF, unsigned compatibility API requests are allowed.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'SUPPORT_NIP_B7',
+          'policy.support_nip_b7',
+          'Blossom blob API',
+          '',
+          null,
+          'When ON, clients can use Blossom routes for hash-addressed blobs. When OFF, Blossom API endpoints are disabled.'
+        ), { nipMaster: true }),
+        withFieldUi(boolField(
+          'ENABLE_BLOSSOM',
+          'policy.enable_blossom',
+          'Enable Blossom API routes',
+          '',
+          null,
+          'When ON, Blossom routes accept and serve blobs. When OFF, Blossom endpoints are not served.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'ENABLE_BLOSSOM_LIST',
+          'policy.enable_blossom_list',
+          'Allow owner blob listings',
+          '',
+          ['ENABLE_BLOSSOM'],
+          'When ON, owners can list blobs they own. When OFF, owner list endpoints are disabled.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'ENABLE_BLOSSOM_MIRROR',
+          'policy.enable_blossom_mirror',
+          'Allow remote blob import',
+          '',
+          ['ENABLE_BLOSSOM'],
+          'When ON, the relay may mirror remote blobs into local storage. When OFF, remote mirror import is blocked.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'REQUIRE_BLOSSOM_AUTH',
+          'policy.require_blossom_auth',
+          'Require login for Blossom writes',
+          '',
+          ['ENABLE_BLOSSOM'],
+          'When ON, Blossom uploads, deletes, mirrors, and owner routes require authentication. When OFF, those writes do not require login.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(boolField(
+          'REQUIRE_BLOSSOM_GET_AUTH',
+          'policy.require_blossom_get_auth',
+          'Require login for Blossom downloads',
+          '',
+          ['ENABLE_BLOSSOM'],
+          'When ON, blob download-by-hash requires authentication. When OFF, hash downloads are public.'
+        ), { nipChild: true, hideNipPill: true }),
+        withFieldUi(textField(
+          'BLOSSOM_PUBLIC_URL',
+          'policy.blossom_public_url',
+          'Blossom public URL',
+          'Leave blank to use the local default',
+          null,
+          ['ENABLE_BLOSSOM'],
+          'Public URL clients should use for Blossom routes.'
+        ), { nipChild: true, hideNipPill: true })
       ]
     },
     {
@@ -158,20 +398,9 @@
       label: 'Auth',
       eyebrow: 'Auth',
       title: 'Authentication',
-      detail: 'Turn on login support, then choose which relay and file actions require it.',
+      detail: 'Authentication switches are managed in NIP policies.',
       fields: [
-        groupField('Feature Switches'),
-        boolField('ENABLE_NIP42', 'policy.enable_nip42', 'Allow relay login', '', null, 'Turn on NIP-42 login so the relay can recognize authenticated clients.'),
-        boolField('REQUIRE_AUTH_FOR_QUERY', 'policy.require_auth_for_query', 'Require login for reads', '', relayLoginDependsOn, 'Block unauthenticated clients from reading events.'),
-        boolField('REQUIRE_AUTH_FOR_COUNT', 'policy.require_auth_for_count', 'Require login for counts', '', relayLoginDependsOn, 'Block unauthenticated clients from running COUNT queries.'),
-        boolField('REQUIRE_AUTH_FOR_PUBLISH', 'policy.require_auth_for_publish', 'Require login for writes', '', relayLoginDependsOn, 'Block unauthenticated clients from publishing events.'),
-        boolField('AUTH_MUST_MATCH_EVENT_PUBKEY', 'policy.auth_must_match_event_pubkey', 'Require writer to match login (recommended)', '', relayLoginDependsOn, 'Only allow writes when the logged-in pubkey matches the event pubkey.'),
-        groupField('HTTP And File Auth'),
-        boolField('REQUIRE_NIP98_AUTH', 'policy.require_nip98_auth', 'Require login for compatibility API (recommended)', '', null, 'Block unsigned `/files` requests and require NIP-98 HTTP auth.'),
-        boolField('REQUIRE_BLOSSOM_AUTH', 'policy.require_blossom_auth', 'Require login for Blossom writes (recommended)', '', ['ENABLE_BLOSSOM'], 'Block unauthenticated Blossom uploads, deletes, mirrors, and owner routes.'),
-        boolField('REQUIRE_BLOSSOM_GET_AUTH', 'policy.require_blossom_get_auth', 'Require login for Blossom downloads', '', ['ENABLE_BLOSSOM'], 'Block unauthenticated blob downloads by hash.'),
-        groupField('Session Rules'),
-        numberField('AUTH_MAX_AGE_SECS', 'policy.auth_max_age_secs', 'Login proof age', '', null, relayLoginDependsOn, 'Maximum age of an AUTH event before the relay rejects it.')
+        noteField('Authentication toggles now live in NIP policies under NIP-42, NIP-96, NIP-98, and NIP-B7.')
       ]
     },
     {
@@ -181,15 +410,7 @@
       title: 'Files And Blob APIs',
       detail: 'Disk-backed file features, public URLs, and retention behavior.',
         fields: [
-        groupField('Feature Switches'),
-        boolField('ENABLE_FILE_METADATA', 'policy.enable_file_metadata', 'File metadata (recommended)', '', null, 'Store file metadata events such as kind 1063.'),
-        boolField('ENABLE_BLOSSOM', 'policy.enable_blossom', 'Blossom API (recommended)', '', null, 'Offer the modern hash-addressed blob API used by current file clients.'),
-        boolField('ENABLE_FILE_API', 'policy.enable_file_api', 'Compatibility API', '', null, 'Offer the older `/files` HTTP upload API for compatible clients.'),
-        boolField('ENABLE_BLOSSOM_LIST', 'policy.enable_blossom_list', 'Blossom owner listing (recommended)', '', ['ENABLE_BLOSSOM'], 'Let authenticated owners list the blobs they have stored here.'),
-        boolField('ENABLE_BLOSSOM_MIRROR', 'policy.enable_blossom_mirror', 'Blossom remote import', '', ['ENABLE_BLOSSOM'], 'Let the server copy remote blobs into local storage.'),
-        groupField('Advertised URLs'),
-        textField('FILE_API_URL', 'policy.file_api_url', 'Compatibility API URL', 'Leave blank to use the local default', null, ['ENABLE_FILE_API'], 'Public URL clients should use for the `/files` API. Leave blank to use the local default.'),
-        textField('BLOSSOM_PUBLIC_URL', 'policy.blossom_public_url', 'Blossom public URL', 'Leave blank to use the local default', null, ['ENABLE_BLOSSOM'], 'Public origin clients should use for Blossom. Leave blank to use the local default.'),
+        noteField('Protocol feature toggles and public API URLs are managed in NIP policies.'),
         groupField('Storage Rules'),
         numberField('FILE_MAX_BYTES', 'policy.file_max_bytes', 'Max upload size', '', null, null, 'Largest file upload this relay will accept.'),
         textField('FILE_ALLOW_MIME', 'policy.file_allowed_mime', 'Allowed file types', 'Comma-separated MIME patterns, for example: image/*,application/pdf', formatList, null, 'If set, only these MIME patterns are allowed, for example `image/*` or `application/pdf`.'),
@@ -251,42 +472,21 @@
       fields: [],
       custom: 'diagnostics'
     },
-    {
-      id: 'nips',
-      label: 'NIPs',
-      eyebrow: 'NIPs',
-      title: 'NIP Support',
-      detail: 'Enable or disable relay-wide support for specific NIPs.',
-      fields: [
-        groupField('Relay And Query'),
-        boolField('SUPPORT_NIP11', 'policy.support_nip11', 'Relay profile', '', null, 'Master switch for the NIP-11 relay information document.'),
-        boolField('SUPPORT_NIP12', 'policy.support_nip12', 'Tag filters', '', null, 'Master switch for generic tag-query filters like `#e`, `#p`, and `#t`.'),
-        boolField('SUPPORT_NIP45', 'policy.support_nip45', 'Count queries', '', null, 'Master switch for COUNT requests that return only a match count.'),
-        boolField('SUPPORT_NIP50', 'policy.support_nip50', 'Text search', '', null, 'Master switch for relay-side full-text event search.'),
-        boolField('SUPPORT_NIP09', 'policy.support_nip09', 'Deletion events', '', null, 'Master switch for kind 5 deletion events and tombstones.'),
-        boolField('SUPPORT_NIP40', 'policy.support_nip40', 'Expiration', '', null, 'Master switch for event expiration handling.'),
-        groupField('Auth And Files'),
-        boolField('SUPPORT_NIP42', 'policy.support_nip42', 'Relay login', '', null, 'Master switch for relay AUTH challenges and signed login events.'),
-        boolField('SUPPORT_NIP94', 'policy.support_nip94', 'File metadata', '', null, 'Master switch for file metadata events such as kind 1063.'),
-        boolField('SUPPORT_NIP96', 'policy.support_nip96', 'Compatibility API', '', null, 'Master switch for the legacy `/files` compatibility API.'),
-        boolField('SUPPORT_NIP98', 'policy.support_nip98', 'HTTP auth', '', null, 'Master switch for signed HTTP auth on compatibility uploads and deletes.'),
-        boolField('SUPPORT_NIP_B7', 'policy.support_nip_b7', 'Blossom API', '', null, 'Master switch for the Blossom blob API surface.')
-      ]
     }
   ];
 
   var nipSummaries = {
-    'NIP-09': 'Deletion events that let authors request removal of previously published events.',
-    'NIP-11': 'Relay information document that tells clients this relay\'s metadata and supported capabilities.',
-    'NIP-12': 'Generic tag query filters so clients can search by tags like `#e`, `#p`, or `#t`.',
-    'NIP-40': 'Event expiration support so the relay can hide or reject expired content.',
-    'NIP-42': 'Relay authentication flow that uses signed AUTH events to gate reads, writes, or other protected actions.',
-    'NIP-45': 'COUNT query support so clients can ask how many events match without downloading them.',
-    'NIP-50': 'Relay-side text search so clients can search stored event content by words or phrases.',
-    'NIP-94': 'File metadata event format, usually kind 1063, for describing shared files on Nostr.',
-    'NIP-96': 'Older HTTP file upload API used by compatible Nostr clients.',
-    'NIP-98': 'Signed HTTP authentication events used to authorize web requests like uploads or deletes.',
-    'NIP-B7': 'Blossom blob API profile for hash-addressed media storage and retrieval.'
+    'NIP-09': 'Controls whether delete requests can remove previously stored events.',
+    'NIP-11': 'Controls whether clients can read this relay\'s profile and capability document.',
+    'NIP-12': 'Controls whether reads can use tag filters like `#e`, `#p`, and `#t`.',
+    'NIP-40': 'Controls whether expiration tags can hide or reject expired events.',
+    'NIP-42': 'Controls login/authentication flows for protected relay actions.',
+    'NIP-45': 'Controls whether clients can request counts without downloading events.',
+    'NIP-50': 'Controls whether relay-side text search is available.',
+    'NIP-94': 'Controls acceptance and serving of file metadata events.',
+    'NIP-96': 'Controls the legacy `/files` compatibility upload API.',
+    'NIP-98': 'Controls signed HTTP auth checks for compatibility API requests.',
+    'NIP-B7': 'Controls Blossom blob API routes for upload, read, and delete.'
   };
 
   var nipBriefSummaries = {
@@ -1002,7 +1202,7 @@
       return item.id === state.activeSection;
     }) || sections[0];
     els.activeTitle.textContent = section.title;
-    if (section.id === 'nips') {
+    if (section.id === 'policies') {
       els.activeSubtitle.hidden = false;
       els.activeSubtitle.textContent = section.detail || '';
     } else {
@@ -1044,7 +1244,7 @@
 
     var grid = document.createElement('div');
     grid.className = 'field-grid';
-    if (section.id === 'nips') {
+    if (section.id === 'policies') {
       grid.appendChild(renderNipSupportHeader());
     }
     section.fields.forEach(function (field) {
@@ -1059,8 +1259,8 @@
     header.className = 'nip-support-head';
     header.innerHTML = [
       '<span class="nip-col nip-col-nip">NIP</span>',
-      '<span class="nip-col nip-col-feature">Feature</span>',
-      '<span class="nip-col nip-col-summary">Description</span>'
+      '<span class="nip-col nip-col-feature">Toggle</span>',
+      '<span class="nip-col nip-col-summary">What This Controls</span>'
     ].join('');
     return header;
   }
@@ -1077,8 +1277,11 @@
     }
     var wrap = document.createElement('div');
     wrap.className = 'field' + (field.type === 'bool' ? ' checkbox-field' : '');
-    if (sectionId === 'nips') {
+    if (sectionId === 'policies' && field.nipMaster) {
       wrap.classList.add('nip-master-field');
+    }
+    if (field.nipChild) {
+      wrap.classList.add('nip-child-field');
     }
     var showHint = !!field.hint && (field.type === 'text' || field.type === 'textarea');
     if (field.type === 'bool' && showHint) {
@@ -1206,7 +1409,7 @@
       }
       wrap.appendChild(input);
       if (nipPill) {
-        if (sectionId === 'nips') {
+        if (field.nipMaster) {
           nipPill.tabIndex = 0;
           nipPill.setAttribute('role', 'button');
           nipPill.setAttribute('aria-label', 'Toggle ' + field.label);
@@ -1274,6 +1477,9 @@
   }
 
   function createFieldNipPill(field) {
+    if (field.hideNipPill) {
+      return null;
+    }
     var nipToken = fieldNipByField[field.envKey];
     if (!nipToken) {
       return null;
@@ -1288,7 +1494,7 @@
 
   function createFieldLabel(field, sectionId, helpText) {
     var nipToken = fieldNipByField[field.envKey];
-    if (sectionId === 'nips' && nipToken && nipUrls[nipToken]) {
+    if (sectionId === 'policies' && field.nipMaster && nipToken && nipUrls[nipToken]) {
       var link = document.createElement('a');
       link.className = 'field-link';
       link.href = nipUrls[nipToken];
@@ -1345,7 +1551,7 @@
 
   function createFieldNipSummary(field, sectionId) {
     var nipToken = fieldNipByField[field.envKey];
-    if (sectionId !== 'nips' || !nipToken || !nipBriefSummaries[nipToken]) {
+    if (sectionId !== 'policies' || !field.nipMaster || !nipToken || !nipBriefSummaries[nipToken]) {
       return null;
     }
     var summary = document.createElement('span');
@@ -2563,6 +2769,14 @@
     return { type: 'retention-apply' };
   }
 
+  function withFieldUi(field, options) {
+    var ui = options || {};
+    field.nipMaster = !!ui.nipMaster;
+    field.nipChild = !!ui.nipChild;
+    field.hideNipPill = !!ui.hideNipPill;
+    return field;
+  }
+
   function getPath(source, path) {
     if (!path) {
       return '';
@@ -2738,7 +2952,7 @@
         var pillTitle = '';
         if (disabledNip) {
           var nipToken = nipTokenForSupportKey(disabledNip);
-          var reason = nipToken + ' is disabled in NIPs settings.';
+          var reason = nipToken + ' is disabled in NIP policies.';
           pillTitle = (nipSummaries[nipToken] ? nipSummaries[nipToken] + ' ' : '') + reason;
           node.nipPill.textContent = nipToken + ' disabled';
           node.nipPill.classList.add('nip-disabled');
