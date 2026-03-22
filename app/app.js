@@ -144,15 +144,15 @@
         withFieldUi(boolField(
           'ENABLE_TAG_QUERIES',
           'policy.enable_tag_queries',
-          'Allow tag-filter reads',
-          '',
+          'Allow reads filtered by tags',
+          'Lets clients filter reads by tags like `#e`, `#p`, and `#t`.',
           null,
           ''
         ), { nipChild: true, hideNipPill: true }),
         withFieldUi(boolField(
           'SUPPORT_NIP45',
           'policy.support_nip45',
-          'Count-only queries',
+          'COUNT query support',
           '',
           null,
           'Enables count-only queries without returning full event payloads.'
@@ -160,8 +160,8 @@
         withFieldUi(boolField(
           'ENABLE_COUNT',
           'policy.enable_count',
-          'Allow COUNT requests',
-          '',
+          'Allow COUNT queries',
+          'Lets clients ask how many events match a filter without downloading events.',
           null,
           ''
         ), { nipChild: true, hideNipPill: true }),
