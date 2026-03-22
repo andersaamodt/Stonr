@@ -48,6 +48,8 @@
     diagnosticsError: '',
     backgroundMode: false,
     menuBarIcon: false,
+    autoStartRelay: false,
+    autoStartAttempted: false,
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -734,6 +736,7 @@
     }
     await saveUiPref('background_mode', state.backgroundMode ? '1' : '0');
     await saveUiPref('menu_bar_icon', state.menuBarIcon ? '1' : '0');
+    await saveUiPref('relay_auto_start', state.autoStartRelay ? '1' : '0');
     await syncDesktopHostSettings();
   }
 
@@ -788,6 +791,8 @@
     state.envPath = prefs.env_path || state.envPath || '';
     state.backgroundMode = matchesBool(prefs.background_mode || '');
     state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
+    state.autoStartRelay = matchesBool(prefs.relay_auto_start || '');
+    state.autoStartAttempted = false;
     if (!state.backgroundMode) {
       state.menuBarIcon = false;
     }
@@ -837,6 +842,7 @@
       revealBootUi();
       queuePostBootEventsLoad();
       hydrateAfterBoot(true);
+      queueAutoStartRelay();
     } catch (error) {
       console.error(error);
       toast(summarizeBackendError(error, 'Failed to load relay state'), 'bad');
@@ -1413,6 +1419,15 @@
       },
       'Show a menu bar or tray icon so you can reopen the window or quit while the relay keeps running.',
       !state.backgroundMode
+    ));
+
+    grid.appendChild(renderDesktopToggleField(
+      'Auto-start relay when app opens',
+      state.autoStartRelay,
+      function (checked) {
+        state.autoStartRelay = checked;
+      },
+      'When enabled, this control app automatically starts the relay once during app launch if it is currently stopped.'
     ));
 
     card.appendChild(grid);
@@ -2954,6 +2969,22 @@
   function runRelayToggle() {
     var status = state.status || {};
     return runRelayAction(status.status === 'running' ? 'relay-stop' : 'relay-start');
+  }
+
+  function queueAutoStartRelay() {
+    if (!state.bridge || !state.autoStartRelay || state.autoStartAttempted) {
+      return;
+    }
+    state.autoStartAttempted = true;
+    var status = state.status || {};
+    if (status.status === 'running' || state.relayBusyAction) {
+      return;
+    }
+    setTimeout(function () {
+      runRelayAction('relay-start').catch(function (error) {
+        console.error(error);
+      });
+    }, 0);
   }
 
   function queueEnvPathSave() {
