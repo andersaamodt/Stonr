@@ -1018,11 +1018,26 @@
 
     var grid = document.createElement('div');
     grid.className = 'field-grid';
+    if (section.id === 'nips') {
+      grid.appendChild(renderNipSupportHeader());
+    }
     section.fields.forEach(function (field) {
       grid.appendChild(renderField(field, section.id));
     });
     card.appendChild(grid);
     return card;
+  }
+
+  function renderNipSupportHeader() {
+    var header = document.createElement('div');
+    header.className = 'nip-support-head';
+    header.innerHTML = [
+      '<span class="nip-col nip-col-nip">NIP</span>',
+      '<span class="nip-col nip-col-feature">Feature</span>',
+      '<span class="nip-col nip-col-summary">Description</span>',
+      '<span class="nip-col nip-col-enabled">Enabled</span>'
+    ].join('');
+    return header;
   }
 
   function renderField(field, sectionId) {
