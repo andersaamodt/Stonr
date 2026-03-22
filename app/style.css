@@ -1204,6 +1204,16 @@ h4 {
   grid-area: hint;
 }
 
+.desktop-toggle-busy {
+  justify-self: end;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
 .card-head,
 .runtime-head,
 .drawer-head {

@@ -51,6 +51,7 @@
     startupServiceEnabled: false,
     startupServiceManager: 'none',
     startupServiceBusy: false,
+    startupServicePendingAction: '',
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -897,6 +898,7 @@
     state.startupServiceEnabled = false;
     state.startupServiceManager = 'none';
     state.startupServiceBusy = false;
+    state.startupServicePendingAction = '';
     if (!state.backgroundMode) {
       state.menuBarIcon = false;
     }
@@ -1526,7 +1528,10 @@
       state.startupServiceBusy || state.startupServiceManager === 'none',
       function (checked) {
         return setStartupServiceEnabled(checked);
-      }
+      },
+      state.startupServiceBusy
+        ? (state.startupServicePendingAction === 'disable' ? 'Disabling...' : 'Enabling...')
+        : ''
     ));
 
     card.appendChild(grid);
@@ -1535,6 +1540,7 @@
 
   function renderDesktopToggleField(labelText, checked, onChange, helpText, forceDisabled) {
     var onPersist = arguments[5];
+    var busyText = arguments[6];
     var wrap = document.createElement('div');
     wrap.className = 'field checkbox-field';
     if (forceDisabled) {
@@ -1578,6 +1584,12 @@
     });
     wrap.appendChild(input);
     wrap.appendChild(label);
+    if (busyText) {
+      var busy = document.createElement('span');
+      busy.className = 'desktop-toggle-busy';
+      busy.innerHTML = '<span>' + escapeHtml(String(busyText)) + '</span><span class="action-spinner" aria-hidden="true"></span>';
+      wrap.appendChild(busy);
+    }
     return wrap;
   }
 
@@ -3103,6 +3115,7 @@
       return;
     }
     state.startupServiceBusy = true;
+    state.startupServicePendingAction = nextEnabled ? 'enable' : 'disable';
     renderActiveSection();
     try {
       var command = nextEnabled ? 'service-autostart-enable' : 'service-autostart-disable';
@@ -3112,6 +3125,7 @@
       toast(nextEnabled ? 'Startup service enabled.' : 'Startup service disabled.', 'good');
     } finally {
       state.startupServiceBusy = false;
+      state.startupServicePendingAction = '';
     }
   }
 
