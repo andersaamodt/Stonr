@@ -765,6 +765,9 @@
     state.envPath = prefs.env_path || state.envPath || '';
     state.backgroundMode = matchesBool(prefs.background_mode || '');
     state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
+    if (!state.backgroundMode) {
+      state.menuBarIcon = false;
+    }
     state.envValues = {};
     state.activeSection = 'relay';
     state.events = [];
@@ -1385,7 +1388,8 @@
           state.backgroundMode = true;
         }
       },
-      'Show a menu bar or tray icon so you can reopen the window or quit while the relay keeps running.'
+      'Show a menu bar or tray icon so you can reopen the window or quit while the relay keeps running.',
+      !state.backgroundMode
     ));
 
     card.appendChild(grid);
