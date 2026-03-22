@@ -1286,6 +1286,15 @@ h4 {
   min-height: 18rem;
 }
 
+#verify-run {
+  margin-right: 0.4rem;
+}
+
+#relay-log {
+  width: calc(100% - 0.4rem);
+  margin-right: 0.4rem;
+}
+
 .toast {
   position: fixed;
   left: 50%;
