@@ -20,6 +20,9 @@ Commands:
   doctor [ENV_PATH]
   get-ui-prefs
   set-ui-pref KEY VALUE
+  service-autostart-status [ENV_PATH]
+  service-autostart-enable [ENV_PATH]
+  service-autostart-disable [ENV_PATH]
   load-config [ENV_PATH]
   load-env [ENV_PATH]
   mirror-status [ENV_PATH]
@@ -405,6 +408,143 @@ EOF
   exit 1
 }
 
+service_label() {
+  printf 'dev.stonr.relay\n'
+}
+
+detect_service_manager() {
+  if command -v launchctl >/dev/null 2>&1 && [ "$(uname -s 2>/dev/null || printf unknown)" = "Darwin" ]; then
+    printf 'launchd\n'
+    return 0
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    printf 'systemd\n'
+    return 0
+  fi
+  printf 'none\n'
+}
+
+launchd_domain() {
+  printf 'gui/%s\n' "$(id -u)"
+}
+
+launchd_plist_path() {
+  printf '%s\n' "$HOME/Library/LaunchAgents/$(service_label).plist"
+}
+
+systemd_unit_name() {
+  printf 'stonr-relay.service\n'
+}
+
+systemd_unit_path() {
+  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$(systemd_unit_name)"
+}
+
+service_autostart_status() {
+  env_path=${1-}
+  manager=$(detect_service_manager)
+  enabled=0
+  installed=0
+  loaded=0
+  active=0
+  label=$(service_label)
+  path=
+  case "$manager" in
+    launchd)
+      path=$(launchd_plist_path)
+      if [ -f "$path" ]; then
+        installed=1
+        enabled=1
+      fi
+      if launchctl print "$(launchd_domain)/$label" >/dev/null 2>&1; then
+        loaded=1
+      fi
+      ;;
+    systemd)
+      unit_name=$(systemd_unit_name)
+      path=$(systemd_unit_path)
+      if [ -f "$path" ]; then
+        installed=1
+      fi
+      if systemctl --user is-enabled "$unit_name" >/dev/null 2>&1; then
+        enabled=1
+      fi
+      if systemctl --user is-active "$unit_name" >/dev/null 2>&1; then
+        active=1
+      fi
+      ;;
+    *)
+      manager=none
+      ;;
+  esac
+  printf '%s\n' "manager=$manager"
+  printf '%s\n' "label=$label"
+  printf '%s\n' "path=$path"
+  printf '%s\n' "enabled=$enabled"
+  printf '%s\n' "installed=$installed"
+  printf '%s\n' "loaded=$loaded"
+  printf '%s\n' "active=$active"
+  if [ -n "${env_path:-}" ]; then
+    printf '%s\n' "env_path=$env_path"
+  fi
+}
+
+service_autostart_enable() {
+  env_path=${1-}
+  manager=$(detect_service_manager)
+  label=$(service_label)
+  case "$manager" in
+    launchd)
+      plist_path=$(launchd_plist_path)
+      mkdir -p "$(dirname "$plist_path")"
+      run_stonr --env "$env_path" print-service --manager launchd --label "$label" > "$plist_path"
+      launchctl bootout "$(launchd_domain)" "$plist_path" >/dev/null 2>&1 || :
+      launchctl bootstrap "$(launchd_domain)" "$plist_path"
+      launchctl enable "$(launchd_domain)/$label" >/dev/null 2>&1 || :
+      launchctl kickstart -k "$(launchd_domain)/$label" >/dev/null 2>&1 || :
+      ;;
+    systemd)
+      unit_name=$(systemd_unit_name)
+      unit_path=$(systemd_unit_path)
+      mkdir -p "$(dirname "$unit_path")"
+      run_stonr --env "$env_path" print-service --manager systemd --label "$label" > "$unit_path"
+      systemctl --user daemon-reload
+      systemctl --user enable --now "$unit_name"
+      ;;
+    *)
+      printf '%s\n' "stonr-control-backend: startup service unsupported on this host" >&2
+      exit 1
+      ;;
+  esac
+  service_autostart_status "$env_path"
+}
+
+service_autostart_disable() {
+  env_path=${1-}
+  manager=$(detect_service_manager)
+  label=$(service_label)
+  case "$manager" in
+    launchd)
+      plist_path=$(launchd_plist_path)
+      launchctl bootout "$(launchd_domain)" "$plist_path" >/dev/null 2>&1 || :
+      launchctl disable "$(launchd_domain)/$label" >/dev/null 2>&1 || :
+      rm -f "$plist_path"
+      ;;
+    systemd)
+      unit_name=$(systemd_unit_name)
+      unit_path=$(systemd_unit_path)
+      systemctl --user disable --now "$unit_name" >/dev/null 2>&1 || :
+      rm -f "$unit_path"
+      systemctl --user daemon-reload >/dev/null 2>&1 || :
+      ;;
+    *)
+      printf '%s\n' "stonr-control-backend: startup service unsupported on this host" >&2
+      exit 1
+      ;;
+  esac
+  service_autostart_status "$env_path"
+}
+
 relay_pid() {
   env_path=${1-}
   file=$(pid_path "$env_path")
@@ -729,6 +869,22 @@ case "$cmd" in
       exit 2
     }
     pref_set "$key" "$value"
+    ;;
+  service-autostart-status)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    service_autostart_status "$env_path"
+    ;;
+  service-autostart-enable)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    ensure_runtime_dirs "$env_path"
+    service_autostart_enable "$env_path"
+    ;;
+  service-autostart-disable)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    service_autostart_disable "$env_path"
     ;;
   doctor)
     env_path=$(resolve_env_path "${1-}")

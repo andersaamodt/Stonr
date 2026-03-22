@@ -48,8 +48,9 @@
     diagnosticsError: '',
     backgroundMode: false,
     menuBarIcon: false,
-    autoStartRelay: false,
-    autoStartAttempted: false,
+    startupServiceEnabled: false,
+    startupServiceManager: 'none',
+    startupServiceBusy: false,
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -935,8 +936,24 @@
     }
     await saveUiPref('background_mode', state.backgroundMode ? '1' : '0');
     await saveUiPref('menu_bar_icon', state.menuBarIcon ? '1' : '0');
-    await saveUiPref('relay_auto_start', state.autoStartRelay ? '1' : '0');
     await syncDesktopHostSettings();
+  }
+
+  async function loadStartupServiceStatus() {
+    if (!state.bridge) {
+      state.startupServiceEnabled = false;
+      state.startupServiceManager = 'none';
+      return;
+    }
+    try {
+      var kv = parseKv(await backend('service-autostart-status', [state.envPath]));
+      state.startupServiceEnabled = matchesBool(kv.enabled || '');
+      state.startupServiceManager = String(kv.manager || 'none');
+    } catch (error) {
+      console.error(error);
+      state.startupServiceEnabled = false;
+      state.startupServiceManager = 'none';
+    }
   }
 
   async function syncDesktopHostSettings() {
@@ -990,8 +1007,9 @@
     state.envPath = prefs.env_path || state.envPath || '';
     state.backgroundMode = matchesBool(prefs.background_mode || '');
     state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
-    state.autoStartRelay = matchesBool(prefs.relay_auto_start || '');
-    state.autoStartAttempted = false;
+    state.startupServiceEnabled = false;
+    state.startupServiceManager = 'none';
+    state.startupServiceBusy = false;
     if (!state.backgroundMode) {
       state.menuBarIcon = false;
     }
@@ -1033,6 +1051,7 @@
       els.doctorOutput.textContent = state.doctor.trim() || 'No backend output.';
       state.envValues = parseKv(await backend('load-env', [state.envPath]));
       state.status = parseKv(await backend('relay-status', [state.envPath]));
+      await loadStartupServiceStatus();
       await syncDesktopHostSettings();
       await loadConfigForBootFrame(state.configEditSeq);
       syncFieldDependencies();
@@ -1041,7 +1060,6 @@
       revealBootUi();
       queuePostBootEventsLoad();
       hydrateAfterBoot(true);
-      queueAutoStartRelay();
     } catch (error) {
       console.error(error);
       toast(summarizeBackendError(error, 'Failed to load relay state'), 'bad');
@@ -1627,12 +1645,18 @@
     ));
 
     grid.appendChild(renderDesktopToggleField(
-      'Auto-start relay when app opens',
-      state.autoStartRelay,
-      function (checked) {
-        state.autoStartRelay = checked;
+      'Auto-start relay when system starts',
+      state.startupServiceEnabled,
+      function () {
+        return;
       },
-      'When enabled, this control app automatically starts the relay once during app launch if it is currently stopped.'
+      state.startupServiceManager === 'none'
+        ? 'Startup service is unavailable on this host.'
+        : 'Install a user startup service so the relay starts automatically when your system starts.',
+      state.startupServiceBusy || state.startupServiceManager === 'none',
+      function (checked) {
+        return setStartupServiceEnabled(checked);
+      }
     ));
 
     card.appendChild(grid);
@@ -1640,6 +1664,7 @@
   }
 
   function renderDesktopToggleField(labelText, checked, onChange, helpText, forceDisabled) {
+    var onPersist = arguments[5];
     var wrap = document.createElement('div');
     wrap.className = 'field checkbox-field';
     if (forceDisabled) {
@@ -1661,11 +1686,23 @@
     input.title = helpText;
     bindCheckboxLabel(label, input);
     input.addEventListener('change', function () {
+      var previous = !input.checked;
       onChange(input.checked);
-      saveDesktopPrefs().then(function () {
+      var persistPromise;
+      if (typeof onPersist === 'function') {
+        persistPromise = Promise.resolve().then(function () {
+          return onPersist(input.checked);
+        });
+      } else {
+        persistPromise = saveDesktopPrefs();
+      }
+      persistPromise.then(function () {
         renderActiveSection();
       }).catch(function (error) {
         console.error(error);
+        input.checked = previous;
+        onChange(previous);
+        renderActiveSection();
         toast(summarizeBackendError(error, 'Failed to save desktop settings'), 'bad');
       });
     });
@@ -3184,20 +3221,21 @@
     return runRelayAction(status.status === 'running' ? 'relay-stop' : 'relay-start');
   }
 
-  function queueAutoStartRelay() {
-    if (!state.bridge || !state.autoStartRelay || state.autoStartAttempted) {
+  async function setStartupServiceEnabled(nextEnabled) {
+    if (!state.bridge) {
       return;
     }
-    state.autoStartAttempted = true;
-    var status = state.status || {};
-    if (status.status === 'running' || state.relayBusyAction) {
-      return;
+    state.startupServiceBusy = true;
+    renderActiveSection();
+    try {
+      var command = nextEnabled ? 'service-autostart-enable' : 'service-autostart-disable';
+      var kv = parseKv(await backend(command, [state.envPath]));
+      state.startupServiceEnabled = matchesBool(kv.enabled || '');
+      state.startupServiceManager = String(kv.manager || state.startupServiceManager || 'none');
+      toast(nextEnabled ? 'Startup service enabled.' : 'Startup service disabled.', 'good');
+    } finally {
+      state.startupServiceBusy = false;
     }
-    setTimeout(function () {
-      runRelayAction('relay-start').catch(function (error) {
-        console.error(error);
-      });
-    }, 0);
   }
 
   function queueEnvPathSave() {
