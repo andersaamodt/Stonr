@@ -82,6 +82,30 @@ fn mirror_status_returns_json_array() {
 }
 
 #[test]
+fn tail_log_prefixes_timestamp_on_each_line() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let store_root = dir.path().join("store");
+    fs::create_dir_all(store_root.join("runtime")).unwrap();
+    fs::write(
+        store_root.join("runtime/relay.log"),
+        concat!(
+            "storage warning: skipping unreadable event file /tmp/a: bad UTF-8\n",
+            "{\"ts\":1711111111,\"level\":\"warn\",\"component\":\"retention\",\"message\":\"failed to enforce retention\"}\n"
+        ),
+    )
+    .unwrap();
+
+    let output = run_backend(&["tail-log", &env_path, "20"]);
+    let lines: Vec<&str> = output.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with('['));
+    assert!(lines[0].contains("] storage warning: skipping unreadable event file /tmp/a: bad UTF-8"));
+    assert!(lines[1].starts_with('['));
+    assert!(lines[1].contains("] {\"ts\":1711111111,"));
+}
+
+#[test]
 fn count_events_prefers_runtime_cache() {
     let dir = TempDir::new().unwrap();
     let env_path = write_env(&dir);

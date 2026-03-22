@@ -986,7 +986,47 @@ json.dump(events, sys.stdout)
     lines=${2-200}
     normalize_env_file "$env_path"
     file=$(log_path "$env_path")
-    [ -f "$file" ] && tail -n "$lines" "$file"
+    if [ -f "$file" ]; then
+      python3 - "$file" "$lines" <<'PY'
+import datetime
+import json
+import subprocess
+import sys
+
+log_path = sys.argv[1]
+lines = sys.argv[2]
+
+result = subprocess.run(
+    ["tail", "-n", lines, log_path],
+    check=False,
+    capture_output=True,
+    text=True,
+    errors="replace",
+)
+if result.returncode != 0:
+    sys.stderr.write(result.stderr)
+    sys.exit(result.returncode)
+
+def format_timestamp(value):
+    try:
+        return datetime.datetime.fromtimestamp(int(value)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+for raw_line in result.stdout.splitlines():
+    line = raw_line.rstrip("\n")
+    ts = None
+    try:
+        parsed = json.loads(line)
+        if isinstance(parsed, dict) and "ts" in parsed:
+            ts = format_timestamp(parsed["ts"])
+    except Exception:
+        parsed = None
+    if ts is None:
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] {line}")
+PY
+    fi
     ;;
   verify)
     env_path=$(resolve_env_path "${1-}")
