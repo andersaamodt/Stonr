@@ -1133,10 +1133,20 @@ h4 {
 }
 
 .field.checkbox-field.nip-child-field input {
-  width: 0.96rem;
-  height: 0.96rem;
+  width: 0.82rem;
+  min-width: 0.82rem;
+  max-width: 0.82rem;
+  height: 0.82rem;
+  min-height: 0.82rem;
+  max-height: 0.82rem;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  padding: 0;
+  margin-right: 0;
   align-self: start;
   margin-top: 0.06rem;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
 .field.checkbox-field.nip-child-field input[type="checkbox"] {
@@ -1151,8 +1161,8 @@ h4 {
 
 .field.checkbox-field.nip-child-field input[type="checkbox"]::before {
   content: "";
-  width: 0.56rem;
-  height: 0.56rem;
+  width: 0.46rem;
+  height: 0.46rem;
   transform: scale(0);
   clip-path: polygon(14% 52%, 0 66%, 42% 100%, 100% 22%, 84% 8%, 42% 66%);
   background: color-mix(in srgb, var(--accent) 42%, white);
