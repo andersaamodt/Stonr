@@ -765,20 +765,6 @@ h4 {
   line-height: 1.35;
 }
 
-.preset-apply-field {
-  align-content: start;
-  gap: 0.3rem;
-}
-
-.preset-note {
-  margin-top: 0;
-  max-width: 34rem;
-}
-
-.preset-apply-btn {
-  justify-self: start;
-}
-
 .retention-apply-field {
   margin-top: -0.15rem;
 }

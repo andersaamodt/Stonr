@@ -5,10 +5,9 @@ fn read_file(path: &str) -> String {
 }
 
 #[test]
-fn app_includes_nostr_blog_preset_flow() {
+fn app_hides_nostr_blog_preset_flow() {
     let app_js = read_file(&format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR")));
-    assert!(app_js.contains("Apply nostr-blog preset"));
-    assert!(app_js.contains("apply-preset"));
+    assert!(!app_js.contains("Apply nostr-blog preset"));
     assert!(app_js.contains("Site author pubkey"));
 }
 

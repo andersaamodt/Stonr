@@ -19,7 +19,6 @@
     saveStatusTicket: 0,
     saveStatusShownAt: 0,
     relayBusyAction: '',
-    presetBusy: '',
     retentionBusy: false,
     railWidth: 224,
     dragPointerId: null,
@@ -109,12 +108,6 @@
       title: 'Network And Mirror',
       detail: 'Bind addresses, upstream feeds, and mirror filter state.',
       fields: [
-        groupField('Presets'),
-        presetApplyField(
-          'nostr-blog',
-          'Apply nostr-blog preset',
-          'Sets one-site mirror defaults for one site author and that site\'s comments. Set Site author pubkey after applying.'
-        ),
         groupField('Mirror Mode'),
         radioField('MIRROR_MODE', 'mirror_mode', 'Mirror mode', [
           { value: 'broad', label: 'General relay' },
@@ -795,7 +788,6 @@
     state.diagnosticsMirror = [];
     state.diagnosticsRetention = null;
     state.diagnosticsError = '';
-    state.presetBusy = '';
     state.railWidth = parseRailWidth(prefs.rail_width) || state.railWidth;
     els.envPath.value = state.envPath;
     applyRailWidth(state.railWidth);
@@ -1034,9 +1026,6 @@
     }
     if (field.type === 'note') {
       return renderNoteField(field);
-    }
-    if (field.type === 'preset-apply') {
-      return renderPresetApplyField(field);
     }
     if (field.type === 'retention-apply') {
       return renderRetentionApplyField();
@@ -1335,31 +1324,6 @@
     return note;
   }
 
-  function renderPresetApplyField(field) {
-    var wrap = document.createElement('div');
-    wrap.className = 'field preset-apply-field';
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'action mini preset-apply-btn';
-    button.textContent = state.presetBusy === field.preset ? 'Applying...' : field.label;
-    button.disabled = !state.bridge || state.presetBusy === field.preset;
-    button.title = field.note || field.label;
-    button.addEventListener('click', function () {
-      applyPreset(field.preset).catch(function (error) {
-        console.error(error);
-        toast(summarizeBackendError(error, 'Failed to apply preset'), 'bad');
-      });
-    });
-    wrap.appendChild(button);
-    if (field.note) {
-      var note = document.createElement('p');
-      note.className = 'section-note preset-note';
-      note.textContent = field.note;
-      wrap.appendChild(note);
-    }
-    return wrap;
-  }
-
   function renderRetentionApplyField() {
     var wrap = document.createElement('div');
     wrap.className = 'field retention-apply-field';
@@ -1377,29 +1341,6 @@
     });
     wrap.appendChild(button);
     return wrap;
-  }
-
-  async function applyPreset(preset) {
-    if (!state.bridge) {
-      return;
-    }
-    try {
-      state.presetBusy = preset;
-      renderActiveSection();
-      await backend('apply-preset', [state.envPath, preset]);
-      state.doctor = await backend('doctor', [state.envPath]);
-      state.doctorKv = parseKv(state.doctor);
-      state.envValues = parseKv(await backend('load-env', [state.envPath]));
-      state.status = parseKv(await backend('relay-status', [state.envPath]));
-      state.config = JSON.parse(await backend('load-config', [state.envPath]));
-      syncFieldDependencies();
-      renderRuntime();
-      renderActiveSection();
-      toast('Applied ' + preset + ' preset');
-    } finally {
-      state.presetBusy = '';
-      renderActiveSection();
-    }
   }
 
   function renderDesktopSection() {
@@ -2541,10 +2482,6 @@
 
   function noteField(text) {
     return { type: 'note', text: text };
-  }
-
-  function presetApplyField(preset, label, note) {
-    return { type: 'preset-apply', preset: preset, label: label, note: note || '' };
   }
 
   function retentionApplyField() {
