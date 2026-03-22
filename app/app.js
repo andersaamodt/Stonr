@@ -98,11 +98,11 @@
         textField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkey', 'Hex pubkey for the site owner', null, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Hex pubkey whose long-form posts define the one-site mirror scope.'),
         boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.'),
         groupField('Core Behavior'),
-        boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', '', null, 'Allow clients to read stored events with REQ filters.'),
-        boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', '', null, 'Allow clients to publish new events to this relay.'),
-        boolField('ENABLE_LIVE_SUBSCRIPTIONS', 'policy.enable_live_subscriptions', 'Live updates (recommended)', '', null, 'Keep subscriptions open and push new matching events as they arrive.'),
-        boolField('VERIFY_SIG', 'verify_sig', 'Signature checks (recommended)', '', null, 'Reject events whose signatures do not match their claimed author.'),
-        boolField('ENABLE_MIRRORING', 'policy.enable_mirroring', 'Import from relays', '', null, 'Pull events from upstream relays into local storage.')
+        boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', 'Clients can read stored events.', null, 'Allow clients to read stored events with REQ filters.'),
+        boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', 'Clients can publish events.', null, 'Allow clients to publish new events to this relay.'),
+        boolField('ENABLE_LIVE_SUBSCRIPTIONS', 'policy.enable_live_subscriptions', 'Live updates (recommended)', 'Subscriptions stay open for new matching events.', null, 'Keep subscriptions open and push new matching events as they arrive.'),
+        boolField('VERIFY_SIG', 'verify_sig', 'Signature checks (recommended)', 'Invalid signatures are rejected.', null, 'Reject events whose signatures do not match their claimed author.'),
+        boolField('ENABLE_MIRRORING', 'policy.enable_mirroring', 'Import from relays', 'Imports events from configured upstream relays.', null, 'Pull events from upstream relays into local storage.')
       ]
     },
     {
@@ -1179,7 +1179,7 @@
     var showHint = false;
     if (field.type === 'text' || field.type === 'textarea') {
       showHint = !!field.hint;
-    } else if (field.type === 'bool' && sectionId === 'policies') {
+    } else if (field.type === 'bool' && (sectionId === 'policies' || field.hint)) {
       showHint = !!(field.hint || field.tooltip);
     }
     if (field.type === 'bool' && showHint) {
