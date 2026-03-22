@@ -68,6 +68,15 @@
       custom: 'events'
     },
     {
+      id: 'general',
+      label: 'General',
+      eyebrow: 'General',
+      title: 'General Settings',
+      detail: 'Desktop app behavior and window lifecycle.',
+      fields: [],
+      custom: 'general'
+    },
+    {
       id: 'relay',
       label: 'Relay',
       eyebrow: 'Core',
@@ -77,6 +86,22 @@
         groupField('Identity'),
         textField('RELAY_NAME', 'policy.relay_name', 'Relay name', '', null, null, 'Name shown to clients when they browse or save this relay.'),
         textField('RELAY_DESCRIPTION', 'policy.relay_description', 'Relay description', '', null, null, 'Short summary shown beside the relay name in client UIs.'),
+        groupField('Mirror Mode'),
+        radioField('MIRROR_MODE', 'mirror_mode', 'Mirror mode', [
+          { value: 'broad', label: 'General relay' },
+          { value: 'site', label: 'One-site mirror' }
+        ], null, 'Choose whether this relay mirrors broad upstream traffic or only one site author and that site\'s comments.'),
+        textField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkey', 'Hex pubkey for the site owner', null, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Hex pubkey whose long-form posts define the one-site mirror scope.'),
+        boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.')
+      ]
+    },
+    {
+      id: 'policies',
+      label: 'Policies',
+      eyebrow: 'Policies',
+      title: 'Relay Policies',
+      detail: 'Enable and disable core relay behavior and client capabilities.',
+      fields: [
         groupField('Feature Switches'),
         boolField(
           'ENABLE_NIP11',
@@ -108,13 +133,6 @@
       title: 'Network And Mirror',
       detail: 'Bind addresses, upstream feeds, and mirror filter state.',
       fields: [
-        groupField('Mirror Mode'),
-        radioField('MIRROR_MODE', 'mirror_mode', 'Mirror mode', [
-          { value: 'broad', label: 'General relay' },
-          { value: 'site', label: 'One-site mirror' }
-        ], null, 'Choose whether this relay mirrors broad upstream traffic or only one site author and that site\'s comments.'),
-        textField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkey', 'Hex pubkey for the site owner', null, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Hex pubkey whose long-form posts define the one-site mirror scope.'),
-        boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.'),
         groupField('Local Paths And Ports'),
         browseTextField('STORE_ROOT', 'store_root', 'Data folder', '', null, null, 'Root folder for events, blobs, indexes, logs, and runtime files.'),
         textField('BIND_HTTP', 'bind_http', 'HTTP address', 'Example: 127.0.0.1:7777', null, null, 'Local host and port for relay info, file APIs, and other HTTP routes.'),
@@ -989,7 +1007,7 @@
     if (section.fields.length) {
       els.sectionContent.appendChild(renderFieldSection(section));
     }
-    if (section.id === 'relay') {
+    if (section.id === 'general') {
       els.sectionContent.appendChild(renderDesktopSection());
     }
     if (section.custom === 'moderation') {
