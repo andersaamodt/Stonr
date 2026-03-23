@@ -250,6 +250,7 @@
         browseTextField('STORE_ROOT', 'store_root', 'Data folder', '', null, null, 'Root folder for events, blobs, indexes, logs, and runtime files.'),
         textField('BIND_HTTP', 'bind_http', 'HTTP address', 'Example: 127.0.0.1:7777', null, null, 'Local host and port for relay info, file APIs, and other HTTP routes.'),
         textField('BIND_WS', 'bind_ws', 'WebSocket address', 'Example: 127.0.0.1:7778', null, null, 'Local host and port where Nostr clients connect for relay traffic.'),
+        textField('PUBLIC_RELAY_URL', 'policy.public_relay_url', 'Public relay URL', 'Example: wss://relay.example.com', null, null, 'Public relay URL clients should use. Provision TLS with centralized Wizardry/Headquarters SSL setup, then set this URL.'),
         groupField('Upstream Relays'),
         textareaField('RELAYS_UPSTREAM', 'relays_upstream', 'Source relays', 'One relay URL per line', formatLineList, null, 'Relay URLs to import events from, one per line.'),
         textField('TOR_SOCKS', 'tor_socks', 'SOCKS proxy', 'Optional. Example: 127.0.0.1:9050', null, null, 'Optional SOCKS proxy for outbound relay traffic, including Tor.'),
@@ -1558,6 +1559,8 @@
 
     grid.appendChild(renderKv('Status', runtimeStatus));
     grid.appendChild(renderKv('PID', pidValue, pidOptions));
+    grid.appendChild(renderKv('Relay URL', relayPublicWsUrl()));
+    grid.appendChild(renderKv('Profile URL', relayProfileUrl()));
     grid.appendChild(renderKv('Env', state.envPath || ''));
     grid.appendChild(renderKv('Store root', status.store_root || ''));
     grid.appendChild(renderKv('PID file', status.pid_path || ''));
@@ -1704,6 +1707,8 @@
         return 'broad';
       case 'MIRROR_SITE_INCLUDE_COMMENTS':
         return true;
+      case 'PUBLIC_RELAY_URL':
+        return '';
       case 'RELAY_NAME':
         return 'stonr';
       case 'RELAY_DESCRIPTION':
@@ -3074,6 +3079,55 @@
       host = '127.0.0.1:7777';
     }
     return 'http://' + host;
+  }
+
+  function bindWsUrl() {
+    var bind = rawEnvValueByKey('BIND_WS') || getPath(state.config || {}, 'bind_ws') || '127.0.0.1:7778';
+    var host = String(bind).trim() || '127.0.0.1:7778';
+    if (host === '0.0.0.0:7778' || host === '[::]:7778') {
+      host = '127.0.0.1:7778';
+    }
+    if (/^wss?:\/\//i.test(host)) {
+      return host.replace(/\/+$/, '');
+    }
+    if (/^https?:\/\//i.test(host)) {
+      return host.replace(/^http/i, 'ws').replace(/\/+$/, '');
+    }
+    return 'ws://' + host.replace(/\/+$/, '');
+  }
+
+  function normalizeRelayWsUrl(value) {
+    var text = String(value || '').trim();
+    if (!text) {
+      return '';
+    }
+    if (/^wss?:\/\//i.test(text)) {
+      return text.replace(/\/+$/, '');
+    }
+    if (/^https?:\/\//i.test(text)) {
+      return text.replace(/^http/i, 'ws').replace(/\/+$/, '');
+    }
+    return 'wss://' + text.replace(/\/+$/, '');
+  }
+
+  function relayPublicWsUrl() {
+    var configured =
+      rawEnvValueByKey('PUBLIC_RELAY_URL') ||
+      getPath(state.config || {}, 'policy.public_relay_url') ||
+      '';
+    var normalized = normalizeRelayWsUrl(configured);
+    return normalized || bindWsUrl();
+  }
+
+  function relayProfileUrl() {
+    var relay = relayPublicWsUrl();
+    if (/^wss:\/\//i.test(relay)) {
+      return relay.replace(/^wss:/i, 'https:') + '/';
+    }
+    if (/^ws:\/\//i.test(relay)) {
+      return relay.replace(/^ws:/i, 'http:') + '/';
+    }
+    return bindHttpOrigin().replace(/\/+$/, '') + '/';
   }
 
   function basename(path) {

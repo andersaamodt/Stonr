@@ -186,6 +186,7 @@ ensure_env_file() {
 STORE_ROOT=$store_root
 BIND_HTTP=127.0.0.1:7777
 BIND_WS=127.0.0.1:7778
+PUBLIC_RELAY_URL=
 VERIFY_SIG=0
 RELAY_NAME=stonr
 RELAY_DESCRIPTION=File-backed Nostr relay
@@ -598,6 +599,29 @@ relay_running() {
 
 relay_profile_url() {
   env_path=${1-}
+  public_relay_url=$(env_get "$env_path" PUBLIC_RELAY_URL 2>/dev/null || printf '')
+  if [ -n "$public_relay_url" ]; then
+    public_relay_url=$(sanitize_env_value "$public_relay_url")
+    public_relay_url=${public_relay_url%/}
+    case "$public_relay_url" in
+      wss://*)
+        printf 'https://%s/\n' "${public_relay_url#wss://}"
+        return 0
+        ;;
+      ws://*)
+        printf 'http://%s/\n' "${public_relay_url#ws://}"
+        return 0
+        ;;
+      https://*|http://*)
+        printf '%s/\n' "$public_relay_url"
+        return 0
+        ;;
+      *)
+        printf 'https://%s/\n' "$public_relay_url"
+        return 0
+        ;;
+    esac
+  fi
   bind_http=$(env_get "$env_path" BIND_HTTP "127.0.0.1:7777")
   host_port=$bind_http
   case "$host_port" in
