@@ -1,0 +1,111 @@
+name: Build Supported Platforms
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-desktop:
+    name: Desktop Bundle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            archive_suffix: linux-x86_64
+          - os: macos-latest
+            archive_suffix: macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Create desktop bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_subpath="$(awk -F= '$1 == "app_subpath" { print $2; exit }' wizardry.workspace.conf | tr -d '\r')"
+          if [ -z "${app_subpath}" ]; then
+            app_subpath="app"
+          fi
+          package_dir="stonr-${{ matrix.archive_suffix }}"
+          mkdir -p "dist/${package_dir}"
+          cp target/release/stonr "dist/${package_dir}/"
+          cp -R "${app_subpath}" "dist/${package_dir}/app"
+          cp README.md LICENSE PRODUCTION_CHECKLIST.md CHANGELOG.md "dist/${package_dir}/"
+          tar -C dist -czf "${package_dir}.tar.gz" "${package_dir}"
+
+      - name: Upload desktop bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: stonr-${{ matrix.archive_suffix }}
+          path: stonr-${{ matrix.archive_suffix }}.tar.gz
+          if-no-files-found: error
+
+  build-hosted-web:
+    name: Hosted Web Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create hosted web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_subpath="$(awk -F= '$1 == "app_subpath" { print $2; exit }' wizardry.workspace.conf | tr -d '\r')"
+          if [ -z "${app_subpath}" ]; then
+            app_subpath="app"
+          fi
+          package_dir="stonr-hosted-web"
+          mkdir -p "dist/${package_dir}"
+          cp -R "${app_subpath}" "dist/${package_dir}/app"
+          cp README.md LICENSE PRODUCTION_CHECKLIST.md CHANGELOG.md "dist/${package_dir}/"
+          tar -C dist -czf "${package_dir}.tar.gz" "${package_dir}"
+
+      - name: Upload hosted web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: stonr-hosted-web
+          path: stonr-hosted-web.tar.gz
+          if-no-files-found: error
+
+  publish-release-assets:
+    name: Publish Release Assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build-desktop
+      - build-hosted-web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-files
+          find artifacts -type f -name '*.tar.gz' -exec cp {} release-files/ \;
+          ls -1 release-files
+
+      - name: Upload assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*.tar.gz

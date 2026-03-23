@@ -642,16 +642,6 @@ relay_profile_url() {
 }
 
 resolve_repo_root() {
-  conf_path=$REPO_ROOT/wizardry.workspace.conf
-  if [ -f "$conf_path" ]; then
-    root=$(
-      awk -F= '$1 == "root" { print substr($0, index($0, "=") + 1); exit }' "$conf_path"
-    )
-    if [ -n "${root:-}" ] && [ -f "$root/Cargo.toml" ]; then
-      printf '%s\n' "$root"
-      return 0
-    fi
-  fi
   printf '%s\n' "$REPO_ROOT"
 }
 
