@@ -1033,7 +1033,14 @@ case "$cmd" in
     filter_private=$(env_get "$env_path" FILTER_PRIVATE_MESSAGES 2>/dev/null || printf '1')
     normalize_env_file "$env_path"
     event_log=$(event_log_path "$env_path")
-    if [ -f "$event_log" ]; then
+    if relay_running "$env_path"; then
+      if [ -n "$search" ]; then
+        query_json=$(run_stonr --env "$env_path" query --search "$search" --limit "$query_limit")
+      else
+        query_json=$(run_stonr --env "$env_path" query --limit "$query_limit")
+      fi
+      printf '%s' "$query_json" | summarize_events_json "$limit" "$filter_private"
+    elif [ -f "$event_log" ]; then
       if [ -n "$search" ]; then
         query_events_from_log "$event_log" "$search" "$limit" | summarize_events_json "$limit" "$filter_private"
       else
@@ -1051,11 +1058,12 @@ for raw in sys.stdin:
 json.dump(events, sys.stdout)
 ' | summarize_events_json "$limit" "$filter_private"
       fi
-    elif [ -n "$search" ]; then
-      query_json=$(run_stonr --env "$env_path" query --search "$search" --limit "$query_limit")
-      printf '%s' "$query_json" | summarize_events_json "$limit" "$filter_private"
     else
-      query_json=$(run_stonr --env "$env_path" query --limit "$query_limit")
+      if [ -n "$search" ]; then
+        query_json=$(run_stonr --env "$env_path" query --search "$search" --limit "$query_limit")
+      else
+        query_json=$(run_stonr --env "$env_path" query --limit "$query_limit")
+      fi
       printf '%s' "$query_json" | summarize_events_json "$limit" "$filter_private"
     fi
     ;;
