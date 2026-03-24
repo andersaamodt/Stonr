@@ -133,10 +133,14 @@ pub fn descriptor(meta: &files::BlobMeta, public_origin: &str) -> BlobDescriptor
 }
 
 fn tag_values(event: &Event, name: &str) -> Vec<String> {
-    event.tags.iter().filter_map(|fields| match fields.0.as_slice() {
-        [tag, value, ..] if tag == name => Some(value.clone()),
-        _ => None,
-    }).collect()
+    event
+        .tags
+        .iter()
+        .filter_map(|fields| match fields.0.as_slice() {
+            [tag, value, ..] if tag == name => Some(value.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn now_unix() -> u64 {

@@ -13,15 +13,18 @@ pub fn error(component: &str, message: &str, fields: Value) {
 }
 
 fn emit(level: &str, component: &str, message: &str, fields: Value) {
-    eprintln!("{}", serde_json::to_string(&entry(level, component, message, fields)).unwrap_or_else(|_| {
-        format!(
-            r#"{{"ts":{},"level":"{}","component":"{}","message":"{}"}}"#,
-            current_unix_ts(),
-            level,
-            component,
-            message.replace('"', "'"),
-        )
-    }));
+    eprintln!(
+        "{}",
+        serde_json::to_string(&entry(level, component, message, fields)).unwrap_or_else(|_| {
+            format!(
+                r#"{{"ts":{},"level":"{}","component":"{}","message":"{}"}}"#,
+                current_unix_ts(),
+                level,
+                component,
+                message.replace('"', "'"),
+            )
+        })
+    );
 }
 
 fn entry(level: &str, component: &str, message: &str, fields: Value) -> Value {

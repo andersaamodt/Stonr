@@ -6,7 +6,10 @@ use anyhow::{anyhow, bail, Result};
 use rand::RngCore;
 use url::Url;
 
-use crate::{event::{Event, Tag}, storage::verify_signed_event};
+use crate::{
+    event::{Event, Tag},
+    storage::verify_signed_event,
+};
 
 pub(crate) struct SessionAuth {
     challenge: String,
@@ -53,12 +56,13 @@ pub(crate) fn verify_auth_event(
         bail!("AUTH event must use kind 22242");
     }
     verify_signed_event(event)?;
-    let challenge_tag = tag_value(event, "challenge")
-        .ok_or_else(|| anyhow!("AUTH event missing challenge tag"))?;
+    let challenge_tag =
+        tag_value(event, "challenge").ok_or_else(|| anyhow!("AUTH event missing challenge tag"))?;
     if challenge_tag != challenge {
         bail!("AUTH event challenge mismatch");
     }
-    let relay_tag = tag_value(event, "relay").ok_or_else(|| anyhow!("AUTH event missing relay tag"))?;
+    let relay_tag =
+        tag_value(event, "relay").ok_or_else(|| anyhow!("AUTH event missing relay tag"))?;
     if !relay_tag_matches(&relay_tag, bind_ws) {
         bail!("AUTH event relay tag does not match this relay");
     }
@@ -75,10 +79,13 @@ fn generate_challenge() -> String {
 }
 
 fn tag_value(event: &Event, tag_name: &str) -> Option<String> {
-    event.tags.iter().find_map(|Tag(fields)| match fields.as_slice() {
-        [tag, value, ..] if tag == tag_name => Some(value.clone()),
-        _ => None,
-    })
+    event
+        .tags
+        .iter()
+        .find_map(|Tag(fields)| match fields.as_slice() {
+            [tag, value, ..] if tag == tag_name => Some(value.clone()),
+            _ => None,
+        })
 }
 
 fn relay_tag_matches(relay_tag: &str, bind_ws: &str) -> bool {
@@ -88,7 +95,9 @@ fn relay_tag_matches(relay_tag: &str, bind_ws: &str) -> bool {
         format!("wss://{bind_ws}"),
         format!("wss://{bind_ws}/"),
     ];
-    candidates.iter().any(|candidate| same_relay_url(relay_tag, candidate))
+    candidates
+        .iter()
+        .any(|candidate| same_relay_url(relay_tag, candidate))
 }
 
 fn same_relay_url(left: &str, right: &str) -> bool {

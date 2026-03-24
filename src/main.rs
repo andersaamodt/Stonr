@@ -2,10 +2,10 @@
 //! ingesting events, serving HTTP/WebSocket endpoints, mirroring from upstream
 //! relays, and signature verification.
 
-mod config;
-mod deploy;
 mod auth;
 mod blossom;
+mod config;
+mod deploy;
 mod event;
 mod files;
 mod log;
@@ -221,11 +221,18 @@ fn cli_query(args: QueryArgs) -> storage::Query {
 /// Execute the selected CLI subcommand.
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let cfg = Settings::from_env(&cli.env)?;
-    let store = Store::with_limits(
+    let mut pinned_pubkeys = cfg.owner_pubkeys.clone().unwrap_or_default();
+    if let Some(followed) = &cfg.follow_pubkeys {
+        pinned_pubkeys.extend(followed.iter().cloned());
+    }
+    let store = Store::with_limits_and_pins(
         cfg.store_root.clone(),
         cfg.verify_sig,
         cfg.max_stored_events,
         cfg.max_stored_event_bytes,
+        pinned_pubkeys,
+        cfg.pinned_event_ids.clone().unwrap_or_default(),
+        cfg.protect_pinned_from_deletes,
     );
     match cli.command {
         Commands::Init => {
@@ -279,17 +286,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let q = apply_query_policy(
                 &cfg,
                 cli_query(QueryArgs {
-                authors,
-                kinds,
-                d,
-                t,
-                search,
-                since,
-                until,
-                limit,
+                    authors,
+                    kinds,
+                    d,
+                    t,
+                    search,
+                    since,
+                    until,
+                    limit,
                 }),
             );
-            let events = store.query_with_policy(q, cfg.delete_enabled(), cfg.expiration_enabled())?;
+            let events =
+                store.query_with_policy(q, cfg.delete_enabled(), cfg.expiration_enabled())?;
             if count {
                 println!("{}", events.len());
             } else {
@@ -304,9 +312,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::MirrorStatus => {
             println!(
                 "{}",
-                serde_json::to_string(
-                    &crate::mirror::read_statuses(&cfg.store_root)?
-                )?
+                serde_json::to_string(&crate::mirror::read_statuses(&cfg.store_root)?)?
             );
         }
         Commands::RetentionStatus => {
@@ -422,7 +428,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let ws_addr: SocketAddr = cfg.bind_ws.parse()?;
             let (events_tx, _) = broadcast::channel(1024);
             let stats_store = store.clone();
-                tokio::spawn(async move {
+            tokio::spawn(async move {
                 if let Err(error) = stats_store.refresh_stats_cache() {
                     crate::log::warn(
                         "runtime",
@@ -436,28 +442,26 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 let retention_cfg = cfg.clone();
                 tokio::spawn(async move {
                     loop {
-                        let result = retention_store
-                            .enforce_retention()
-                            .and_then(|_| {
-                                let visible = retention_store.query_with_policy(
-                                    storage::Query {
-                                        authors: None,
-                                        kinds: None,
-                                        d: None,
-                                        t: None,
-                                        tags: vec![],
-                                        search: None,
-                                        since: None,
-                                        until: None,
-                                        limit: None,
-                                    },
-                                    retention_cfg.delete_enabled(),
-                                    retention_cfg.expiration_enabled(),
-                                )?;
-                                retention_store.files().rebuild_references(&visible)?;
-                                retention_store.files().prune(&retention_cfg, false)?;
-                                Ok(())
-                            });
+                        let result = retention_store.enforce_retention().and_then(|_| {
+                            let visible = retention_store.query_with_policy(
+                                storage::Query {
+                                    authors: None,
+                                    kinds: None,
+                                    d: None,
+                                    t: None,
+                                    tags: vec![],
+                                    search: None,
+                                    since: None,
+                                    until: None,
+                                    limit: None,
+                                },
+                                retention_cfg.delete_enabled(),
+                                retention_cfg.expiration_enabled(),
+                            )?;
+                            retention_store.files().rebuild_references(&visible)?;
+                            retention_store.files().prune(&retention_cfg, false)?;
+                            Ok(())
+                        });
                         if let Err(error) = result {
                             crate::log::warn(
                                 "retention",
@@ -475,7 +479,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 let store_clone = store.clone();
                 let cfg_clone = cfg.clone();
                 let mirror_events_tx = events_tx.clone();
-                tokio::spawn(async move { mirror::run(cfg_clone, store_clone, mirror_events_tx).await });
+                tokio::spawn(
+                    async move { mirror::run(cfg_clone, store_clone, mirror_events_tx).await },
+                );
             }
             let store_http = store.clone();
             let store_ws = store.clone();

@@ -158,7 +158,9 @@ async fn mirror_relay_forever(
     events_tx: broadcast::Sender<Event>,
 ) {
     loop {
-        if let Err(e) = mirror_relay_once(relay.clone(), cfg.clone(), store.clone(), events_tx.clone()).await {
+        if let Err(e) =
+            mirror_relay_once(relay.clone(), cfg.clone(), store.clone(), events_tx.clone()).await
+        {
             crate::log::error(
                 "mirror",
                 "broad mirror cycle failed",
@@ -188,7 +190,7 @@ async fn mirror_relay_once(
     };
     // Assemble the filter sent in the REQ message based on config options.
     let mut filter = serde_json::Map::new();
-    if let Some(a) = cfg.filter_authors.clone() {
+    if let Some(a) = cfg.mirror_authors() {
         filter.insert(
             "authors".into(),
             Value::Array(a.into_iter().map(Value::String).collect()),
@@ -276,13 +278,9 @@ async fn mirror_site_posts_forever(
     events_tx: broadcast::Sender<Event>,
 ) {
     loop {
-        if let Err(e) = mirror_site_posts_once(
-            relay.clone(),
-            cfg.clone(),
-            store.clone(),
-            events_tx.clone(),
-        )
-        .await
+        if let Err(e) =
+            mirror_site_posts_once(relay.clone(), cfg.clone(), store.clone(), events_tx.clone())
+                .await
         {
             crate::log::error(
                 "mirror",
@@ -323,7 +321,10 @@ async fn mirror_site_posts_once(
     };
     let mut filter = serde_json::Map::new();
     filter.insert("authors".into(), Value::Array(vec![Value::String(author)]));
-    filter.insert("kinds".into(), Value::Array(vec![Value::Number(30023u32.into())]));
+    filter.insert(
+        "kinds".into(),
+        Value::Array(vec![Value::Number(30023u32.into())]),
+    );
     if since > 0 {
         filter.insert("since".into(), Value::Number(since.into()));
     }
@@ -380,13 +381,9 @@ async fn mirror_site_comments_forever(
     events_tx: broadcast::Sender<Event>,
 ) {
     loop {
-        if let Err(e) = mirror_site_comments_once(
-            relay.clone(),
-            cfg.clone(),
-            store.clone(),
-            events_tx.clone(),
-        )
-        .await
+        if let Err(e) =
+            mirror_site_comments_once(relay.clone(), cfg.clone(), store.clone(), events_tx.clone())
+                .await
         {
             crate::log::error(
                 "mirror",
@@ -423,25 +420,29 @@ async fn mirror_site_comments_once(
     write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-comments")?;
     let post_events = store.query_with_policy(
         Query {
-        authors: Some(vec![author.clone()]),
-        kinds: Some(vec![30023]),
-        d: None,
-        t: None,
-        tags: vec![],
-        search: None,
-        since: None,
-        until: None,
-        limit: Some(5000),
+            authors: Some(vec![author.clone()]),
+            kinds: Some(vec![30023]),
+            d: None,
+            t: None,
+            tags: vec![],
+            search: None,
+            since: None,
+            until: None,
+            limit: Some(5000),
         },
         cfg.delete_enabled(),
         cfg.expiration_enabled(),
     )?;
     let mut addresses = vec![];
     for ev in post_events {
-        if let Some(d_tag) = ev.tags.iter().find_map(|Tag(fields)| match fields.as_slice() {
-            [tag, value, ..] if tag == "d" => Some(value.clone()),
-            _ => None,
-        }) {
+        if let Some(d_tag) = ev
+            .tags
+            .iter()
+            .find_map(|Tag(fields)| match fields.as_slice() {
+                [tag, value, ..] if tag == "d" => Some(value.clone()),
+                _ => None,
+            })
+        {
             addresses.push(format!("30023:{}:{}", ev.pubkey, d_tag));
         }
     }
@@ -455,7 +456,10 @@ async fn mirror_site_comments_once(
         SinceMode::Fixed(ts) => ts,
     };
     let mut filter = serde_json::Map::new();
-    filter.insert("kinds".into(), Value::Array(vec![Value::Number(1u32.into())]));
+    filter.insert(
+        "kinds".into(),
+        Value::Array(vec![Value::Number(1u32.into())]),
+    );
     filter.insert(
         "#a".into(),
         Value::Array(addresses.into_iter().map(Value::String).collect()),
@@ -539,21 +543,65 @@ where
         match msg {
             Err(_) => break,
             Ok(msg) => match msg {
-            Message::Text(txt) => {
-                if let Ok(val) = serde_json::from_str::<Value>(&txt) {
-                    if let Some(arr) = val.as_array() {
-                        match arr.first().and_then(|v| v.as_str()) {
-                            Some("EVENT") if arr.len() >= 3 => {
-                                if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone()) {
-                                    latest = latest.max(ev.created_at);
-                                    if validate_event_with_files(
-                                        options.settings,
-                                        &store.files(),
-                                        &ev,
-                                        current_unix_ts(),
-                                    )
-                                    .is_err()
+                Message::Text(txt) => {
+                    if let Ok(val) = serde_json::from_str::<Value>(&txt) {
+                        if let Some(arr) = val.as_array() {
+                            match arr.first().and_then(|v| v.as_str()) {
+                                Some("EVENT") if arr.len() >= 3 => {
+                                    if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone())
                                     {
+                                        latest = latest.max(ev.created_at);
+                                        if validate_event_with_files(
+                                            options.settings,
+                                            &store.files(),
+                                            &ev,
+                                            current_unix_ts(),
+                                        )
+                                        .is_err()
+                                        {
+                                            let _ = write_mirror_success(
+                                                options.store_root,
+                                                options.cursor_key,
+                                                options.relay,
+                                                options.scope,
+                                                Some(ev.created_at),
+                                                false,
+                                            );
+                                            let _ = write_cursor(
+                                                options.store_root,
+                                                options.cursor_key,
+                                                latest,
+                                            );
+                                            continue;
+                                        }
+                                        if let Err(e) = store.ingest_with_policy(
+                                            &ev,
+                                            options.delete_enabled,
+                                            options.expiration_enabled,
+                                        ) {
+                                            crate::log::warn(
+                                                "mirror",
+                                                "failed to ingest mirrored event",
+                                                serde_json::json!({
+                                                    "relay": options.relay,
+                                                    "scope": options.scope,
+                                                    "event_id": ev.id,
+                                                    "error": e.to_string(),
+                                                }),
+                                            );
+                                        } else {
+                                            let _ = store.files().add_event_references(&ev);
+                                        }
+                                        if store
+                                            .event_visible_with_policy(
+                                                &ev,
+                                                options.delete_enabled,
+                                                options.expiration_enabled,
+                                            )
+                                            .unwrap_or(false)
+                                        {
+                                            let _ = events_tx.send(ev.clone());
+                                        }
                                         let _ = write_mirror_success(
                                             options.store_root,
                                             options.cursor_key,
@@ -562,71 +610,35 @@ where
                                             Some(ev.created_at),
                                             false,
                                         );
-                                        let _ =
-                                            write_cursor(options.store_root, options.cursor_key, latest);
-                                        continue;
-                                    }
-                                    if let Err(e) = store.ingest_with_policy(
-                                        &ev,
-                                        options.delete_enabled,
-                                        options.expiration_enabled,
-                                    ) {
-                                        crate::log::warn(
-                                            "mirror",
-                                            "failed to ingest mirrored event",
-                                            serde_json::json!({
-                                                "relay": options.relay,
-                                                "scope": options.scope,
-                                                "event_id": ev.id,
-                                                "error": e.to_string(),
-                                            }),
+                                        let _ = write_cursor(
+                                            options.store_root,
+                                            options.cursor_key,
+                                            latest,
                                         );
-                                    } else {
-                                        let _ = store.files().add_event_references(&ev);
                                     }
-                                    if store
-                                        .event_visible_with_policy(
-                                            &ev,
-                                            options.delete_enabled,
-                                            options.expiration_enabled,
-                                        )
-                                        .unwrap_or(false)
-                                    {
-                                        let _ = events_tx.send(ev.clone());
-                                    }
+                                }
+                                Some("EOSE") => {
                                     let _ = write_mirror_success(
                                         options.store_root,
                                         options.cursor_key,
                                         options.relay,
                                         options.scope,
-                                        Some(ev.created_at),
-                                        false,
+                                        None,
+                                        !options.keep_running_after_eose,
                                     );
-                                    let _ =
-                                        write_cursor(options.store_root, options.cursor_key, latest);
+                                    if !options.keep_running_after_eose {
+                                        break;
+                                    }
                                 }
+                                _ => {}
                             }
-                            Some("EOSE") => {
-                                let _ = write_mirror_success(
-                                    options.store_root,
-                                    options.cursor_key,
-                                    options.relay,
-                                    options.scope,
-                                    None,
-                                    !options.keep_running_after_eose,
-                                );
-                                if !options.keep_running_after_eose {
-                                    break;
-                                }
-                            }
-                            _ => {}
                         }
                     }
                 }
-            }
-            Message::Close(_) => break,
-            _ => {}
-        }}
+                Message::Close(_) => break,
+                _ => {}
+            },
+        }
     }
     Ok(latest)
 }
@@ -943,6 +955,10 @@ mod tests {
             file_hash_denylist: None,
             file_keep_mode: crate::config::FileKeepMode::Referenced,
             max_blob_bytes_per_pubkey: None,
+            owner_pubkeys: None,
+            follow_pubkeys: None,
+            pinned_event_ids: None,
+            protect_pinned_from_deletes: true,
         }
     }
 
@@ -1144,10 +1160,7 @@ mod tests {
             .unwrap();
         server.abort();
         assert!(dir.path().join("events/aa/11/aa11.json").exists());
-        assert_eq!(
-            super::read_cursor(dir.path(), &relay_url),
-            Some(6)
-        );
+        assert_eq!(super::read_cursor(dir.path(), &relay_url), Some(6));
     }
 
     async fn spawn_socks_proxy(target: std::net::SocketAddr) -> std::net::SocketAddr {
@@ -1377,14 +1390,9 @@ mod tests {
 
         let mut cfg = base_settings(dir.path());
         cfg.mirror_site_author = Some("site-author".into());
-        mirror_site_posts_once(
-            format!("ws://{}", addr),
-            cfg,
-            store,
-            test_events_tx(),
-        )
-        .await
-        .unwrap();
+        mirror_site_posts_once(format!("ws://{}", addr), cfg, store, test_events_tx())
+            .await
+            .unwrap();
         server.await.unwrap();
 
         let req: Value = serde_json::from_str(&rx.await.unwrap()).unwrap();
@@ -1429,14 +1437,9 @@ mod tests {
 
         let mut cfg = base_settings(dir.path());
         cfg.mirror_site_author = Some("site-author".into());
-        mirror_site_comments_once(
-            format!("ws://{}", addr),
-            cfg,
-            store,
-            test_events_tx(),
-        )
-        .await
-        .unwrap();
+        mirror_site_comments_once(format!("ws://{}", addr), cfg, store, test_events_tx())
+            .await
+            .unwrap();
         server.await.unwrap();
 
         let req: Value = serde_json::from_str(&rx.await.unwrap()).unwrap();
@@ -1457,11 +1460,9 @@ mod tests {
     #[tokio::test]
     async fn connect_ws_invalid_url_errors() {
         assert!(Url::parse("not a url").is_err());
-        assert!(
-            super::connect_ws_via_proxy("not a url", "127.0.0.1:9050")
-                .await
-                .is_err()
-        );
+        assert!(super::connect_ws_via_proxy("not a url", "127.0.0.1:9050")
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -1591,6 +1592,10 @@ mod tests {
         );
 
         assert_eq!(ingested.len(), total);
-        assert!(elapsed.as_secs_f64() < 10.0, "long-running mirror smoke too slow: {:?}", elapsed);
+        assert!(
+            elapsed.as_secs_f64() < 10.0,
+            "long-running mirror smoke too slow: {:?}",
+            elapsed
+        );
     }
 }

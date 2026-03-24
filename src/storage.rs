@@ -1,6 +1,7 @@
 //! Minimal file-backed storage and query engine.
 
 use std::{
+    collections::HashSet,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -27,6 +28,9 @@ pub struct Store {
     verify_sig: bool,
     max_stored_events: Option<usize>,
     max_stored_event_bytes: Option<u64>,
+    pinned_pubkeys: HashSet<String>,
+    pinned_event_ids: HashSet<String>,
+    protect_pinned_from_deletes: bool,
 }
 
 /// Structured retention/size status stored under `runtime/`.
@@ -70,11 +74,43 @@ impl Store {
         max_stored_events: Option<usize>,
         max_stored_event_bytes: Option<u64>,
     ) -> Self {
+        Self::with_limits_and_pins(
+            root,
+            verify_sig,
+            max_stored_events,
+            max_stored_event_bytes,
+            Vec::new(),
+            Vec::new(),
+            true,
+        )
+    }
+
+    /// Create a new store rooted at `root` with retention limits and protected content keys.
+    pub fn with_limits_and_pins(
+        root: PathBuf,
+        verify_sig: bool,
+        max_stored_events: Option<usize>,
+        max_stored_event_bytes: Option<u64>,
+        pinned_pubkeys: Vec<String>,
+        pinned_event_ids: Vec<String>,
+        protect_pinned_from_deletes: bool,
+    ) -> Self {
+        let pinned_pubkeys = pinned_pubkeys
+            .into_iter()
+            .filter(|value| !value.trim().is_empty())
+            .collect::<HashSet<_>>();
+        let pinned_event_ids = pinned_event_ids
+            .into_iter()
+            .filter(|value| !value.trim().is_empty())
+            .collect::<HashSet<_>>();
         Self {
             root,
             verify_sig,
             max_stored_events,
             max_stored_event_bytes,
+            pinned_pubkeys,
+            pinned_event_ids,
+            protect_pinned_from_deletes,
         }
     }
 
@@ -256,6 +292,9 @@ impl Store {
                 .unwrap_or(false);
             if !over_events && !over_bytes {
                 break;
+            }
+            if self.event_is_retention_protected(&record.event) {
+                continue;
             }
             fs::remove_file(&record.path)?;
             total_events = total_events.saturating_sub(1);
@@ -673,7 +712,13 @@ impl Store {
                         continue;
                     }
                 };
-                records.push(StoredEventRecord { id: ev.id.clone(), created_at: ev.created_at, size_bytes, path, event: ev });
+                records.push(StoredEventRecord {
+                    id: ev.id.clone(),
+                    created_at: ev.created_at,
+                    size_bytes,
+                    path,
+                    event: ev,
+                });
             }
         }
         Ok(records)
@@ -973,7 +1018,11 @@ impl Store {
         delete_enabled: bool,
         expiration_enabled: bool,
     ) -> Result<bool> {
-        if expiration_enabled && event_is_expired(event, current_unix_ts()) {
+        let protected = self.event_is_retention_protected(event);
+        if protected && self.protect_pinned_from_deletes {
+            return Ok(true);
+        }
+        if expiration_enabled && event_is_expired(event, current_unix_ts()) && !protected {
             return Ok(false);
         }
         if !delete_enabled || event.kind == 5 {
@@ -992,6 +1041,10 @@ impl Store {
             }
         }
         Ok(true)
+    }
+
+    fn event_is_retention_protected(&self, event: &Event) -> bool {
+        self.pinned_pubkeys.contains(&event.pubkey) || self.pinned_event_ids.contains(&event.id)
     }
 
     fn apply_delete_event_locked(&self, event: &Event) -> Result<()> {
@@ -1221,16 +1274,21 @@ fn event_address(event: &Event) -> Option<String> {
         .tags
         .iter()
         .find_map(|Tag(fields)| match fields.as_slice() {
-            [tag, value, ..] if tag == "d" => Some(format!("{}:{}:{}", event.kind, event.pubkey, value)),
+            [tag, value, ..] if tag == "d" => {
+                Some(format!("{}:{}:{}", event.kind, event.pubkey, value))
+            }
             _ => None,
         })
 }
 
 fn event_expiration(event: &Event) -> Option<u64> {
-    event.tags.iter().find_map(|Tag(fields)| match fields.as_slice() {
-        [tag, value, ..] if tag == "expiration" => value.parse::<u64>().ok(),
-        _ => None,
-    })
+    event
+        .tags
+        .iter()
+        .find_map(|Tag(fields)| match fields.as_slice() {
+            [tag, value, ..] if tag == "expiration" => value.parse::<u64>().ok(),
+            _ => None,
+        })
 }
 
 fn event_is_expired(event: &Event, now: u64) -> bool {
@@ -1476,17 +1534,18 @@ mod tests {
             sig: String::new(),
         };
         store.ingest(&ev).unwrap();
-        let tag_path = dir
-            .path()
-            .join(format!("index/by-tag/t/{}.txt", super::hashed_index_name("tag1")));
+        let tag_path = dir.path().join(format!(
+            "index/by-tag/t/{}.txt",
+            super::hashed_index_name("tag1")
+        ));
         let contents = fs::read_to_string(&tag_path).unwrap();
         assert_eq!(contents.trim(), "aa11");
         fs::remove_file(tag_path).unwrap();
         store.reindex().unwrap();
-        let rebuilt = fs::read_to_string(
-            dir.path()
-                .join(format!("index/by-tag/t/{}.txt", super::hashed_index_name("tag1"))),
-        )
+        let rebuilt = fs::read_to_string(dir.path().join(format!(
+            "index/by-tag/t/{}.txt",
+            super::hashed_index_name("tag1")
+        )))
         .unwrap();
         assert_eq!(rebuilt.trim(), "aa11");
     }
@@ -1709,6 +1768,52 @@ mod tests {
     }
 
     #[test]
+    fn enforce_retention_keeps_pinned_pubkeys_and_event_ids() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits_and_pins(
+            dir.path().to_path_buf(),
+            false,
+            Some(2),
+            None,
+            vec!["owner".into()],
+            vec!["pin22".into()],
+            true,
+        );
+        store.init().unwrap();
+
+        store
+            .ingest(&sample_event("old11", "untrusted", 1, None, 10))
+            .unwrap();
+        store
+            .ingest(&sample_event("pin22", "untrusted", 1, None, 20))
+            .unwrap();
+        store
+            .ingest(&sample_event("own33", "owner", 1, None, 30))
+            .unwrap();
+
+        let events = store
+            .query_with_policy(
+                Query {
+                    authors: None,
+                    kinds: Some(vec![1]),
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: Some(10),
+                },
+                true,
+                true,
+            )
+            .unwrap();
+        let ids: Vec<String> = events.into_iter().map(|event| event.id).collect();
+        assert_eq!(ids, vec!["own33".to_string(), "pin22".to_string()]);
+        assert!(!store.event_path("old11").exists());
+    }
+
+    #[test]
     fn enforce_retention_skips_corrupt_event_files() {
         let dir = TempDir::new().unwrap();
         let store = Store::with_limits(dir.path().to_path_buf(), false, Some(10), None);
@@ -1755,9 +1860,15 @@ mod tests {
         let store = Store::with_limits(dir.path().to_path_buf(), false, Some(2), None);
         store.init().unwrap();
 
-        store.ingest(&sample_event("aa11", "p1", 1, None, 10)).unwrap();
-        store.ingest(&sample_event("bb22", "p1", 1, None, 20)).unwrap();
-        store.ingest(&sample_event("cc33", "p1", 1, None, 30)).unwrap();
+        store
+            .ingest(&sample_event("aa11", "p1", 1, None, 10))
+            .unwrap();
+        store
+            .ingest(&sample_event("bb22", "p1", 1, None, 20))
+            .unwrap();
+        store
+            .ingest(&sample_event("cc33", "p1", 1, None, 30))
+            .unwrap();
 
         let status = store.retention_status().unwrap();
         assert_eq!(status.state, "ok");
@@ -1861,6 +1972,54 @@ mod tests {
             .unwrap();
         assert!(visible.is_empty());
         assert!(store.event_path("aa11").exists());
+    }
+
+    #[test]
+    fn delete_event_does_not_hide_pinned_owner_content() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits_and_pins(
+            dir.path().to_path_buf(),
+            false,
+            None,
+            None,
+            vec!["p1".into()],
+            vec![],
+            true,
+        );
+        store.init().unwrap();
+
+        let target = sample_event("aa11", "p1", 1, None, 10);
+        let delete = Event {
+            id: "dd55".into(),
+            pubkey: "p1".into(),
+            kind: 5,
+            created_at: 20,
+            tags: vec![Tag(vec!["e".into(), "aa11".into()])],
+            content: String::new(),
+            sig: String::new(),
+        };
+        store.ingest(&target).unwrap();
+        store.ingest_with_policy(&delete, true, true).unwrap();
+
+        let visible = store
+            .query_with_policy(
+                Query {
+                    authors: Some(vec!["p1".into()]),
+                    kinds: Some(vec![1, 5]),
+                    d: None,
+                    t: None,
+                    tags: vec![],
+                    search: None,
+                    since: None,
+                    until: None,
+                    limit: None,
+                },
+                true,
+                true,
+            )
+            .unwrap();
+        let ids: Vec<String> = visible.into_iter().map(|event| event.id).collect();
+        assert_eq!(ids, vec!["dd55".to_string(), "aa11".to_string()]);
     }
 
     #[test]
@@ -1989,7 +2148,9 @@ mod tests {
                 sig: String::new(),
             };
             if idx % 50 == 0 {
-                event.tags.push(Tag(vec!["d".into(), format!("slug-{idx}")]));
+                event
+                    .tags
+                    .push(Tag(vec!["d".into(), format!("slug-{idx}")]));
             }
             if idx % 17 == 0 {
                 event.tags.push(Tag(vec!["t".into(), "topic".into()]));
@@ -2053,8 +2214,20 @@ mod tests {
         assert_eq!(count, total);
         assert_eq!(recent.len(), 60);
         assert!(!searched.is_empty());
-        assert!(stats_elapsed.as_secs_f64() < 5.0, "refresh_stats_cache too slow: {:?}", stats_elapsed);
-        assert!(recent_elapsed.as_secs_f64() < 2.0, "recent query too slow: {:?}", recent_elapsed);
-        assert!(search_elapsed.as_secs_f64() < 4.0, "search query too slow: {:?}", search_elapsed);
+        assert!(
+            stats_elapsed.as_secs_f64() < 5.0,
+            "refresh_stats_cache too slow: {:?}",
+            stats_elapsed
+        );
+        assert!(
+            recent_elapsed.as_secs_f64() < 2.0,
+            "recent query too slow: {:?}",
+            recent_elapsed
+        );
+        assert!(
+            search_elapsed.as_secs_f64() < 4.0,
+            "search query too slow: {:?}",
+            search_elapsed
+        );
     }
 }

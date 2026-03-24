@@ -100,7 +100,9 @@ fn tail_log_prefixes_timestamp_on_each_line() {
     let lines: Vec<&str> = output.lines().collect();
     assert_eq!(lines.len(), 2);
     assert!(lines[0].starts_with('['));
-    assert!(lines[0].contains("] storage warning: skipping unreadable event file /tmp/a: bad UTF-8"));
+    assert!(
+        lines[0].contains("] storage warning: skipping unreadable event file /tmp/a: bad UTF-8")
+    );
     assert!(lines[1].starts_with('['));
     assert!(lines[1].contains("] {\"ts\":1711111111,"));
 }
@@ -123,7 +125,11 @@ fn size_events_prefers_runtime_cache() {
     let env_path = write_env(&dir);
     let store_root = dir.path().join("store");
     fs::create_dir_all(store_root.join("runtime")).unwrap();
-    fs::write(store_root.join("runtime/events-bytes.cache"), "1258291200\n").unwrap();
+    fs::write(
+        store_root.join("runtime/events-bytes.cache"),
+        "1258291200\n",
+    )
+    .unwrap();
 
     let output = run_backend(&["size-events", &env_path]);
     assert_eq!(output.trim(), "1258291200");

@@ -260,6 +260,11 @@
         textField('FILTER_TAG_A', 'filter_tag_a', 'Addresses to import', 'Comma-separated `kind:pubkey:d` addresses', formatList, null, 'If set, only import events whose `#a` tags match these addresses.'),
         textField('FILTER_TAG_T', 'filter_tag_t', 'Topics to import', 'Comma-separated topic tags', formatList, null, 'If set, only import events whose `#t` tags match these topics.'),
         textField('FILTER_SINCE_MODE', 'filter_since_mode', 'Import start point', 'Use `cursor` or `fixed:<unix time>`', formatSinceMode, null, 'Use `cursor` to resume where the importer left off, or `fixed:<unix time>` to start from a fixed timestamp.'),
+        groupField('Pinned And Followed Content'),
+        textareaField('OWNER_PUBKEYS', 'owner_pubkeys', 'Owner authors (privileged + always kept)', 'One pubkey per line', formatLineList, null, 'Owner pubkeys bypass write auth/rate limits and their content is always retained.'),
+        textareaField('FOLLOW_PUBKEYS', 'follow_pubkeys', 'Follow authors (mirror + always kept)', 'One pubkey per line', formatLineList, null, 'These pubkeys are added to mirror author filters and retained from eviction.'),
+        textareaField('PIN_EVENT_IDS', 'pin_event_ids', 'Pin specific event IDs', 'One event ID per line', formatLineList, null, 'Exact events that should never be removed by retention.'),
+        boolField('PIN_PROTECT_FROM_DELETES', 'pin_protect_from_deletes', 'Ignore delete events against pinned content', '', null, 'Keep owner/follow/pinned content visible even when NIP-09 delete events target it.'),
         groupField('Kind Policy'),
         textField('ALLOW_KINDS', 'policy.allowed_kinds', 'Allowed kinds', 'Comma-separated kind numbers', formatNumberList, null, 'If set, only these event kinds are accepted.'),
         textField('DENY_KINDS', 'policy.blocked_kinds', 'Blocked kinds', 'Comma-separated kind numbers', formatNumberList, null, 'These event kinds are always rejected.')
@@ -480,6 +485,9 @@
     FILTER_KINDS: true,
     FILTER_TAG_A: true,
     FILTER_TAG_T: true,
+    OWNER_PUBKEYS: true,
+    FOLLOW_PUBKEYS: true,
+    PIN_EVENT_IDS: true,
     ALLOW_KINDS: true,
     DENY_KINDS: true,
     FILE_API_URL: true,
@@ -1740,6 +1748,7 @@
       case 'ENABLE_BLOSSOM':
       case 'ENABLE_BLOSSOM_LIST':
       case 'FILTER_PRIVATE_MESSAGES':
+      case 'PIN_PROTECT_FROM_DELETES':
         return true;
       case 'ENABLE_NIP42':
       case 'ENABLE_BLOSSOM_MIRROR':

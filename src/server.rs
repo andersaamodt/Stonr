@@ -3,7 +3,9 @@
 use anyhow::Result;
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Multipart, OriginalUri, Path, Query as AxumQuery, RawQuery, Request, State},
+    extract::{
+        ConnectInfo, Multipart, OriginalUri, Path, Query as AxumQuery, RawQuery, Request, State,
+    },
     http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, options},
@@ -21,7 +23,10 @@ use crate::{
     files::{self, BlobInfo, BlobMeta, UploadCandidate},
     mirror::{read_statuses, MirrorStatus},
     nip98,
-    policy::{apply_query_policy, client_actor_label, current_unix_ts, enforce_rate_limit, RateLimitAction},
+    policy::{
+        apply_query_policy, client_actor_label, current_unix_ts, enforce_rate_limit,
+        RateLimitAction,
+    },
     storage::{Query, RetentionStatus, Store},
 };
 
@@ -146,10 +151,15 @@ pub async fn serve_http(
         .route("/query", get(query))
         .route("/count", get(count))
         .route("/.well-known/nostr/nip96.json", get(nip96_info))
-        .route("/files", options(cors_preflight).get(list_files).post(upload_file))
+        .route(
+            "/files",
+            options(cors_preflight).get(list_files).post(upload_file),
+        )
         .route(
             "/files/:blob_id",
-            options(cors_preflight).get(download_file).delete(delete_file),
+            options(cors_preflight)
+                .get(download_file)
+                .delete(delete_file),
         )
         .route(
             "/upload",
@@ -167,9 +177,12 @@ pub async fn serve_http(
                 .delete(blossom_delete_blob),
         )
         .with_state(Arc::new(AppState { store, settings }));
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(shutdown)
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await?;
     Ok(())
 }
 
@@ -184,7 +197,10 @@ async fn healthz(State(state): State<Arc<AppState>>) -> Json<Health> {
             .iter()
             .filter(|status| mirror_status_is_healthy(status, now))
             .count(),
-        last_mirror_success_at: statuses.iter().filter_map(|status| status.last_success_at).max(),
+        last_mirror_success_at: statuses
+            .iter()
+            .filter_map(|status| status.last_success_at)
+            .max(),
     })
 }
 
@@ -220,9 +236,7 @@ async fn mirror_health(State(state): State<Arc<AppState>>) -> Json<MirrorHealth>
             last_event_at: status.last_event_at,
             last_seen_event_created_at: status.last_seen_event_created_at,
             last_success_at: status.last_success_at,
-            seconds_since_last_success: status
-                .last_success_at
-                .map(|ts| now.saturating_sub(ts)),
+            seconds_since_last_success: status.last_success_at.map(|ts| now.saturating_sub(ts)),
             lag_seconds: status
                 .last_seen_event_created_at
                 .map(|ts| now.saturating_sub(ts)),
@@ -252,7 +266,13 @@ fn readiness_issues(state: &AppState) -> Vec<String> {
         || state.settings.file_api_enabled()
         || state.settings.blossom_enabled()
     {
-        for rel in ["files/blobs", "files/meta", "files/refs", "files/tmp", "files/quarantine"] {
+        for rel in [
+            "files/blobs",
+            "files/meta",
+            "files/refs",
+            "files/tmp",
+            "files/quarantine",
+        ] {
             let path = state.settings.store_root.join(rel);
             if !path.is_dir() {
                 issues.push(format!("missing file path: {rel}"));
@@ -306,9 +326,7 @@ struct RelayInfo {
 }
 
 /// Basic NIP-11 relay information document.
-async fn relay_info(
-    State(state): State<Arc<AppState>>,
-) -> axum::response::Response {
+async fn relay_info(State(state): State<Arc<AppState>>) -> axum::response::Response {
     if !state.settings.relay_info_enabled() {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::NOT_FOUND)
@@ -777,7 +795,9 @@ async fn upload_file(
     };
     let meta = match file_store.load_meta(&info.sha256) {
         Ok(Some(meta)) => meta,
-        Ok(None) => return internal_file_api_error(anyhow::anyhow!("missing blob metadata after upload")),
+        Ok(None) => {
+            return internal_file_api_error(anyhow::anyhow!("missing blob metadata after upload"))
+        }
         Err(error) => return internal_file_api_error(error),
     };
     json_response(
@@ -882,12 +902,18 @@ async fn download_file(
     };
     let mut builder = Response::builder()
         .status(StatusCode::OK)
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        )
         .header(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
             HeaderValue::from_static("Authorization, Content-Type"),
         )
-        .header(header::CACHE_CONTROL, HeaderValue::from_static("public, immutable"))
+        .header(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, immutable"),
+        )
         .header(header::CONTENT_TYPE, meta.mime.as_str());
     if let Some(name) = meta.original_name.as_deref() {
         builder = builder.header(
@@ -923,7 +949,11 @@ async fn delete_file(
         Ok(None) => unreachable!(),
         Err(error) => return file_api_error(StatusCode::UNAUTHORIZED, &error.to_string()),
     };
-    match state.store.files().delete_for_owner(&hash, &owner, &state.settings) {
+    match state
+        .store
+        .files()
+        .delete_for_owner(&hash, &owner, &state.settings)
+    {
         Ok(true) => json_response(
             StatusCode::OK,
             FileApiResponse {
@@ -959,10 +989,16 @@ async fn blossom_check_upload(
         return blossom_error(StatusCode::BAD_REQUEST, "invalid: missing X-SHA-256 header");
     };
     let Some(mime) = header_string(&headers, "x-content-type") else {
-        return blossom_error(StatusCode::BAD_REQUEST, "invalid: missing X-Content-Type header");
+        return blossom_error(
+            StatusCode::BAD_REQUEST,
+            "invalid: missing X-Content-Type header",
+        );
     };
     let Some(length) = header_string(&headers, "x-content-length") else {
-        return blossom_error(StatusCode::BAD_REQUEST, "invalid: missing X-Content-Length header");
+        return blossom_error(
+            StatusCode::BAD_REQUEST,
+            "invalid: missing X-Content-Length header",
+        );
     };
     let length = match length.parse::<u64>() {
         Ok(length) => length,
@@ -1004,7 +1040,9 @@ async fn blossom_upload(
     let declared_len = header_string(&headers, header::CONTENT_LENGTH.as_str())
         .and_then(|value| value.parse::<u64>().ok());
     if let Some(length) = declared_len {
-        if let Err(error) = validate_upload_requirements(&state.settings, &expected_hash, &mime, length) {
+        if let Err(error) =
+            validate_upload_requirements(&state.settings, &expected_hash, &mime, length)
+        {
             return blossom_error(status_for_file_error(&error), &error.to_string());
         }
     } else if !is_valid_hash(&expected_hash) {
@@ -1102,12 +1140,7 @@ async fn blossom_list(
         return StatusCode::NOT_FOUND.into_response();
     }
     let host_domain = request_host_domain(&headers);
-    let auth = match blossom_optional_auth(
-        true,
-        &headers,
-        BlossomAction::List,
-        &host_domain,
-    ) {
+    let auth = match blossom_optional_auth(true, &headers, BlossomAction::List, &host_domain) {
         Ok(auth) => auth,
         Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
     };
@@ -1150,12 +1183,7 @@ async fn blossom_mirror(
         return blossom_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
     }
     let host_domain = request_host_domain(&headers);
-    let auth = match blossom_optional_auth(
-        true,
-        &headers,
-        BlossomAction::Upload,
-        &host_domain,
-    ) {
+    let auth = match blossom_optional_auth(true, &headers, BlossomAction::Upload, &host_domain) {
         Ok(auth) => auth,
         Err(error) => return blossom_error(StatusCode::UNAUTHORIZED, &error.to_string()),
     };
@@ -1185,7 +1213,10 @@ async fn blossom_mirror(
     }
     if let Some(length) = response.content_length() {
         if length > state.settings.file_max_bytes as u64 {
-            return blossom_error(StatusCode::PAYLOAD_TOO_LARGE, "blocked: file exceeds max size");
+            return blossom_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "blocked: file exceeds max size",
+            );
         }
     }
     let mime = response
@@ -1195,7 +1226,10 @@ async fn blossom_mirror(
         .map(str::to_string)
         .unwrap_or_else(|| "application/octet-stream".into());
     if !state.settings.file_mime_allowed(&mime) {
-        return blossom_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "blocked: MIME type not allowed");
+        return blossom_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "blocked: MIME type not allowed",
+        );
     }
     let temp_path = temp_upload_path(&state);
     let mut writer = match tokio::fs::File::create(&temp_path).await {
@@ -1218,7 +1252,10 @@ async fn blossom_mirror(
         written += chunk.len();
         if written > state.settings.file_max_bytes {
             let _ = tokio::fs::remove_file(&temp_path).await;
-            return blossom_error(StatusCode::PAYLOAD_TOO_LARGE, "blocked: file exceeds max size");
+            return blossom_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "blocked: file exceeds max size",
+            );
         }
         if let Err(error) = writer.write_all(&chunk).await {
             let _ = tokio::fs::remove_file(&temp_path).await;
@@ -1573,7 +1610,9 @@ fn normalize_blob_id(blob_id: &str) -> anyhow::Result<String> {
         .unwrap_or(blob_id)
         .trim();
     if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(anyhow::anyhow!("invalid: blob id must be a 64-byte hex sha256"));
+        return Err(anyhow::anyhow!(
+            "invalid: blob id must be a 64-byte hex sha256"
+        ));
     }
     Ok(hash.to_ascii_lowercase())
 }
@@ -1666,12 +1705,18 @@ fn json_response<T: Serialize>(status: StatusCode, payload: T) -> axum::response
     let body = serde_json::to_vec(&payload).unwrap();
     Response::builder()
         .status(status)
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"))
+        .header(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        )
         .header(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
             HeaderValue::from_static("Authorization, Content-Type"),
         )
-        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )
         .body(Body::from(body))
         .unwrap()
 }
@@ -1760,8 +1805,15 @@ fn mirror_status_is_healthy(status: &MirrorStatus, now: u64) -> bool {
 #[allow(clippy::single_match)]
 mod tests {
     use super::*;
-    use crate::{event::Event, mirror::{MirrorStatus, write_status}};
-    use reqwest::{self, header::ACCESS_CONTROL_ALLOW_ORIGIN, multipart::{Form, Part}};
+    use crate::{
+        event::Event,
+        mirror::{write_status, MirrorStatus},
+    };
+    use reqwest::{
+        self,
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        multipart::{Form, Part},
+    };
     use tempfile::TempDir;
     use tokio::task;
 
@@ -1839,6 +1891,10 @@ mod tests {
             file_hash_denylist: None,
             file_keep_mode: crate::config::FileKeepMode::Referenced,
             max_blob_bytes_per_pubkey: None,
+            owner_pubkeys: None,
+            follow_pubkeys: None,
+            pinned_event_ids: None,
+            protect_pinned_from_deletes: true,
         }
     }
 
@@ -1919,7 +1975,10 @@ mod tests {
         let body: super::Readiness = resp.json().await.unwrap();
         assert_eq!(status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body.status, "not-ready");
-        assert!(body.issues.iter().any(|issue| issue.contains("missing store path: events")));
+        assert!(body
+            .issues
+            .iter()
+            .any(|issue| issue.contains("missing store path: events")));
         handle.abort();
     }
 
@@ -2078,7 +2137,10 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
-            .route("/files", options(super::cors_preflight).post(super::upload_file))
+            .route(
+                "/files",
+                options(super::cors_preflight).post(super::upload_file),
+            )
             .route("/files/:blob_id", get(super::download_file))
             .with_state(test_state(store, dir.path()));
         let server = axum::serve(listener, app.into_make_service());
@@ -2095,7 +2157,12 @@ mod tests {
                 .mime_str("text/plain")
                 .unwrap(),
         );
-        let response = client.post(&upload_url).multipart(form).send().await.unwrap();
+        let response = client
+            .post(&upload_url)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::CREATED);
         let body: super::FileApiResponse = response.json().await.unwrap();
         let hash = body
@@ -2111,7 +2178,10 @@ mod tests {
         let response = client.get(&download_url).send().await.unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         assert_eq!(
-            response.headers().get(reqwest::header::CONTENT_TYPE).unwrap(),
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .unwrap(),
             "text/plain"
         );
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"hello world");
@@ -2137,7 +2207,11 @@ mod tests {
 
         let response = reqwest::get(&format!("http://{addr}/files")).await.unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
-        assert!(response.text().await.unwrap().contains("NIP-98 auth support disabled"));
+        assert!(response
+            .text()
+            .await
+            .unwrap()
+            .contains("NIP-98 auth support disabled"));
         handle.abort();
     }
 
@@ -2691,8 +2765,10 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf(), false);
         let settings = test_settings(dir.path());
         // binding to the same address should error because it's already taken
-        assert!(super::serve_http(addr, store, settings, std::future::pending())
-            .await
-            .is_err());
+        assert!(
+            super::serve_http(addr, store, settings, std::future::pending())
+                .await
+                .is_err()
+        );
     }
 }

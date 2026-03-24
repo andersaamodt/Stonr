@@ -55,6 +55,9 @@ pub fn apply_query_policy(settings: &Settings, mut query: Query) -> Query {
 }
 
 pub fn validate_event(settings: &Settings, event: &Event, now: u64) -> Result<()> {
+    if settings.is_owner_pubkey(&event.pubkey) {
+        return Ok(());
+    }
     if settings.filter_private_messages && is_private_message_kind(event.kind) {
         return Err(anyhow!("encrypted private messages are filtered"));
     }
@@ -111,6 +114,9 @@ pub fn validate_event_with_files(
     event: &Event,
     now: u64,
 ) -> Result<()> {
+    if settings.is_owner_pubkey(&event.pubkey) {
+        return Ok(());
+    }
     validate_event(settings, event, now)?;
     if event.kind == 1063 {
         file_store.validate_metadata_event(event, settings)?;
@@ -151,7 +157,10 @@ pub fn enforce_rate_limit(
     Ok(())
 }
 
-pub fn client_actor_label(peer_addr: Option<std::net::SocketAddr>, auth_actor: Option<&str>) -> String {
+pub fn client_actor_label(
+    peer_addr: Option<std::net::SocketAddr>,
+    auth_actor: Option<&str>,
+) -> String {
     if let Some(actor) = auth_actor {
         return format!("pubkey:{actor}");
     }
@@ -281,6 +290,10 @@ mod tests {
             file_hash_denylist: None,
             file_keep_mode: crate::config::FileKeepMode::Referenced,
             max_blob_bytes_per_pubkey: None,
+            owner_pubkeys: None,
+            follow_pubkeys: None,
+            pinned_event_ids: None,
+            protect_pinned_from_deletes: true,
         }
     }
 
@@ -326,7 +339,9 @@ mod tests {
         settings.blocked_kinds = Some(vec![1]);
         settings.max_event_bytes = Some(10);
         let event = event("blocked", 1, 100, "payload that is too large");
-        let error = validate_event(&settings, &event, 100).unwrap_err().to_string();
+        let error = validate_event(&settings, &event, 100)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("author is not allowed"));
     }
 
@@ -356,10 +371,9 @@ mod tests {
         settings.max_queries_per_window = Some(2);
         enforce_rate_limit(&settings, RateLimitAction::Query, "ip:127.0.0.1", 120).unwrap();
         enforce_rate_limit(&settings, RateLimitAction::Query, "ip:127.0.0.1", 120).unwrap();
-        let error =
-            enforce_rate_limit(&settings, RateLimitAction::Query, "ip:127.0.0.1", 120)
-                .unwrap_err()
-                .to_string();
+        let error = enforce_rate_limit(&settings, RateLimitAction::Query, "ip:127.0.0.1", 120)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("rate limit exceeded"));
     }
 }

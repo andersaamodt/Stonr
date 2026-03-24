@@ -56,10 +56,13 @@ pub fn verify_http_auth(
 }
 
 fn tag_value(event: &Event, tag: &str) -> Option<String> {
-    event.tags.iter().find_map(|fields| match fields.0.as_slice() {
-        [name, value, ..] if name == tag => Some(value.clone()),
-        _ => None,
-    })
+    event
+        .tags
+        .iter()
+        .find_map(|fields| match fields.0.as_slice() {
+            [name, value, ..] if name == tag => Some(value.clone()),
+            _ => None,
+        })
 }
 
 fn payload_tag_matches(tag_value: &str, payload_hash_hex: &str) -> Result<bool> {
@@ -95,7 +98,10 @@ mod tests {
             crate::event::Tag(vec!["method".into(), method.into()]),
         ];
         if let Some(payload_hash) = payload_hash {
-            tags.push(crate::event::Tag(vec!["payload".into(), payload_hash.into()]));
+            tags.push(crate::event::Tag(vec![
+                "payload".into(),
+                payload_hash.into(),
+            ]));
         }
         let mut event = Event {
             id: String::new(),

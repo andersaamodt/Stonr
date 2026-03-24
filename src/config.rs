@@ -50,6 +50,14 @@ pub struct Settings {
     pub allowed_pubkeys: Option<Vec<String>>,
     /// Reject these author pubkeys when set.
     pub blocked_pubkeys: Option<Vec<String>>,
+    /// Owner pubkeys that are privileged on write and always retained.
+    pub owner_pubkeys: Option<Vec<String>>,
+    /// Followed pubkeys that should be mirrored and retained.
+    pub follow_pubkeys: Option<Vec<String>>,
+    /// Explicit event IDs that should never be removed by retention.
+    pub pinned_event_ids: Option<Vec<String>>,
+    /// Keep pinned content visible even when delete events target it.
+    pub protect_pinned_from_deletes: bool,
     /// Enable NIP-42 relay authentication.
     pub enable_nip42: bool,
     /// Require authenticated sessions for read/query access.
@@ -201,9 +209,16 @@ impl Settings {
         let blocked_kinds = env_value(&env, "DENY_KINDS").and_then(csv_u32_opt);
         let allowed_pubkeys = env_value(&env, "ALLOW_PUBKEYS").and_then(csv_strings_opt);
         let blocked_pubkeys = env_value(&env, "DENY_PUBKEYS").and_then(csv_strings_opt);
+        let owner_pubkeys = env_value(&env, "OWNER_PUBKEYS").and_then(csv_strings_opt);
+        let follow_pubkeys = env_value(&env, "FOLLOW_PUBKEYS").and_then(csv_strings_opt);
+        let pinned_event_ids = env_value(&env, "PIN_EVENT_IDS").and_then(csv_strings_opt);
+        let protect_pinned_from_deletes =
+            env_value(&env, "PIN_PROTECT_FROM_DELETES").unwrap_or("1") == "1";
         let enable_nip42 = env_value(&env, "ENABLE_NIP42").unwrap_or("0") == "1";
-        let require_auth_for_query = env_value(&env, "REQUIRE_AUTH_FOR_QUERY").unwrap_or("0") == "1";
-        let require_auth_for_count = env_value(&env, "REQUIRE_AUTH_FOR_COUNT").unwrap_or("0") == "1";
+        let require_auth_for_query =
+            env_value(&env, "REQUIRE_AUTH_FOR_QUERY").unwrap_or("0") == "1";
+        let require_auth_for_count =
+            env_value(&env, "REQUIRE_AUTH_FOR_COUNT").unwrap_or("0") == "1";
         let require_auth_for_publish =
             env_value(&env, "REQUIRE_AUTH_FOR_PUBLISH").unwrap_or("0") == "1";
         let auth_must_match_event_pubkey =
@@ -222,9 +237,12 @@ impl Settings {
         let support_nip96 = env_value(&env, "SUPPORT_NIP96").unwrap_or("1") == "1";
         let support_nip98 = env_value(&env, "SUPPORT_NIP98").unwrap_or("1") == "1";
         let support_nip_b7 = env_value(&env, "SUPPORT_NIP_B7").unwrap_or("1") == "1";
-        let filter_private_messages = env_value(&env, "FILTER_PRIVATE_MESSAGES").unwrap_or("1") == "1";
+        let filter_private_messages =
+            env_value(&env, "FILTER_PRIVATE_MESSAGES").unwrap_or("1") == "1";
         let relays_upstream = csv_strings(env_value(&env, "RELAYS_UPSTREAM").unwrap_or_default());
-        let tor_socks = env_value(&env, "TOR_SOCKS").filter(|s| !s.is_empty()).map(str::to_string);
+        let tor_socks = env_value(&env, "TOR_SOCKS")
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         let filter_authors = env_value(&env, "FILTER_AUTHORS").and_then(|s| {
             let v = csv_strings(s);
             if v.is_empty() {
@@ -306,12 +324,9 @@ impl Settings {
         let enable_file_api = env_value(&env, "ENABLE_FILE_API").unwrap_or("1") == "1";
         let enable_blossom = env_value(&env, "ENABLE_BLOSSOM").unwrap_or("1") == "1";
         let enable_blossom_list = env_value(&env, "ENABLE_BLOSSOM_LIST").unwrap_or("1") == "1";
-        let enable_blossom_mirror =
-            env_value(&env, "ENABLE_BLOSSOM_MIRROR").unwrap_or("0") == "1";
-        let require_nip98_auth =
-            env_value(&env, "REQUIRE_NIP98_AUTH").unwrap_or("0") == "1";
-        let require_blossom_auth =
-            env_value(&env, "REQUIRE_BLOSSOM_AUTH").unwrap_or("0") == "1";
+        let enable_blossom_mirror = env_value(&env, "ENABLE_BLOSSOM_MIRROR").unwrap_or("0") == "1";
+        let require_nip98_auth = env_value(&env, "REQUIRE_NIP98_AUTH").unwrap_or("0") == "1";
+        let require_blossom_auth = env_value(&env, "REQUIRE_BLOSSOM_AUTH").unwrap_or("0") == "1";
         let require_blossom_get_auth =
             env_value(&env, "REQUIRE_BLOSSOM_GET_AUTH").unwrap_or("0") == "1";
         let file_api_url = env_value(&env, "FILE_API_URL")
@@ -326,10 +341,20 @@ impl Settings {
             .unwrap_or(32 * 1024 * 1024);
         let file_allowed_mime = env_value(&env, "FILE_ALLOW_MIME")
             .and_then(csv_strings_opt)
-            .map(|values| values.into_iter().map(|value| value.to_ascii_lowercase()).collect());
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value.to_ascii_lowercase())
+                    .collect()
+            });
         let file_blocked_mime = env_value(&env, "FILE_DENY_MIME")
             .and_then(csv_strings_opt)
-            .map(|values| values.into_iter().map(|value| value.to_ascii_lowercase()).collect());
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value.to_ascii_lowercase())
+                    .collect()
+            });
         let file_hash_denylist = load_hash_denylist(&env);
         let file_keep_mode = parse_file_keep_mode(env_value(&env, "FILE_KEEP_MODE"));
         let max_blob_bytes_per_pubkey = env_value(&env, "MAX_BLOB_BYTES_PER_PUBKEY")
@@ -354,6 +379,10 @@ impl Settings {
             blocked_kinds,
             allowed_pubkeys,
             blocked_pubkeys,
+            owner_pubkeys,
+            follow_pubkeys,
+            pinned_event_ids,
+            protect_pinned_from_deletes,
             enable_nip42,
             require_auth_for_query,
             require_auth_for_count,
@@ -492,16 +521,20 @@ impl Settings {
 
     pub fn file_mime_allowed(&self, mime: &str) -> bool {
         let mime = mime.trim().to_ascii_lowercase();
-        if self
-            .file_blocked_mime
-            .as_ref()
-            .is_some_and(|patterns| patterns.iter().any(|pattern| mime_pattern_matches(pattern, &mime)))
-        {
+        if self.file_blocked_mime.as_ref().is_some_and(|patterns| {
+            patterns
+                .iter()
+                .any(|pattern| mime_pattern_matches(pattern, &mime))
+        }) {
             return false;
         }
         self.file_allowed_mime
             .as_ref()
-            .map(|patterns| patterns.iter().any(|pattern| mime_pattern_matches(pattern, &mime)))
+            .map(|patterns| {
+                patterns
+                    .iter()
+                    .any(|pattern| mime_pattern_matches(pattern, &mime))
+            })
             .unwrap_or(true)
     }
 
@@ -514,8 +547,29 @@ impl Settings {
     }
 
     pub fn publish_auth_required(&self) -> bool {
-        self.nip42_enabled()
-            && (self.require_auth_for_publish || self.auth_must_match_event_pubkey)
+        self.nip42_enabled() && (self.require_auth_for_publish || self.auth_must_match_event_pubkey)
+    }
+
+    pub fn is_owner_pubkey(&self, pubkey: &str) -> bool {
+        self.owner_pubkeys
+            .as_ref()
+            .is_some_and(|owners| owners.iter().any(|value| value == pubkey))
+    }
+
+    pub fn mirror_authors(&self) -> Option<Vec<String>> {
+        let mut merged = Vec::new();
+        if let Some(values) = &self.filter_authors {
+            merged.extend(values.iter().cloned());
+        }
+        if let Some(values) = &self.follow_pubkeys {
+            merged.extend(values.iter().cloned());
+        }
+        if merged.is_empty() {
+            return None;
+        }
+        merged.sort();
+        merged.dedup();
+        Some(merged)
     }
 }
 
@@ -611,7 +665,12 @@ fn load_hash_denylist(env: &HashMap<String, String>) -> Option<Vec<String>> {
 }
 
 fn parse_file_keep_mode(value: Option<&str>) -> FileKeepMode {
-    match value.unwrap_or("referenced").trim().to_ascii_lowercase().as_str() {
+    match value
+        .unwrap_or("referenced")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "all" => FileKeepMode::All,
         _ => FileKeepMode::Referenced,
     }
@@ -969,6 +1028,46 @@ mod tests {
         assert_eq!(cfg.mirror_mode, MirrorMode::Site);
         assert_eq!(cfg.mirror_site_author.as_deref(), Some("abcdef"));
         assert!(!cfg.mirror_site_include_comments);
+    }
+
+    #[test]
+    fn owner_follow_and_pin_settings_parse_and_merge_mirror_authors() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let env_path = dir.path().join(".env");
+        fs::write(
+            &env_path,
+            concat!(
+                "STORE_ROOT=/tmp\n",
+                "BIND_HTTP=127.0.0.1:8080\n",
+                "BIND_WS=127.0.0.1:8081\n",
+                "FILTER_AUTHORS=alice\n",
+                "OWNER_PUBKEYS=owner1,owner2\n",
+                "FOLLOW_PUBKEYS=alice,bob\n",
+                "PIN_EVENT_IDS=aa11,bb22\n",
+                "PIN_PROTECT_FROM_DELETES=1\n"
+            ),
+        )
+        .unwrap();
+        let cfg = Settings::from_env(env_path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            cfg.owner_pubkeys.as_ref().unwrap(),
+            &vec![String::from("owner1"), String::from("owner2")]
+        );
+        assert_eq!(
+            cfg.follow_pubkeys.as_ref().unwrap(),
+            &vec![String::from("alice"), String::from("bob")]
+        );
+        assert_eq!(
+            cfg.pinned_event_ids.as_ref().unwrap(),
+            &vec![String::from("aa11"), String::from("bb22")]
+        );
+        assert!(cfg.protect_pinned_from_deletes);
+        assert!(cfg.is_owner_pubkey("owner1"));
+        assert_eq!(
+            cfg.mirror_authors().unwrap(),
+            vec!["alice".to_string(), "bob".to_string()]
+        );
     }
 
     #[test]

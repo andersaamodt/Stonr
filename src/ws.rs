@@ -10,9 +10,8 @@ use std::{
 use anyhow::Result;
 use axum::{
     extract::{
-        ConnectInfo,
         ws::{Message, WebSocket},
-        State, WebSocketUpgrade,
+        ConnectInfo, State, WebSocketUpgrade,
     },
     response::IntoResponse,
     routing::get,
@@ -56,9 +55,12 @@ pub async fn serve_ws(
             settings,
             events_tx,
         }));
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(shutdown)
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await?;
     Ok(())
 }
 
@@ -138,7 +140,11 @@ async fn handle_text(
     };
     match arr.first().and_then(|v| v.as_str()) {
         Some("REQ") if arr.len() >= 3 => {
-            let sub = arr.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let sub = arr
+                .get(1)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
             let filters = arr
                 .iter()
                 .skip(2)
@@ -146,22 +152,36 @@ async fn handle_text(
                 .map(|query| apply_query_policy(&state.settings, query))
                 .collect::<Vec<_>>();
             if !state.settings.query_enabled() {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "read access disabled"]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "read access disabled"]),
+                );
                 return;
             }
             if state.settings.query_auth_required() && !auth.is_authenticated() {
                 if state.settings.nip42_enabled() {
                     send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
                 }
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "auth-required: relay login required"]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "auth-required: relay login required"]),
+                );
                 return;
             }
             if filters.iter().any(Query::has_tag_filters) && !state.settings.tag_queries_enabled() {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "tag queries disabled"]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "tag queries disabled"]),
+                );
                 return;
             }
-            if filters.iter().any(|query| query.search.is_some()) && !state.settings.search_enabled() {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
+            if filters.iter().any(|query| query.search.is_some())
+                && !state.settings.search_enabled()
+            {
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "text search disabled"]),
+                );
                 return;
             }
             let actor = client_actor_label(peer_addr, auth.actor_pubkey());
@@ -171,10 +191,14 @@ async fn handle_text(
                 &actor,
                 current_unix_ts(),
             ) {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, format!("rate-limited: {error}")]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, format!("rate-limited: {error}")]),
+                );
                 return;
             }
-            let snapshot = snapshot_events(&state.store, &state.settings, &filters).unwrap_or_default();
+            let snapshot =
+                snapshot_events(&state.store, &state.settings, &filters).unwrap_or_default();
             for event in snapshot {
                 send_json(out_tx, serde_json::json!(["EVENT", sub, event]));
             }
@@ -184,7 +208,11 @@ async fn handle_text(
             }
         }
         Some("COUNT") if arr.len() >= 3 => {
-            let sub = arr.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let sub = arr
+                .get(1)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
             let filters = arr
                 .iter()
                 .skip(2)
@@ -192,22 +220,36 @@ async fn handle_text(
                 .map(|query| apply_query_policy(&state.settings, query))
                 .collect::<Vec<_>>();
             if !state.settings.query_enabled() || !state.settings.count_enabled() {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "count queries disabled"]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "count queries disabled"]),
+                );
                 return;
             }
             if state.settings.count_auth_required() && !auth.is_authenticated() {
                 if state.settings.nip42_enabled() {
                     send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
                 }
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "auth-required: relay login required"]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "auth-required: relay login required"]),
+                );
                 return;
             }
             if filters.iter().any(Query::has_tag_filters) && !state.settings.tag_queries_enabled() {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "tag queries disabled"]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "tag queries disabled"]),
+                );
                 return;
             }
-            if filters.iter().any(|query| query.search.is_some()) && !state.settings.search_enabled() {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, "text search disabled"]));
+            if filters.iter().any(|query| query.search.is_some())
+                && !state.settings.search_enabled()
+            {
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, "text search disabled"]),
+                );
                 return;
             }
             let actor = client_actor_label(peer_addr, auth.actor_pubkey());
@@ -217,7 +259,10 @@ async fn handle_text(
                 &actor,
                 current_unix_ts(),
             ) {
-                send_json(out_tx, serde_json::json!(["CLOSED", sub, format!("rate-limited: {error}")]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["CLOSED", sub, format!("rate-limited: {error}")]),
+                );
                 return;
             }
             let count = snapshot_events(&state.store, &state.settings, &filters)
@@ -226,7 +271,11 @@ async fn handle_text(
             send_json(out_tx, serde_json::json!(["COUNT", sub, {"count": count}]));
         }
         Some("CLOSE") if arr.len() >= 2 => {
-            let sub = arr.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let sub = arr
+                .get(1)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
             subs.remove(&sub);
             send_json(out_tx, serde_json::json!(["CLOSED", sub, "closed"]));
         }
@@ -237,85 +286,127 @@ async fn handle_text(
                     .and_then(|value| value.get("id"))
                     .and_then(|value| value.as_str())
                     .unwrap_or_default();
-                send_json(out_tx, serde_json::json!(["OK", event_id, false, "publish disabled"]));
+                send_json(
+                    out_tx,
+                    serde_json::json!(["OK", event_id, false, "publish disabled"]),
+                );
                 return;
             }
             match serde_json::from_value::<Event>(arr[1].clone()) {
                 Ok(event) => {
                     let actor = client_actor_label(peer_addr, auth.actor_pubkey());
-                    if state.settings.publish_auth_required() && !auth.is_authenticated() {
-                        if state.settings.nip42_enabled() {
-                            send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                    let owner_publish = state.settings.is_owner_pubkey(&event.pubkey);
+                    if !owner_publish {
+                        if state.settings.publish_auth_required() && !auth.is_authenticated() {
+                            if state.settings.nip42_enabled() {
+                                send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                            }
+                            send_json(
+                                out_tx,
+                                serde_json::json!([
+                                    "OK",
+                                    event.id,
+                                    false,
+                                    "auth-required: relay login required"
+                                ]),
+                            );
+                            return;
                         }
-                        send_json(out_tx, serde_json::json!(["OK", event.id, false, "auth-required: relay login required"]));
-                        return;
-                    }
-                    if state.settings.nip42_enabled()
-                        && state.settings.auth_must_match_event_pubkey
-                        && !auth.contains_pubkey(&event.pubkey)
-                    {
-                        let msg = if auth.is_authenticated() {
-                            "restricted: authenticated pubkey does not match event pubkey"
-                        } else {
-                            "auth-required: relay login required"
-                        };
-                        if !auth.is_authenticated() {
-                            send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                        if state.settings.nip42_enabled()
+                            && state.settings.auth_must_match_event_pubkey
+                            && !auth.contains_pubkey(&event.pubkey)
+                        {
+                            let msg = if auth.is_authenticated() {
+                                "restricted: authenticated pubkey does not match event pubkey"
+                            } else {
+                                "auth-required: relay login required"
+                            };
+                            if !auth.is_authenticated() {
+                                send_json(out_tx, serde_json::json!(["AUTH", auth.challenge()]));
+                            }
+                            send_json(out_tx, serde_json::json!(["OK", event.id, false, msg]));
+                            return;
                         }
-                        send_json(out_tx, serde_json::json!(["OK", event.id, false, msg]));
-                        return;
-                    }
-                    if let Err(error) = enforce_rate_limit(
-                        &state.settings,
-                        RateLimitAction::Publish,
-                        &actor,
-                        current_unix_ts(),
-                    ) {
-                        send_json(out_tx, serde_json::json!(["OK", event.id, false, format!("rate-limited: {error}")]));
-                        return;
+                        if let Err(error) = enforce_rate_limit(
+                            &state.settings,
+                            RateLimitAction::Publish,
+                            &actor,
+                            current_unix_ts(),
+                        ) {
+                            send_json(
+                                out_tx,
+                                serde_json::json!([
+                                    "OK",
+                                    event.id,
+                                    false,
+                                    format!("rate-limited: {error}")
+                                ]),
+                            );
+                            return;
+                        }
                     }
                     let result = publish_event(state, &event);
                     match result {
-                        Ok(()) => send_json(out_tx, serde_json::json!(["OK", event.id, true, "stored"])),
-                        Err(error) => send_json(out_tx, serde_json::json!(["OK", event.id, false, format!("error: {error}")])),
+                        Ok(()) => {
+                            send_json(out_tx, serde_json::json!(["OK", event.id, true, "stored"]))
+                        }
+                        Err(error) => send_json(
+                            out_tx,
+                            serde_json::json!(["OK", event.id, false, format!("error: {error}")]),
+                        ),
                     }
                 }
                 Err(error) => {
-                    send_json(out_tx, serde_json::json!(["NOTICE", format!("invalid EVENT payload: {error}")]));
+                    send_json(
+                        out_tx,
+                        serde_json::json!(["NOTICE", format!("invalid EVENT payload: {error}")]),
+                    );
                 }
             }
         }
-        Some("AUTH") if arr.len() >= 2 => {
-            match serde_json::from_value::<Event>(arr[1].clone()) {
-                Ok(event) => {
-                    if !state.settings.nip42_enabled() {
+        Some("AUTH") if arr.len() >= 2 => match serde_json::from_value::<Event>(arr[1].clone()) {
+            Ok(event) => {
+                if !state.settings.nip42_enabled() {
+                    send_json(
+                        out_tx,
+                        serde_json::json!([
+                            "OK",
+                            event.id,
+                            false,
+                            "restricted: relay authentication disabled"
+                        ]),
+                    );
+                    return;
+                }
+                match verify_auth_event(
+                    &event,
+                    auth.challenge(),
+                    &state.settings.bind_ws,
+                    state.settings.auth_max_age_secs,
+                    current_unix_ts(),
+                ) {
+                    Ok(()) => {
+                        auth.authenticate(event.pubkey.clone());
                         send_json(
                             out_tx,
-                            serde_json::json!(["OK", event.id, false, "restricted: relay authentication disabled"]),
+                            serde_json::json!(["OK", event.id, true, "authenticated"]),
                         );
-                        return;
                     }
-                    match verify_auth_event(
-                        &event,
-                        auth.challenge(),
-                        &state.settings.bind_ws,
-                        state.settings.auth_max_age_secs,
-                        current_unix_ts(),
-                    ) {
-                        Ok(()) => {
-                            auth.authenticate(event.pubkey.clone());
-                            send_json(out_tx, serde_json::json!(["OK", event.id, true, "authenticated"]));
-                        }
-                        Err(error) => {
-                            send_json(out_tx, serde_json::json!(["OK", event.id, false, format!("invalid: {error}")]));
-                        }
+                    Err(error) => {
+                        send_json(
+                            out_tx,
+                            serde_json::json!(["OK", event.id, false, format!("invalid: {error}")]),
+                        );
                     }
-                }
-                Err(error) => {
-                    send_json(out_tx, serde_json::json!(["NOTICE", format!("invalid AUTH payload: {error}")]));
                 }
             }
-        }
+            Err(error) => {
+                send_json(
+                    out_tx,
+                    serde_json::json!(["NOTICE", format!("invalid AUTH payload: {error}")]),
+                );
+            }
+        },
         _ => {}
     }
 }
@@ -325,7 +416,12 @@ fn publish_event(state: &AppState, event: &Event) -> Result<()> {
     if calc_id != event.id {
         anyhow::bail!("id mismatch");
     }
-    validate_event_with_files(&state.settings, &state.store.files(), event, current_unix_ts())?;
+    validate_event_with_files(
+        &state.settings,
+        &state.store.files(),
+        event,
+        current_unix_ts(),
+    )?;
     if state.store.ingest_with_policy(
         event,
         state.settings.delete_enabled(),
@@ -355,7 +451,10 @@ fn fan_out_live_event(
         return;
     }
     for (sub, filters) in subs {
-        if filters.iter().any(|filter| event_matches_query(event, filter)) {
+        if filters
+            .iter()
+            .any(|filter| event_matches_query(event, filter))
+        {
             send_json(out_tx, serde_json::json!(["EVENT", sub, event]));
         }
     }
@@ -401,17 +500,25 @@ fn event_matches_query(event: &Event, query: &Query) -> bool {
         }
     }
     if let Some(search) = &query.search {
-        if !event.content.to_lowercase().contains(&search.to_lowercase()) {
+        if !event
+            .content
+            .to_lowercase()
+            .contains(&search.to_lowercase())
+        {
             return false;
         }
     }
     if let Some(d) = &query.d {
-        if !event.tags.iter().any(|Tag(fields)| matches!(fields.as_slice(), [tag, value, ..] if tag == "d" && value == d)) {
+        if !event.tags.iter().any(
+            |Tag(fields)| matches!(fields.as_slice(), [tag, value, ..] if tag == "d" && value == d),
+        ) {
             return false;
         }
     }
     if let Some(t) = &query.t {
-        if !event.tags.iter().any(|Tag(fields)| matches!(fields.as_slice(), [tag, value, ..] if tag == "t" && value == t)) {
+        if !event.tags.iter().any(
+            |Tag(fields)| matches!(fields.as_slice(), [tag, value, ..] if tag == "t" && value == t),
+        ) {
             return false;
         }
     }
@@ -513,6 +620,10 @@ mod tests {
             file_hash_denylist: None,
             file_keep_mode: crate::config::FileKeepMode::Referenced,
             max_blob_bytes_per_pubkey: None,
+            owner_pubkeys: None,
+            follow_pubkeys: None,
+            pinned_event_ids: None,
+            protect_pinned_from_deletes: true,
         }
     }
 
@@ -572,7 +683,11 @@ mod tests {
         event
     }
 
-    async fn next_text(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>) -> String {
+    async fn next_text(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> String {
         loop {
             match ws.next().await.unwrap().unwrap() {
                 TungMessage::Text(text) => return text,
@@ -1122,9 +1237,11 @@ mod tests {
         let store = Store::new(dir.path().to_path_buf(), false);
         let settings = test_settings(dir.path());
         let (events_tx, _) = broadcast::channel(256);
-        assert!(super::serve_ws(addr, store, settings, events_tx, std::future::pending())
-            .await
-            .is_err());
+        assert!(
+            super::serve_ws(addr, store, settings, events_tx, std::future::pending())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -1132,9 +1249,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
         store.init().unwrap();
-        store.ingest(&hashed_event("p1", 1, 1, vec![], "a")).unwrap();
-        store.ingest(&hashed_event("p1", 1, 2, vec![], "b")).unwrap();
-        store.ingest(&hashed_event("p2", 1, 3, vec![], "c")).unwrap();
+        store
+            .ingest(&hashed_event("p1", 1, 1, vec![], "a"))
+            .unwrap();
+        store
+            .ingest(&hashed_event("p1", 1, 2, vec![], "b"))
+            .unwrap();
+        store
+            .ingest(&hashed_event("p2", 1, 3, vec![], "c"))
+            .unwrap();
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1233,7 +1356,15 @@ mod tests {
             }
         }
         assert!(saw_live_event);
-        assert!(dir.path().join(format!("events/{}/{}/{}.json", &event.id[0..2], &event.id[2..4], event.id)).exists());
+        assert!(dir
+            .path()
+            .join(format!(
+                "events/{}/{}/{}.json",
+                &event.id[0..2],
+                &event.id[2..4],
+                event.id
+            ))
+            .exists());
         handle.abort();
     }
 
@@ -1410,9 +1541,15 @@ mod tests {
         let (events_tx, _) = broadcast::channel(256);
         let app = Router::new()
             .route("/", get(handler))
-            .with_state(Arc::new(AppState { store, settings, events_tx }));
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
         let server = axum::serve(listener, app.into_make_service());
-        let handle = tokio::spawn(async move { server.await.unwrap(); });
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
 
         let url = format!("ws://{}/", addr);
         let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
@@ -1437,15 +1574,24 @@ mod tests {
         let (events_tx, _) = broadcast::channel(256);
         let app = Router::new()
             .route("/", get(handler))
-            .with_state(Arc::new(AppState { store, settings, events_tx }));
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
         let server = axum::serve(listener, app.into_make_service());
-        let handle = tokio::spawn(async move { server.await.unwrap(); });
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
 
         let url = format!("ws://{}/", addr);
         let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
         let _ = next_text(&mut ws_stream).await;
         let req = serde_json::json!(["REQ", "sub", {"limit": 1}]);
-        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+        ws_stream
+            .send(TungMessage::Text(req.to_string()))
+            .await
+            .unwrap();
 
         let mut saw_closed = None;
         for _ in 0..3 {
@@ -1477,19 +1623,31 @@ mod tests {
         let (events_tx, _) = broadcast::channel(256);
         let app = Router::new()
             .route("/", get(handler))
-            .with_state(Arc::new(AppState { store, settings, events_tx }));
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
         let server = axum::serve(listener, app.into_make_service());
-        let handle = tokio::spawn(async move { server.await.unwrap(); });
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
 
         let url = format!("ws://{}/", addr);
         let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
         let req = serde_json::json!(["REQ", "sub1", {"authors": ["p1"], "kinds": [1]}]);
-        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+        ws_stream
+            .send(TungMessage::Text(req.to_string()))
+            .await
+            .unwrap();
         let _ = next_text(&mut ws_stream).await;
         let _ = next_text(&mut ws_stream).await;
 
         let req = serde_json::json!(["REQ", "sub2", {"authors": ["p1"], "kinds": [1]}]);
-        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+        ws_stream
+            .send(TungMessage::Text(req.to_string()))
+            .await
+            .unwrap();
         let text = next_text(&mut ws_stream).await;
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value[0], "CLOSED");
@@ -1514,9 +1672,15 @@ mod tests {
         let (events_tx, _) = broadcast::channel(256);
         let app = Router::new()
             .route("/", get(handler))
-            .with_state(Arc::new(AppState { store, settings, events_tx }));
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
         let server = axum::serve(listener, app.into_make_service());
-        let handle = tokio::spawn(async move { server.await.unwrap(); });
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
 
         let bind_ws = addr.to_string();
         let url = format!("ws://{}/", bind_ws);
@@ -1526,14 +1690,20 @@ mod tests {
         let challenge = auth_prompt_value[1].as_str().unwrap().to_string();
         let auth_event = signed_auth_event(&bind_ws, &challenge, [9u8; 32]);
         let auth_msg = serde_json::json!(["AUTH", auth_event]);
-        ws_stream.send(TungMessage::Text(auth_msg.to_string())).await.unwrap();
+        ws_stream
+            .send(TungMessage::Text(auth_msg.to_string()))
+            .await
+            .unwrap();
         let ok_text = next_text(&mut ws_stream).await;
         let ok_value: serde_json::Value = serde_json::from_str(&ok_text).unwrap();
         assert_eq!(ok_value[0], "OK");
         assert_eq!(ok_value[2], true);
 
         let req = serde_json::json!(["REQ", "sub", {"authors": ["p1"], "kinds": [1]}]);
-        ws_stream.send(TungMessage::Text(req.to_string())).await.unwrap();
+        ws_stream
+            .send(TungMessage::Text(req.to_string()))
+            .await
+            .unwrap();
 
         let mut saw_event = false;
         let mut saw_eose = false;
@@ -1567,9 +1737,15 @@ mod tests {
         let (events_tx, _) = broadcast::channel(256);
         let app = Router::new()
             .route("/", get(handler))
-            .with_state(Arc::new(AppState { store, settings, events_tx }));
+            .with_state(Arc::new(AppState {
+                store,
+                settings,
+                events_tx,
+            }));
         let server = axum::serve(listener, app.into_make_service());
-        let handle = tokio::spawn(async move { server.await.unwrap(); });
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
 
         let bind_ws = addr.to_string();
         let url = format!("ws://{}/", bind_ws);
@@ -1579,17 +1755,26 @@ mod tests {
         let challenge = auth_prompt_value[1].as_str().unwrap().to_string();
         let auth_event = signed_auth_event(&bind_ws, &challenge, [9u8; 32]);
         let auth_msg = serde_json::json!(["AUTH", auth_event]);
-        ws_stream.send(TungMessage::Text(auth_msg.to_string())).await.unwrap();
+        ws_stream
+            .send(TungMessage::Text(auth_msg.to_string()))
+            .await
+            .unwrap();
         let _ = next_text(&mut ws_stream).await;
 
         let event = hashed_event("other-pubkey", 1, 42, vec![], "hello world");
         let publish = serde_json::json!(["EVENT", event]);
-        ws_stream.send(TungMessage::Text(publish.to_string())).await.unwrap();
+        ws_stream
+            .send(TungMessage::Text(publish.to_string()))
+            .await
+            .unwrap();
         let text = next_text(&mut ws_stream).await;
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value[0], "OK");
         assert_eq!(value[2], false);
-        assert_eq!(value[3], "restricted: authenticated pubkey does not match event pubkey");
+        assert_eq!(
+            value[3],
+            "restricted: authenticated pubkey does not match event pubkey"
+        );
         handle.abort();
     }
 }

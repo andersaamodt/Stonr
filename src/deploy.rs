@@ -38,7 +38,9 @@ pub fn render_proxy(
 ) -> Result<String> {
     Ok(match manager {
         ProxyManager::Caddy => render_caddy_proxy(domain, http_upstream, ws_upstream),
-        ProxyManager::Nginx => render_nginx_proxy(domain, http_upstream, ws_upstream, tls_cert, tls_key)?,
+        ProxyManager::Nginx => {
+            render_nginx_proxy(domain, http_upstream, ws_upstream, tls_cert, tls_key)?
+        }
     })
 }
 
@@ -199,6 +201,7 @@ mod tests {
         assert!(output.contains("map $http_upgrade $stonr_upstream"));
         assert!(output.contains("default 127.0.0.1:7778;"));
         assert!(output.contains("'' 127.0.0.1:7777;"));
-        assert!(output.contains("ssl_certificate /etc/letsencrypt/live/relay.example.com/fullchain.pem;"));
+        assert!(output
+            .contains("ssl_certificate /etc/letsencrypt/live/relay.example.com/fullchain.pem;"));
     }
 }

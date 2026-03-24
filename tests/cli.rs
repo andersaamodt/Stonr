@@ -266,7 +266,13 @@ fn backup_and_restore_cli_round_trip() {
 
     let output = Command::cargo_bin("stonr")
         .unwrap()
-        .args(["--env", restore_env.to_str().unwrap(), "query", "--limit", "10"])
+        .args([
+            "--env",
+            restore_env.to_str().unwrap(),
+            "query",
+            "--limit",
+            "10",
+        ])
         .assert()
         .success()
         .get_output()
@@ -284,14 +290,7 @@ fn mirror_cursor_cli_can_get_set_and_clear() {
     let relay = "wss://relay.example";
     let output = Command::cargo_bin("stonr")
         .unwrap()
-        .args([
-            "--env",
-            &env_path,
-            "mirror-cursor",
-            "get",
-            "--relay",
-            relay,
-        ])
+        .args(["--env", &env_path, "mirror-cursor", "get", "--relay", relay])
         .assert()
         .success()
         .get_output()

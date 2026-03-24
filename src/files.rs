@@ -104,7 +104,10 @@ impl FileStore {
         }
 
         let existing = self.load_meta(&hash)?;
-        if let (Some(owner), Some(limit)) = (candidate.owner.as_deref(), settings.max_blob_bytes_per_pubkey) {
+        if let (Some(owner), Some(limit)) = (
+            candidate.owner.as_deref(),
+            settings.max_blob_bytes_per_pubkey,
+        ) {
             let current_usage = self.owner_usage(owner)?;
             let additional = match &existing {
                 Some(meta) if meta.owners.contains(owner) => 0,
@@ -297,7 +300,8 @@ impl FileStore {
         let Some(url) = first_tag_value(event, "url") else {
             return Err(anyhow!("invalid: kind 1063 missing url tag"));
         };
-        let Some(hash) = first_tag_value(event, "x").or_else(|| first_tag_value(event, "ox")) else {
+        let Some(hash) = first_tag_value(event, "x").or_else(|| first_tag_value(event, "ox"))
+        else {
             return Err(anyhow!("invalid: kind 1063 missing x or ox tag"));
         };
         if !settings.file_hash_allowed(&hash) {
@@ -309,14 +313,20 @@ impl FileStore {
             }
             return Ok(());
         };
-        if let Some(size) = first_tag_value(event, "size").and_then(|value| value.parse::<u64>().ok()) {
+        if let Some(size) =
+            first_tag_value(event, "size").and_then(|value| value.parse::<u64>().ok())
+        {
             if size != meta.size {
-                return Err(anyhow!("invalid: kind 1063 size tag does not match local blob"));
+                return Err(anyhow!(
+                    "invalid: kind 1063 size tag does not match local blob"
+                ));
             }
         }
         if let Some(mime) = first_tag_value(event, "m") {
             if mime != meta.mime {
-                return Err(anyhow!("invalid: kind 1063 mime tag does not match local blob"));
+                return Err(anyhow!(
+                    "invalid: kind 1063 mime tag does not match local blob"
+                ));
             }
         }
         Ok(())
@@ -461,10 +471,13 @@ pub(crate) fn hash_file(path: &Path) -> Result<(String, u64)> {
 }
 
 fn first_tag_value(event: &Event, name: &str) -> Option<String> {
-    event.tags.iter().find_map(|Tag(fields)| match fields.as_slice() {
-        [tag, value, ..] if tag == name => Some(value.clone()),
-        _ => None,
-    })
+    event
+        .tags
+        .iter()
+        .find_map(|Tag(fields)| match fields.as_slice() {
+            [tag, value, ..] if tag == name => Some(value.clone()),
+            _ => None,
+        })
 }
 
 fn sanitize_extension(ext: &str) -> String {
@@ -561,6 +574,10 @@ mod tests {
             file_hash_denylist: None,
             file_keep_mode: FileKeepMode::Referenced,
             max_blob_bytes_per_pubkey: None,
+            owner_pubkeys: None,
+            follow_pubkeys: None,
+            pinned_event_ids: None,
+            protect_pinned_from_deletes: true,
         }
     }
 

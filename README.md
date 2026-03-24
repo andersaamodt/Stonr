@@ -62,6 +62,10 @@ Runtime settings are read from a `.env` file:
 | `FILTER_KINDS` | Kind numbers to mirror | `1,30023` | _none_ |
 | `FILTER_TAG_T` | `#t` tag values to mirror | `essay,philosophy` | _none_ |
 | `FILTER_SINCE_MODE` | `cursor` or `fixed:<unix>` start time | `fixed:1700000000` | `cursor` |
+| `OWNER_PUBKEYS` | Privileged owner pubkeys (always retained, write-bypass) | `npub1owner...` | _none_ |
+| `FOLLOW_PUBKEYS` | Followed pubkeys to mirror and retain | `npub1alice...,npub1bob...` | _none_ |
+| `PIN_EVENT_IDS` | Exact event IDs to retain | `4a9f...` | _none_ |
+| `PIN_PROTECT_FROM_DELETES` | Keep pinned content visible when delete events target it | `1` | `1` |
 
 Example `.env`:
 
