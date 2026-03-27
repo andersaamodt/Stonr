@@ -5,6 +5,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    process,
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -20,6 +21,9 @@ use sha2::{Digest, Sha256};
 use crate::event::{Event, Tag};
 use crate::files::FileStore;
 use std::os::unix::fs as unix_fs;
+
+const MUTATION_LOCK_STALE_AFTER: Duration = Duration::from_secs(120);
+const MUTATION_LOCK_OWNER_FILE: &str = "owner.pid";
 
 /// Persistent store for events and indexes rooted at `root`.
 #[derive(Clone)]
@@ -224,9 +228,6 @@ impl Store {
         self.write_mirror_links(ev)?;
         let size_bytes = fs::metadata(&path)?.len();
         self.bump_stats_cache(size_bytes)?;
-        if self.max_stored_events.is_some() || self.max_stored_event_bytes.is_some() {
-            self.enforce_retention_locked()?;
-        }
         Ok(true)
     }
 
@@ -529,7 +530,8 @@ impl Store {
             .ok()
             .and_then(|value| value.trim().parse::<u64>().ok());
         if let (Some(count), Some(bytes)) = (count, bytes) {
-            self.write_stats_cache(count.saturating_add(1), bytes.saturating_add(added_bytes))?;
+            let next = (count.saturating_add(1), bytes.saturating_add(added_bytes));
+            self.write_stats_cache(next.0, next.1)?;
         }
         Ok(())
     }
@@ -664,8 +666,18 @@ impl Store {
         let lock_path = runtime_dir.join("store.lock");
         for _ in 0..400 {
             match fs::create_dir(&lock_path) {
-                Ok(()) => return Ok(MutationLock { path: lock_path }),
+                Ok(()) => {
+                    if let Err(error) = write_lock_owner_pid(&lock_path) {
+                        let _ = fs::remove_dir_all(&lock_path);
+                        return Err(error);
+                    }
+                    return Ok(MutationLock { path: lock_path });
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if lock_dir_should_break(&lock_path, MUTATION_LOCK_STALE_AFTER) {
+                        let _ = fs::remove_dir_all(&lock_path);
+                        continue;
+                    }
                     thread::sleep(Duration::from_millis(25));
                 }
                 Err(error) => return Err(error.into()),
@@ -1154,7 +1166,51 @@ struct MutationLock {
 
 impl Drop for MutationLock {
     fn drop(&mut self) {
-        let _ = fs::remove_dir(&self.path);
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn write_lock_owner_pid(path: &Path) -> Result<()> {
+    fs::write(path.join(MUTATION_LOCK_OWNER_FILE), format!("{}\n", process::id()))?;
+    Ok(())
+}
+
+fn read_lock_owner_pid(path: &Path) -> Option<u32> {
+    fs::read_to_string(path.join(MUTATION_LOCK_OWNER_FILE))
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+}
+
+fn lock_owner_pid_is_running(pid: u32) -> bool {
+    // `kill(pid, 0)` checks process existence without sending a signal.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if rc == 0 {
+        return true;
+    }
+    matches!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(code) if code == libc::EPERM
+    )
+}
+
+fn lock_dir_should_break(path: &Path, stale_after: Duration) -> bool {
+    let metadata = match fs::metadata(path) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    if !metadata.is_dir() {
+        return false;
+    }
+    if let Some(owner_pid) = read_lock_owner_pid(path) {
+        return !lock_owner_pid_is_running(owner_pid);
+    }
+    let modified = match metadata.modified() {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    match modified.elapsed() {
+        Ok(age) => age > stale_after,
+        Err(_) => false,
     }
 }
 
@@ -1695,6 +1751,47 @@ mod tests {
     }
 
     #[test]
+    fn lock_dir_breaks_when_owner_pid_is_dead() {
+        let dir = TempDir::new().unwrap();
+        let lock_path = dir.path().join("store.lock");
+        fs::create_dir_all(&lock_path).unwrap();
+        fs::write(lock_path.join(super::MUTATION_LOCK_OWNER_FILE), "999999\n").unwrap();
+        assert!(super::lock_dir_should_break(
+            &lock_path,
+            Duration::from_secs(3600)
+        ));
+    }
+
+    #[test]
+    fn lock_dir_keeps_live_owner_even_if_old() {
+        let dir = TempDir::new().unwrap();
+        let lock_path = dir.path().join("store.lock");
+        fs::create_dir_all(&lock_path).unwrap();
+        fs::write(
+            lock_path.join(super::MUTATION_LOCK_OWNER_FILE),
+            format!("{}\n", std::process::id()),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(!super::lock_dir_should_break(
+            &lock_path,
+            Duration::from_secs(0)
+        ));
+    }
+
+    #[test]
+    fn lock_dir_without_owner_uses_stale_age() {
+        let dir = TempDir::new().unwrap();
+        let lock_path = dir.path().join("store.lock");
+        fs::create_dir_all(&lock_path).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(super::lock_dir_should_break(
+            &lock_path,
+            Duration::from_secs(0)
+        ));
+    }
+
+    #[test]
     fn mirror_symlinks_not_duplicated() {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
@@ -1746,6 +1843,7 @@ mod tests {
         store.ingest(&e1).unwrap();
         store.ingest(&e2).unwrap();
         store.ingest(&e3).unwrap();
+        store.enforce_retention().unwrap();
 
         let res = store
             .query(Query {
@@ -1790,6 +1888,7 @@ mod tests {
         store
             .ingest(&sample_event("own33", "owner", 1, None, 30))
             .unwrap();
+        store.enforce_retention().unwrap();
 
         let events = store
             .query_with_policy(
@@ -1855,6 +1954,29 @@ mod tests {
     }
 
     #[test]
+    fn ingest_with_limits_updates_stats_cache_without_full_recount() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(
+            dir.path().to_path_buf(),
+            false,
+            Some(2_000),
+            Some(1_000_000),
+        );
+        store.init().unwrap();
+        fs::write(dir.path().join("runtime/events-count.cache"), "100").unwrap();
+        fs::write(dir.path().join("runtime/events-bytes.cache"), "1000").unwrap();
+
+        store.ingest(&sample_event("aa11", "p1", 1, None, 10)).unwrap();
+
+        let count = fs::read_to_string(dir.path().join("runtime/events-count.cache"))
+            .unwrap()
+            .trim()
+            .parse::<usize>()
+            .unwrap();
+        assert_eq!(count, 101);
+    }
+
+    #[test]
     fn retention_status_records_last_prune_result() {
         let dir = TempDir::new().unwrap();
         let store = Store::with_limits(dir.path().to_path_buf(), false, Some(2), None);
@@ -1869,6 +1991,7 @@ mod tests {
         store
             .ingest(&sample_event("cc33", "p1", 1, None, 30))
             .unwrap();
+        store.enforce_retention().unwrap();
 
         let status = store.retention_status().unwrap();
         assert_eq!(status.state, "ok");

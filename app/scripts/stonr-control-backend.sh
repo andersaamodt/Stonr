@@ -745,7 +745,6 @@ if FILTER_PRIVATE:
 summaries = [summarize(event) for event in events]
 summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
 summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
-summaries.sort(key=lambda event: int(int(event.get("created_at") or 0) > NOW))
 json.dump(summaries[:LIMIT], sys.stdout)
 ' "$limit" "$filter_private"
 }

@@ -563,7 +563,11 @@ where
                                 Some("EVENT") if arr.len() >= 3 => {
                                     if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone())
                                     {
-                                        latest = latest.max(ev.created_at);
+                                        // Keep cursor monotonic but never ahead of wall-clock time.
+                                        // Some upstream events arrive with future timestamps; if we
+                                        // advance the cursor to those values, mirror ingest can stall.
+                                        let cursor_created_at = ev.created_at.min(current_unix_ts());
+                                        latest = latest.max(cursor_created_at);
                                         if validate_event_with_files(
                                             options.settings,
                                             &store.files(),
@@ -710,7 +714,8 @@ pub fn cursor_key_for(relay: &str, scope: &str) -> String {
 /// Returns `None` if no cursor file exists or if the contents fail to parse.
 fn read_cursor(root: &Path, relay: &str) -> Option<u64> {
     let path = cursor_path(root, relay);
-    std::fs::read_to_string(path).ok()?.parse().ok()
+    let since = std::fs::read_to_string(path).ok()?.parse::<u64>().ok()?;
+    Some(since.min(current_unix_ts()))
 }
 
 /// Persist the last seen timestamp for a relay.
@@ -1176,6 +1181,51 @@ mod tests {
         assert_eq!(super::read_cursor(dir.path(), &relay_url), Some(6));
     }
 
+    #[tokio::test]
+    async fn mirror_cursor_does_not_advance_into_future() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let relay_url = format!("ws://{}", addr);
+        let future_created_at = current_unix_ts() + 300;
+        let ev = Event {
+            id: "aa11".into(),
+            pubkey: "p".into(),
+            kind: 1,
+            created_at: future_created_at,
+            tags: vec![],
+            content: String::new(),
+            sig: String::new(),
+        };
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await;
+            ws.send(TMsg::Text(json!(["EVENT", "s", ev]).to_string()))
+                .await
+                .unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "s"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        let before = current_unix_ts();
+        mirror_relay(relay_url.clone(), cfg, store.clone())
+            .await
+            .unwrap();
+        let after = current_unix_ts();
+        server.abort();
+
+        let cursor = super::read_cursor(dir.path(), &relay_url).unwrap();
+        assert!(cursor >= before);
+        assert!(cursor <= after);
+    }
+
     async fn spawn_socks_proxy(target: std::net::SocketAddr) -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1564,6 +1614,17 @@ mod tests {
         let root = dir.path().to_path_buf();
         write_cursor(&root, "ws://example", 42).unwrap();
         assert_eq!(read_cursor(&root, "ws://example"), Some(42));
+    }
+
+    #[test]
+    fn read_cursor_clamps_future_timestamp() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let future = current_unix_ts() + 600;
+        write_cursor(&root, "ws://example", future).unwrap();
+        let now = current_unix_ts();
+        let cursor = read_cursor(&root, "ws://example").unwrap();
+        assert!(cursor <= now);
     }
 
     #[tokio::test]
