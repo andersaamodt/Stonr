@@ -48,6 +48,7 @@
     diagnosticsError: '',
     backgroundMode: false,
     menuBarIcon: false,
+    hostStatusItemRelayRunning: null,
     startupServiceEnabled: false,
     startupServiceManager: 'none',
     startupServiceBusy: false,
@@ -857,26 +858,66 @@
     if (!state.bridge) {
       return;
     }
-    var argv = [
-      '__wizardry_host_set_background_mode',
-      state.backgroundMode ? '1' : '0',
-      state.menuBarIcon ? '1' : '0'
-    ];
-    await execArgv(argv);
+    await setHostBackgroundModeWithRelayState(relayRunningNow());
     if (!state.menuBarIcon) {
+      state.hostStatusItemRelayRunning = null;
       return;
     }
     var hostState = await readHostStatusItemState();
     if (hostStatusItemHealthy(hostState)) {
+      state.hostStatusItemRelayRunning = relayRunningNow();
       return;
     }
     await new Promise(function (resolve) {
       setTimeout(resolve, 120);
     });
-    await execArgv(argv);
+    await setHostBackgroundModeWithRelayState(relayRunningNow());
     hostState = await readHostStatusItemState();
     if (!hostStatusItemHealthy(hostState)) {
       toast('Menu bar icon did not activate in host.', 'bad');
+      return;
+    }
+    state.hostStatusItemRelayRunning = relayRunningNow();
+  }
+
+  function relayRunningNow() {
+    return !!(state.status && state.status.status === 'running');
+  }
+
+  async function setHostBackgroundModeWithRelayState(relayRunning) {
+    var argvWithRelay = [
+      '__wizardry_host_set_background_mode',
+      state.backgroundMode ? '1' : '0',
+      state.menuBarIcon ? '1' : '0',
+      relayRunning ? '1' : '0'
+    ];
+    try {
+      await execArgv(argvWithRelay);
+      return;
+    } catch (_error) {
+      var argvLegacy = [
+        '__wizardry_host_set_background_mode',
+        state.backgroundMode ? '1' : '0',
+        state.menuBarIcon ? '1' : '0'
+      ];
+      await execArgv(argvLegacy);
+    }
+  }
+
+  async function syncHostStatusItemRelayIcon() {
+    if (!state.bridge || !state.backgroundMode || !state.menuBarIcon) {
+      state.hostStatusItemRelayRunning = null;
+      return;
+    }
+    var running = relayRunningNow();
+    if (state.hostStatusItemRelayRunning === running) {
+      return;
+    }
+    try {
+      await setHostBackgroundModeWithRelayState(running);
+      state.hostStatusItemRelayRunning = running;
+    } catch (error) {
+      console.error(error);
     }
   }
 
@@ -904,6 +945,7 @@
     state.envPath = prefs.env_path || state.envPath || '';
     state.backgroundMode = matchesBool(prefs.background_mode || '');
     state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
+    state.hostStatusItemRelayRunning = null;
     state.startupServiceEnabled = false;
     state.startupServiceManager = 'none';
     state.startupServiceBusy = false;
@@ -2496,6 +2538,7 @@
     }
     try {
       state.status = parseKv(await backend('relay-status', [state.envPath]));
+      syncHostStatusItemRelayIcon();
       renderRuntime();
       if (state.activeSection === 'general') {
         renderActiveSection(false);
@@ -2589,6 +2632,7 @@
       ) {
         state.relayBusyAction = '';
         syncRelayToggle(state.status);
+        syncHostStatusItemRelayIcon();
       }
       await refreshDoctor();
       await loadEvents();
