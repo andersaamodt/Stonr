@@ -2960,6 +2960,12 @@
       var disabledNip = disabledNipSupportKey(node.field);
       var enabled = state.bridge && !unmetDependency && !disabledNip;
       var collapsedByDependency = !!(node.field.collapseWhenUnavailable && unmetDependency);
+      if (node.field.collapseWhenUnavailable) {
+        var expandedHeight = node.wrap.scrollHeight;
+        if (expandedHeight > 0) {
+          node.wrap.style.setProperty('--field-expanded-height', expandedHeight + 'px');
+        }
+      }
       if (node.field.type === 'radio') {
         Array.prototype.slice.call(node.input.querySelectorAll('input[type="radio"]')).forEach(function (radio) {
           radio.disabled = !enabled || radio.dataset.baseDisabled === '1';

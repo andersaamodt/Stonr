@@ -744,8 +744,8 @@ h4 {
 }
 
 .field.field-collapsible {
-  overflow: clip;
-  max-height: 12rem;
+  overflow: hidden;
+  max-height: var(--field-expanded-height, 12rem);
   opacity: 1;
   transform: translateY(0);
   transform-origin: top;
