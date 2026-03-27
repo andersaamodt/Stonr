@@ -4,6 +4,8 @@
     bridge: false,
     hostBootReadySent: false,
     refreshTimer: null,
+    refreshInFlight: false,
+    refreshQueued: false,
     envPathTimer: null,
     envPath: '',
     envValues: {},
@@ -37,6 +39,7 @@
     eventsTotalLoading: false,
     eventsLoadedOnce: false,
     eventsStatsLoadedAt: 0,
+    eventsStatsPromise: null,
     eventsError: '',
     events: [],
     eventsTotal: 0,
@@ -563,7 +566,9 @@
           console.error(error);
         });
       } else if (document.visibilityState === 'visible') {
-        refreshLiveState();
+        refreshLiveState().catch(function (error) {
+          console.error(error);
+        });
       }
     });
     window.addEventListener('pagehide', function () {
@@ -946,6 +951,8 @@
     state.backgroundMode = matchesBool(prefs.background_mode || '');
     state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
     state.hostStatusItemRelayRunning = null;
+    state.refreshInFlight = false;
+    state.refreshQueued = false;
     state.startupServiceEnabled = false;
     state.startupServiceManager = 'none';
     state.startupServiceBusy = false;
@@ -963,6 +970,7 @@
     state.eventsTotalLoading = false;
     state.eventsLoadedOnce = false;
     state.eventsStatsLoadedAt = 0;
+    state.eventsStatsPromise = null;
     state.diagnosticsLoading = false;
     state.diagnosticsLoadedOnce = false;
     state.diagnosticsMirror = [];
@@ -2096,30 +2104,16 @@
       state.eventsTotalLoading = false;
       state.eventsLoadedOnce = true;
       state.eventsStatsLoadedAt = 0;
+      state.eventsStatsPromise = null;
       return;
     }
     state.eventsLoading = true;
-    var now = Date.now();
-    var shouldRefreshStats =
-      !state.eventsStatsLoadedAt || now - state.eventsStatsLoadedAt >= 30000;
-    if (shouldRefreshStats) {
-      state.eventsTotalLoading = true;
-    }
+    var refreshStats = false;
     var hadSnapshot = state.eventsLoadedOnce || state.events.length > 0 || state.eventsTotal > 0 || state.eventsBytes > 0;
     try {
       var output = await backend('query-events', [state.envPath, state.eventsSearch.trim(), '60']);
       state.events = JSON.parse(output || '[]');
-      if (shouldRefreshStats) {
-        var results = await Promise.all([
-          backend('count-events', [state.envPath]),
-          backend('size-events', [state.envPath])
-        ]);
-        var total = results[0];
-        var size = results[1];
-        state.eventsTotal = Number(String(total || '0').trim()) || 0;
-        state.eventsBytes = Number(String(size || '0').trim()) || 0;
-        state.eventsStatsLoadedAt = Date.now();
-      }
+      refreshStats = true;
       state.eventsError = '';
       state.eventsLoadedOnce = true;
     } catch (error) {
@@ -2136,10 +2130,53 @@
       }
     } finally {
       state.eventsLoading = false;
-      if (shouldRefreshStats) {
-        state.eventsTotalLoading = false;
-      }
     }
+    if (refreshStats) {
+      refreshEventsStats().catch(function (error) {
+        console.error(error);
+      });
+    }
+  }
+
+  function shouldRefreshEventsStats() {
+    return !state.eventsStatsLoadedAt || Date.now() - state.eventsStatsLoadedAt >= 30000;
+  }
+
+  function refreshEventsStats() {
+    if (!state.bridge) {
+      state.eventsTotal = 0;
+      state.eventsBytes = 0;
+      state.eventsTotalLoading = false;
+      state.eventsStatsLoadedAt = 0;
+      state.eventsStatsPromise = null;
+      return Promise.resolve();
+    }
+    if (state.eventsStatsPromise) {
+      return state.eventsStatsPromise;
+    }
+    if (!shouldRefreshEventsStats()) {
+      return Promise.resolve();
+    }
+    state.eventsTotalLoading = true;
+    state.eventsStatsPromise = Promise.all([
+      backend('count-events', [state.envPath]),
+      backend('size-events', [state.envPath])
+    ]).then(function (results) {
+      var total = results[0];
+      var size = results[1];
+      state.eventsTotal = Number(String(total || '0').trim()) || 0;
+      state.eventsBytes = Number(String(size || '0').trim()) || 0;
+      state.eventsStatsLoadedAt = Date.now();
+    }).catch(function (error) {
+      console.error(error);
+    }).finally(function () {
+      state.eventsTotalLoading = false;
+      state.eventsStatsPromise = null;
+      if (state.activeSection === 'events') {
+        renderActiveSection();
+      }
+    });
+    return state.eventsStatsPromise;
   }
 
   async function purgeEvents() {
@@ -2157,6 +2194,7 @@
     state.eventsTotalLoading = false;
     state.eventsLoadedOnce = false;
     state.eventsStatsLoadedAt = 0;
+    state.eventsStatsPromise = null;
     state.eventsError = '';
     await loadEvents();
     renderActiveSection();
@@ -2651,7 +2689,9 @@
     } finally {
       state.relayBusyAction = '';
       syncRelayToggle(state.status || { status: 'stopped' });
-      refreshLiveState();
+      refreshLiveState().catch(function (error) {
+        console.error(error);
+      });
     }
   }
 
@@ -3538,16 +3578,31 @@
     if (!state.bridge) {
       return;
     }
-    await refreshStatus();
-    await refreshDoctor();
-    if (state.activeSection === 'events') {
-      await loadEvents();
-      renderActiveSection();
+    if (state.refreshInFlight) {
+      state.refreshQueued = true;
       return;
     }
-    if (state.activeSection === 'diagnostics') {
-      await Promise.all([loadLog(), loadDiagnosticsStatus()]);
-      renderActiveSection();
+    state.refreshInFlight = true;
+    try {
+      await refreshStatus();
+      await refreshDoctor();
+      if (state.activeSection === 'events') {
+        await loadEvents();
+        renderActiveSection();
+        return;
+      }
+      if (state.activeSection === 'diagnostics') {
+        await Promise.all([loadLog(), loadDiagnosticsStatus()]);
+        renderActiveSection();
+      }
+    } finally {
+      state.refreshInFlight = false;
+      if (state.refreshQueued) {
+        state.refreshQueued = false;
+        refreshLiveState().catch(function (error) {
+          console.error(error);
+        });
+      }
     }
   }
 
@@ -3560,7 +3615,9 @@
     }
     state.refreshTimer = setInterval(function () {
       if (document.visibilityState === 'visible') {
-        refreshLiveState();
+        refreshLiveState().catch(function (error) {
+          console.error(error);
+        });
       }
     }, 2000);
   }

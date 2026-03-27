@@ -211,6 +211,33 @@ fn query_events_searches_recent_matches_from_log() {
 }
 
 #[test]
+fn query_events_prefers_event_log_when_running_pid_exists() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let store_root = dir.path().join("store");
+    fs::create_dir_all(store_root.join("runtime")).unwrap();
+    fs::write(
+        store_root.join("runtime/relay.pid"),
+        format!("{}\n", std::process::id()),
+    )
+    .unwrap();
+    fs::write(
+        store_root.join("log/events.ndjson"),
+        concat!(
+            "{\"id\":\"a\",\"pubkey\":\"p1\",\"kind\":1,\"created_at\":10,\"tags\":[],\"content\":\"older\"}\n",
+            "{\"id\":\"b\",\"pubkey\":\"p2\",\"kind\":1,\"created_at\":20,\"tags\":[],\"content\":\"newer\"}\n"
+        ),
+    )
+    .unwrap();
+
+    let output = run_backend(&["query-events", &env_path, "", "5"]);
+    let events: Vec<Value> = serde_json::from_str(&output).unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["id"], "b");
+    assert_eq!(events[1]["id"], "a");
+}
+
+#[test]
 fn apply_retention_prunes_oldest_events() {
     let dir = TempDir::new().unwrap();
     let env_path = write_env(&dir);

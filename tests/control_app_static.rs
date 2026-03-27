@@ -40,6 +40,16 @@ fn checkbox_labels_are_click_targets() {
 }
 
 #[test]
+fn events_refresh_uses_single_flight_and_non_blocking_stats() {
+    let app_js = read_file(&format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR")));
+    assert!(app_js.contains("refreshInFlight: false"));
+    assert!(app_js.contains("if (state.refreshInFlight)"));
+    assert!(app_js.contains("eventsStatsPromise: null"));
+    assert!(app_js.contains("function refreshEventsStats()"));
+    assert!(app_js.contains("refreshEventsStats().catch(function (error)"));
+}
+
+#[test]
 fn splash_uses_stonr_logo_asset() {
     let index_html = read_file(&format!("{}/app/index.html", env!("CARGO_MANIFEST_DIR")));
     assert!(index_html.contains("class=\"boot-splash\""));
