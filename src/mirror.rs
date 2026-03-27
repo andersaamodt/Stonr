@@ -309,10 +309,15 @@ async fn mirror_site_posts_once(
     store: Store,
     events_tx: broadcast::Sender<Event>,
 ) -> Result<()> {
-    let author = match cfg.mirror_site_author.clone() {
-        Some(author) if !author.is_empty() => author,
-        _ => return Ok(()),
-    };
+    let authors = cfg
+        .mirror_site_author
+        .as_deref()
+        .map(crate::config::csv_strings)
+        .filter(|values| !values.is_empty())
+        .unwrap_or_default();
+    if authors.is_empty() {
+        return Ok(());
+    }
     let cursor_key = cursor_key_for(&relay, "site-posts");
     write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-posts")?;
     let since = match cfg.filter_since_mode {
@@ -320,7 +325,10 @@ async fn mirror_site_posts_once(
         SinceMode::Fixed(ts) => ts,
     };
     let mut filter = serde_json::Map::new();
-    filter.insert("authors".into(), Value::Array(vec![Value::String(author)]));
+    filter.insert(
+        "authors".into(),
+        Value::Array(authors.into_iter().map(Value::String).collect()),
+    );
     filter.insert(
         "kinds".into(),
         Value::Array(vec![Value::Number(30023u32.into())]),
@@ -412,15 +420,20 @@ async fn mirror_site_comments_once(
     store: Store,
     events_tx: broadcast::Sender<Event>,
 ) -> Result<()> {
-    let author = match cfg.mirror_site_author.clone() {
-        Some(author) if !author.is_empty() => author,
-        _ => return Ok(()),
-    };
+    let authors = cfg
+        .mirror_site_author
+        .as_deref()
+        .map(crate::config::csv_strings)
+        .filter(|values| !values.is_empty())
+        .unwrap_or_default();
+    if authors.is_empty() {
+        return Ok(());
+    }
     let cursor_key = cursor_key_for(&relay, "site-comments");
     write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-comments")?;
     let post_events = store.query_with_policy(
         Query {
-            authors: Some(vec![author.clone()]),
+            authors: Some(authors),
             kinds: Some(vec![30023]),
             d: None,
             t: None,
@@ -1403,6 +1416,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn site_post_mirror_accepts_multiple_comma_delimited_authors() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let message = ws.next().await.unwrap().unwrap();
+            let TMsg::Text(text) = message else {
+                panic!("expected text request");
+            };
+            tx.send(text.to_string()).unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "site-posts"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.mirror_site_author = Some("site-author-a,site-author-b".into());
+        mirror_site_posts_once(format!("ws://{}", addr), cfg, store, test_events_tx())
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        let req: Value = serde_json::from_str(&rx.await.unwrap()).unwrap();
+        assert_eq!(req[0], "REQ");
+        assert_eq!(req[1], "site-posts");
+        assert_eq!(req[2]["authors"][0], "site-author-a");
+        assert_eq!(req[2]["authors"][1], "site-author-b");
+        assert_eq!(req[2]["kinds"][0], 30023);
+    }
+
+    #[tokio::test]
     async fn site_comment_mirror_matches_nostr_blog_address_scope() {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
@@ -1447,6 +1497,65 @@ mod tests {
         assert_eq!(req[1], "site-comments");
         assert_eq!(req[2]["kinds"][0], 1);
         assert_eq!(req[2]["#a"][0], "30023:site-author:hello-world");
+    }
+
+    #[tokio::test]
+    async fn site_comment_mirror_reads_posts_for_multiple_authors() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let post_a = Event {
+            id: "posta".into(),
+            pubkey: "site-author-a".into(),
+            kind: 30023,
+            created_at: 10,
+            tags: vec![Tag(vec!["d".into(), "alpha".into()])],
+            content: "post".into(),
+            sig: String::new(),
+        };
+        let post_b = Event {
+            id: "postb".into(),
+            pubkey: "site-author-b".into(),
+            kind: 30023,
+            created_at: 11,
+            tags: vec![Tag(vec!["d".into(), "beta".into()])],
+            content: "post".into(),
+            sig: String::new(),
+        };
+        store.ingest(&post_a).unwrap();
+        store.ingest(&post_b).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let message = ws.next().await.unwrap().unwrap();
+            let TMsg::Text(text) = message else {
+                panic!("expected text request");
+            };
+            tx.send(text.to_string()).unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "site-comments"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.mirror_site_author = Some("site-author-a,site-author-b".into());
+        mirror_site_comments_once(format!("ws://{}", addr), cfg, store, test_events_tx())
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        let req: Value = serde_json::from_str(&rx.await.unwrap()).unwrap();
+        assert_eq!(req[0], "REQ");
+        assert_eq!(req[1], "site-comments");
+        assert_eq!(req[2]["kinds"][0], 1);
+        let addresses = req[2]["#a"].as_array().unwrap();
+        assert!(addresses.contains(&Value::String("30023:site-author-a:alpha".into())));
+        assert!(addresses.contains(&Value::String("30023:site-author-b:beta".into())));
     }
 
     #[test]

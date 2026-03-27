@@ -96,8 +96,8 @@
           { value: 'broad', label: 'General relay' },
           { value: 'site', label: 'One-site mirror' }
         ], null, 'Choose whether this relay mirrors broad upstream traffic or only one site author and that site\'s comments.'),
-        textField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkey', 'Hex pubkey for the site owner', null, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Hex pubkey whose long-form posts define the one-site mirror scope.'),
-        boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.'),
+        withFieldUi(textareaField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkeys', 'Comma-delimited hex pubkeys for site owners', formatList, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Comma-delimited hex pubkeys whose long-form posts define the one-site mirror scope.'), { collapseWhenUnavailable: true }),
+        withFieldUi(boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.'), { collapseWhenUnavailable: true }),
         groupField('Core Behavior'),
         boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', 'Clients can read stored events.', null, 'Allow clients to read stored events with REQ filters.'),
         boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', 'Clients can publish events.', null, 'Allow clients to publish new events to this relay.'),
@@ -1221,6 +1221,9 @@
     }
     var wrap = document.createElement('div');
     wrap.className = 'field' + (field.type === 'bool' ? ' checkbox-field' : '');
+    if (field.collapseWhenUnavailable) {
+      wrap.classList.add('field-collapsible');
+    }
     if (sectionId === 'policies' && field.nipMaster) {
       wrap.classList.add('nip-master-field');
     }
@@ -2794,6 +2797,7 @@
     field.nipMaster = !!ui.nipMaster;
     field.nipChild = !!ui.nipChild;
     field.hideNipPill = !!ui.hideNipPill;
+    field.collapseWhenUnavailable = !!ui.collapseWhenUnavailable;
     return field;
   }
 
@@ -2955,6 +2959,7 @@
       var unmetDependency = unmetFieldDependency(node.field);
       var disabledNip = disabledNipSupportKey(node.field);
       var enabled = state.bridge && !unmetDependency && !disabledNip;
+      var collapsedByDependency = !!(node.field.collapseWhenUnavailable && unmetDependency);
       if (node.field.type === 'radio') {
         Array.prototype.slice.call(node.input.querySelectorAll('input[type="radio"]')).forEach(function (radio) {
           radio.disabled = !enabled || radio.dataset.baseDisabled === '1';
@@ -2967,7 +2972,9 @@
       }
       node.wrap.classList.toggle('field-disabled', !enabled);
       node.wrap.classList.toggle('field-dependency-disabled', !!unmetDependency);
+      node.wrap.classList.toggle('field-collapsed', collapsedByDependency);
       node.wrap.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+      node.wrap.setAttribute('aria-hidden', collapsedByDependency ? 'true' : 'false');
       if (node.nipPill) {
         var pillTitle = '';
         if (disabledNip) {
