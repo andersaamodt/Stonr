@@ -26,6 +26,8 @@ use crate::{
     storage::{Query, Store},
 };
 
+const CURSOR_FALLBACK_WINDOW_SECS: u64 = 15 * 60;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MirrorCursorValue {
     pub relay: String,
@@ -185,7 +187,7 @@ async fn mirror_relay_once(
     // Determine the starting timestamp either from a stored cursor or a fixed
     // configuration value.
     let since = match cfg.filter_since_mode {
-        SinceMode::Cursor => read_cursor(&cfg.store_root, &relay).unwrap_or(0),
+        SinceMode::Cursor => cursor_since_with_fallback(&cfg.store_root, &relay),
         SinceMode::Fixed(ts) => ts,
     };
     // Assemble the filter sent in the REQ message based on config options.
@@ -321,7 +323,7 @@ async fn mirror_site_posts_once(
     let cursor_key = cursor_key_for(&relay, "site-posts");
     write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-posts")?;
     let since = match cfg.filter_since_mode {
-        SinceMode::Cursor => read_cursor(&cfg.store_root, &cursor_key).unwrap_or(0),
+        SinceMode::Cursor => cursor_since_with_fallback(&cfg.store_root, &cursor_key),
         SinceMode::Fixed(ts) => ts,
     };
     let mut filter = serde_json::Map::new();
@@ -465,7 +467,7 @@ async fn mirror_site_comments_once(
         return Ok(());
     }
     let since = match cfg.filter_since_mode {
-        SinceMode::Cursor => read_cursor(&cfg.store_root, &cursor_key).unwrap_or(0),
+        SinceMode::Cursor => cursor_since_with_fallback(&cfg.store_root, &cursor_key),
         SinceMode::Fixed(ts) => ts,
     };
     let mut filter = serde_json::Map::new();
@@ -716,6 +718,12 @@ fn read_cursor(root: &Path, relay: &str) -> Option<u64> {
     let path = cursor_path(root, relay);
     let since = std::fs::read_to_string(path).ok()?.parse::<u64>().ok()?;
     Some(since.min(current_unix_ts()))
+}
+
+fn cursor_since_with_fallback(root: &Path, relay: &str) -> u64 {
+    read_cursor(root, relay)
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| current_unix_ts().saturating_sub(CURSOR_FALLBACK_WINDOW_SECS))
 }
 
 /// Persist the last seen timestamp for a relay.
@@ -1346,11 +1354,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mirror_cursor_mode_without_file_starts_at_zero() {
+    async fn mirror_cursor_mode_without_file_uses_recent_fallback_window() {
         use serde_json::Value;
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
         store.init().unwrap();
+        let before = current_unix_ts();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -1358,7 +1367,9 @@ mod tests {
             let mut ws = accept_async(stream).await.unwrap();
             if let Some(Ok(TMsg::Text(txt))) = ws.next().await {
                 let v: Value = serde_json::from_str(&txt).unwrap();
-                assert!(v[2]["since"].is_null());
+                let since = v[2]["since"].as_u64().unwrap();
+                assert!(since <= before);
+                assert!(since >= before.saturating_sub(CURSOR_FALLBACK_WINDOW_SECS));
             }
             ws.send(TMsg::Text(
                 json!(["EVENT", "s", {
@@ -1390,7 +1401,13 @@ mod tests {
         hasher.update(relay_url.as_bytes());
         let hash = hex::encode(hasher.finalize());
         let cursor_path = dir.path().join(format!("cursor/{}.since", hash));
-        assert_eq!(std::fs::read_to_string(cursor_path).unwrap().trim(), "1");
+        let stored = std::fs::read_to_string(cursor_path)
+            .unwrap()
+            .trim()
+            .parse::<u64>()
+            .unwrap();
+        assert!(stored <= current_unix_ts());
+        assert!(stored >= before.saturating_sub(CURSOR_FALLBACK_WINDOW_SECS));
     }
 
     #[tokio::test]

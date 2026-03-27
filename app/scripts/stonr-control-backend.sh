@@ -759,7 +759,9 @@ import json, os, sys
 log_path = sys.argv[1]
 needle = sys.argv[2].strip().lower()
 limit = int(sys.argv[3])
-target = max(limit * 2, limit)
+# Scan a broader tail window so backfill bursts do not make the Events view
+# appear frozen on old timestamps.
+target = max(limit * 50, 2000)
 chunk_size = 262144
 matches = []
 
