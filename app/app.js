@@ -2008,9 +2008,18 @@
 
     var meta = document.createElement('div');
     meta.className = 'event-meta';
+    var createdAt = Number(event.created_at || 0);
+    var ingestedAt = Number(event.ingested_at || 0);
     meta.appendChild(eventMetaPill('kind ' + String(event.kind)));
     meta.appendChild(eventMetaPill('author ' + String(event.pubkey || '').slice(0, 12)));
-    meta.appendChild(eventMetaPill(formatEventTime(event.created_at)));
+    if (isFinite(ingestedAt) && ingestedAt > 0) {
+      meta.appendChild(eventMetaPill('seen ' + formatEventTime(ingestedAt)));
+      if (isFinite(createdAt) && createdAt > 0 && Math.abs(ingestedAt - createdAt) >= 86400) {
+        meta.appendChild(eventMetaPill('created ' + formatEventTime(createdAt)));
+      }
+    } else {
+      meta.appendChild(eventMetaPill(formatEventTime(createdAt)));
+    }
     row.appendChild(meta);
 
     if (event.image_url) {

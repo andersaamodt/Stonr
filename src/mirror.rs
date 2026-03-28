@@ -27,6 +27,7 @@ use crate::{
 };
 
 const CURSOR_FALLBACK_WINDOW_SECS: u64 = 15 * 60;
+const MIRROR_SINCE_SKEW_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MirrorCursorValue {
@@ -570,6 +571,19 @@ where
                                         // advance the cursor to those values, mirror ingest can stall.
                                         let cursor_created_at = ev.created_at.min(current_unix_ts());
                                         latest = latest.max(cursor_created_at);
+                                        // Upstreams may occasionally ignore `since` and send deep history.
+                                        // Skip anything clearly older than the requested window.
+                                        if options.since > 0
+                                            && ev.created_at.saturating_add(MIRROR_SINCE_SKEW_SECS)
+                                                < options.since
+                                        {
+                                            let _ = write_cursor(
+                                                options.store_root,
+                                                options.cursor_key,
+                                                latest,
+                                            );
+                                            continue;
+                                        }
                                         if validate_event_with_files(
                                             options.settings,
                                             &store.files(),
@@ -1096,7 +1110,7 @@ mod tests {
         cfg.bind_ws = "127.0.0.1:0".into();
         cfg.filter_private_messages = true;
         cfg.relays_upstream = vec![format!("ws://{}", ws_addr)];
-        cfg.filter_since_mode = SinceMode::Cursor;
+        cfg.filter_since_mode = SinceMode::Fixed(0);
         super::run(cfg, store.clone(), test_events_tx()).await;
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         server.await.unwrap();
@@ -1187,6 +1201,62 @@ mod tests {
         server.abort();
         assert!(dir.path().join("events/aa/11/aa11.json").exists());
         assert_eq!(super::read_cursor(dir.path(), &relay_url), Some(6));
+    }
+
+    #[tokio::test]
+    async fn mirror_skips_events_older_than_cursor_window() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let relay_url = format!("ws://{}", addr);
+        super::write_cursor(dir.path(), &relay_url, 1000).unwrap();
+
+        let old = Event {
+            id: "aa11".into(),
+            pubkey: "p".into(),
+            kind: 1,
+            created_at: 1,
+            tags: vec![],
+            content: String::new(),
+            sig: String::new(),
+        };
+        let fresh = Event {
+            id: "bb22".into(),
+            pubkey: "p".into(),
+            kind: 1,
+            created_at: 1001,
+            tags: vec![],
+            content: String::new(),
+            sig: String::new(),
+        };
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            if let Some(Ok(TMsg::Text(txt))) = ws.next().await {
+                assert!(txt.contains("\"since\":1000"));
+            }
+            ws.send(TMsg::Text(json!(["EVENT", "s", old]).to_string()))
+                .await
+                .unwrap();
+            ws.send(TMsg::Text(json!(["EVENT", "s", fresh]).to_string()))
+                .await
+                .unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "s"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        cfg.filter_since_mode = SinceMode::Cursor;
+        mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
+        server.abort();
+
+        assert!(!dir.path().join("events/aa/11/aa11.json").exists());
+        assert!(dir.path().join("events/bb/22/bb22.json").exists());
     }
 
     #[tokio::test]

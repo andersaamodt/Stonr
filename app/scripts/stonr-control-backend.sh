@@ -699,6 +699,18 @@ FILTER_PRIVATE = sys.argv[2] == "1"
 NOW = int(time.time())
 PRIVATE_KINDS = {4, 13, 14, 15, 1059}
 
+def as_int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+def clamp_ts(value):
+    ts = as_int(value)
+    if ts < 0:
+        return 0
+    return min(ts, NOW)
+
 def image_url_from_text(text):
     for match in URL_RE.findall(text or ""):
         if IMAGE_RE.match(match.rstrip(".,);]")):
@@ -730,11 +742,13 @@ def preview_text(event):
     return content
 
 def summarize(event):
+    ingested_at = as_int(event.get("_ingested_at") or event.get("ingested_at"))
     return {
         "id": event.get("id", ""),
         "pubkey": event.get("pubkey", ""),
         "kind": event.get("kind"),
         "created_at": event.get("created_at"),
+        "ingested_at": ingested_at if ingested_at > 0 else None,
         "content": preview_text(event),
         "image_url": image_url_from_text(str(event.get("content") or "")) or image_url_from_tags(event),
     }
@@ -744,7 +758,11 @@ if FILTER_PRIVATE:
     events = [event for event in events if int(event.get("kind") or 0) not in PRIVATE_KINDS]
 summaries = [summarize(event) for event in events]
 summaries.sort(key=lambda event: str(event.get("id") or ""), reverse=True)
-summaries.sort(key=lambda event: min(int(event.get("created_at") or 0), NOW), reverse=True)
+summaries.sort(key=lambda event: clamp_ts(event.get("created_at")), reverse=True)
+summaries.sort(
+    key=lambda event: clamp_ts(event.get("ingested_at") or event.get("created_at")),
+    reverse=True,
+)
 json.dump(summaries[:LIMIT], sys.stdout)
 ' "$limit" "$filter_private"
 }
@@ -753,12 +771,14 @@ query_events_from_log() {
   log_file=${1-}
   search=${2-}
   limit=${3-50}
-  python3 - "$log_file" "$search" "$limit" <<'PY'
+  store_root=${4-}
+  python3 - "$log_file" "$search" "$limit" "$store_root" <<'PY'
 import json, os, sys
 
 log_path = sys.argv[1]
 needle = sys.argv[2].strip().lower()
 limit = int(sys.argv[3])
+store_root = sys.argv[4]
 # Scan a broader tail window so backfill bursts do not make the Events view
 # appear frozen on old timestamps.
 target = max(limit * 50, 2000)
@@ -770,6 +790,33 @@ def event_matches(event):
         return True
     content = str(event.get("content") or "")
     return needle in content.lower()
+
+def event_ingested_at(event_id):
+    if len(event_id) < 4:
+        return None
+    event_path = os.path.join(
+        store_root,
+        "events",
+        event_id[:2],
+        event_id[2:4],
+        event_id + ".json",
+    )
+    try:
+        return int(os.path.getmtime(event_path))
+    except OSError:
+        return None
+
+def attach_ingested_at(events):
+    cache = {}
+    for event in events:
+        event_id = str(event.get("id") or "")
+        if not event_id:
+            continue
+        if event_id not in cache:
+            cache[event_id] = event_ingested_at(event_id)
+        ingested_at = cache[event_id]
+        if ingested_at is not None:
+            event["_ingested_at"] = ingested_at
 
 with open(log_path, "rb") as handle:
     handle.seek(0, os.SEEK_END)
@@ -803,6 +850,7 @@ with open(log_path, "rb") as handle:
             matches.append(event)
 
 matches.reverse()
+attach_ingested_at(matches)
 json.dump(matches, sys.stdout)
 PY
 }
@@ -1051,9 +1099,10 @@ case "$cmd" in
     query_limit=$((limit * 2))
     filter_private=$(env_get "$env_path" FILTER_PRIVATE_MESSAGES 2>/dev/null || printf '1')
     normalize_env_file "$env_path"
+    store_root=$(store_root_from_env "$env_path")
     event_log=$(event_log_path "$env_path")
     if [ -f "$event_log" ]; then
-      query_events_from_log "$event_log" "$search" "$limit" | summarize_events_json "$limit" "$filter_private"
+      query_events_from_log "$event_log" "$search" "$limit" "$store_root" | summarize_events_json "$limit" "$filter_private"
     elif relay_running "$env_path"; then
       if [ -n "$search" ]; then
         query_json=$(run_stonr --env "$env_path" query --search "$search" --limit "$query_limit")
