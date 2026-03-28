@@ -2008,18 +2008,12 @@
 
     var meta = document.createElement('div');
     meta.className = 'event-meta';
-    var createdAt = Number(event.created_at || 0);
-    var ingestedAt = Number(event.ingested_at || 0);
+    var createdAt = normalizeEventTs(event.created_at);
+    var ingestedAt = normalizeEventTs(event.ingested_at);
+    var primaryTs = ingestedAt > 0 ? ingestedAt : createdAt;
     meta.appendChild(eventMetaPill('kind ' + String(event.kind)));
     meta.appendChild(eventMetaPill('author ' + String(event.pubkey || '').slice(0, 12)));
-    if (isFinite(ingestedAt) && ingestedAt > 0) {
-      meta.appendChild(eventMetaPill('seen ' + formatEventTime(ingestedAt)));
-      if (isFinite(createdAt) && createdAt > 0 && Math.abs(ingestedAt - createdAt) >= 86400) {
-        meta.appendChild(eventMetaPill('created ' + formatEventTime(createdAt)));
-      }
-    } else {
-      meta.appendChild(eventMetaPill(formatEventTime(createdAt)));
-    }
+    meta.appendChild(eventMetaPill((ingestedAt > 0 ? 'seen ' : '') + formatEventTime(primaryTs)));
     row.appendChild(meta);
 
     if (event.image_url) {
@@ -2122,7 +2116,9 @@
     var hadSnapshot = state.eventsLoadedOnce || state.events.length > 0 || state.eventsTotal > 0 || state.eventsBytes > 0;
     try {
       var output = await backend('query-events', [state.envPath, state.eventsSearch.trim(), '60']);
-      state.events = JSON.parse(output || '[]');
+      var events = JSON.parse(output || '[]');
+      events.sort(compareEventsByRecency);
+      state.events = events;
       refreshStats = true;
       state.eventsError = '';
       state.eventsLoadedOnce = true;
@@ -2146,6 +2142,37 @@
         console.error(error);
       });
     }
+  }
+
+  function normalizeEventTs(value) {
+    var stamp = Number(value || 0);
+    return isFinite(stamp) && stamp > 0 ? stamp : 0;
+  }
+
+  function eventPrimaryTs(event) {
+    var ingestedAt = normalizeEventTs(event && event.ingested_at);
+    if (ingestedAt > 0) {
+      return ingestedAt;
+    }
+    return normalizeEventTs(event && event.created_at);
+  }
+
+  function compareEventsByRecency(a, b) {
+    var aPrimary = eventPrimaryTs(a);
+    var bPrimary = eventPrimaryTs(b);
+    if (bPrimary !== aPrimary) {
+      return bPrimary - aPrimary;
+    }
+    var aCreated = normalizeEventTs(a && a.created_at);
+    var bCreated = normalizeEventTs(b && b.created_at);
+    if (bCreated !== aCreated) {
+      return bCreated - aCreated;
+    }
+    var aId = String((a && a.id) || '');
+    var bId = String((b && b.id) || '');
+    if (bId > aId) return 1;
+    if (bId < aId) return -1;
+    return 0;
   }
 
   function shouldRefreshEventsStats() {
