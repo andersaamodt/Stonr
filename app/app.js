@@ -32,6 +32,7 @@
     nextSaveTicket: 0,
     appliedSaveTicket: 0,
     fieldNodes: {},
+    initialDependencySyncDone: false,
     listSaveTimers: {},
     eventsSearchTimer: null,
     eventsSearch: '',
@@ -2994,6 +2995,7 @@
   }
 
   function syncFieldDependencies() {
+    var suppressCollapseAnimation = !state.initialDependencySyncDone;
     Object.keys(state.fieldNodes).forEach(function (envKey) {
       var node = state.fieldNodes[envKey];
       var unmetDependency = unmetFieldDependency(node.field);
@@ -3001,6 +3003,7 @@
       var enabled = state.bridge && !unmetDependency && !disabledNip;
       var collapsedByDependency = !!(node.field.collapseWhenUnavailable && unmetDependency);
       if (node.field.collapseWhenUnavailable) {
+        node.wrap.classList.toggle('field-no-transition', suppressCollapseAnimation);
         var expandedHeight = node.wrap.scrollHeight;
         if (expandedHeight > 0) {
           node.wrap.style.setProperty('--field-expanded-height', expandedHeight + 'px');
@@ -3059,6 +3062,17 @@
         }
       }
     });
+    if (suppressCollapseAnimation) {
+      state.initialDependencySyncDone = true;
+      requestAnimationFrame(function () {
+        Object.keys(state.fieldNodes).forEach(function (envKey) {
+          var node = state.fieldNodes[envKey];
+          if (node && node.field && node.field.collapseWhenUnavailable) {
+            node.wrap.classList.remove('field-no-transition');
+          }
+        });
+      });
+    }
   }
 
   function formatList(value) {
