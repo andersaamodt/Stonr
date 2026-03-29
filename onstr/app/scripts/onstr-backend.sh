@@ -150,8 +150,10 @@ case "$cmd" in
   get-ui-prefs)
     theme=$(pref_get theme 2>/dev/null || printf 'wizard')
     active_tab=$(pref_get active_tab 2>/dev/null || printf 'home')
+    library_bucket=$(pref_get library_bucket 2>/dev/null || printf 'all')
     printf 'theme=%s\n' "$theme"
     printf 'active_tab=%s\n' "$active_tab"
+    printf 'library_bucket=%s\n' "$library_bucket"
     ;;
   set-ui-pref)
     key=${1-}
