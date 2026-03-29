@@ -95,13 +95,6 @@
         groupField('Identity'),
         textField('RELAY_NAME', 'policy.relay_name', 'Relay name', '', null, null, 'Name shown to clients when they browse or save this relay.'),
         textField('RELAY_DESCRIPTION', 'policy.relay_description', 'Relay description', '', null, null, 'Short summary shown beside the relay name in client UIs.'),
-        groupField('Relay Mode'),
-        radioField('MIRROR_MODE', 'mirror_mode', 'Mirror mode', [
-          { value: 'broad', label: 'General relay' },
-          { value: 'site', label: 'One-site mirror' }
-        ], null, 'Choose whether this relay mirrors broad upstream traffic or only one site author and that site\'s comments.'),
-        withFieldUi(textareaField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Site author pubkeys', 'Comma-delimited hex pubkeys for site owners', formatList, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Comma-delimited hex pubkeys whose long-form posts define the one-site mirror scope.'), { collapseWhenUnavailable: true }),
-        withFieldUi(boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Mirror comments for site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference mirrored site posts by `a` tag.'), { collapseWhenUnavailable: true }),
         groupField('Core Behavior'),
         boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', 'Clients can read stored events.', null, 'Allow clients to read stored events with REQ filters.'),
         boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', 'Clients can publish events.', null, 'Allow clients to publish new events to this relay.'),
@@ -245,11 +238,32 @@
       ]
     },
     {
+      id: 'pinned',
+      label: 'Pinned',
+      eyebrow: 'Pinned',
+      title: 'Pinned Content',
+      detail: 'Pin owner/followed content and choose whether to store only pinned-author site traffic.',
+      fields: [
+        groupField('Pinned Scope'),
+        radioField('MIRROR_MODE', 'mirror_mode', 'Pinned ingest scope', [
+          { value: 'broad', label: 'Store normal relay traffic' },
+          { value: 'site', label: 'Only store pinned-author site traffic' }
+        ], null, 'Use strict pinned-author mode to mirror only pinned site authors and optional comments.'),
+        withFieldUi(textareaField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Pinned site authors', 'Comma-delimited hex pubkeys for site owners', formatList, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Comma-delimited hex pubkeys whose long-form posts define strict pinned-author scope.'), { collapseWhenUnavailable: true }),
+        withFieldUi(boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Include comments for pinned site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference pinned site posts by `a` tag.'), { collapseWhenUnavailable: true }),
+        groupField('Pinned Sets'),
+        textareaField('OWNER_PUBKEYS', 'owner_pubkeys', 'Owner authors (privileged + always kept)', 'One pubkey per line', formatLineList, null, 'Owner pubkeys bypass write auth/rate limits and their content is always retained.'),
+        textareaField('FOLLOW_PUBKEYS', 'follow_pubkeys', 'Follow authors (mirror + always kept)', 'One pubkey per line', formatLineList, null, 'These pubkeys are added to mirror author filters and retained from eviction.'),
+        textareaField('PIN_EVENT_IDS', 'pin_event_ids', 'Pin specific event IDs', 'One event ID per line', formatLineList, null, 'Exact events that should never be removed by retention.'),
+        boolField('PIN_PROTECT_FROM_DELETES', 'pin_protect_from_deletes', 'Ignore delete events against pinned content', '', null, 'Keep owner/follow/pinned content visible even when NIP-09 delete events target it.')
+      ]
+    },
+    {
       id: 'network',
       label: 'Network',
       eyebrow: 'Network',
-      title: 'Network And Mirror',
-      detail: 'Bind addresses, upstream feeds, and mirror filter state.',
+      title: 'Network And Import',
+      detail: 'Bind addresses, upstream feeds, and import filter state.',
       fields: [
         groupField('Local Paths And Ports'),
         browseTextField('STORE_ROOT', 'store_root', 'Data folder', '', null, null, 'Root folder for events, blobs, indexes, logs, and runtime files.'),
@@ -265,11 +279,6 @@
         textField('FILTER_TAG_A', 'filter_tag_a', 'Addresses to import', 'Comma-separated `kind:pubkey:d` addresses', formatList, null, 'If set, only import events whose `#a` tags match these addresses.'),
         textField('FILTER_TAG_T', 'filter_tag_t', 'Topics to import', 'Comma-separated topic tags', formatList, null, 'If set, only import events whose `#t` tags match these topics.'),
         textField('FILTER_SINCE_MODE', 'filter_since_mode', 'Import start point', 'Use `cursor` or `fixed:<unix time>`', formatSinceMode, null, 'Use `cursor` to resume where the importer left off, or `fixed:<unix time>` to start from a fixed timestamp.'),
-        groupField('Pinned And Followed Content'),
-        textareaField('OWNER_PUBKEYS', 'owner_pubkeys', 'Owner authors (privileged + always kept)', 'One pubkey per line', formatLineList, null, 'Owner pubkeys bypass write auth/rate limits and their content is always retained.'),
-        textareaField('FOLLOW_PUBKEYS', 'follow_pubkeys', 'Follow authors (mirror + always kept)', 'One pubkey per line', formatLineList, null, 'These pubkeys are added to mirror author filters and retained from eviction.'),
-        textareaField('PIN_EVENT_IDS', 'pin_event_ids', 'Pin specific event IDs', 'One event ID per line', formatLineList, null, 'Exact events that should never be removed by retention.'),
-        boolField('PIN_PROTECT_FROM_DELETES', 'pin_protect_from_deletes', 'Ignore delete events against pinned content', '', null, 'Keep owner/follow/pinned content visible even when NIP-09 delete events target it.'),
         groupField('Kind Policy'),
         textField('ALLOW_KINDS', 'policy.allowed_kinds', 'Allowed kinds', 'Comma-separated kind numbers', formatNumberList, null, 'If set, only these event kinds are accepted.'),
         textField('DENY_KINDS', 'policy.blocked_kinds', 'Blocked kinds', 'Comma-separated kind numbers', formatNumberList, null, 'These event kinds are always rejected.')
@@ -2973,9 +2982,9 @@
         return 'Requires relay login.';
       case 'MIRROR_MODE':
         if (spec && typeof spec === 'object' && spec.equals === 'site') {
-          return 'Requires one-site mirror mode.';
+          return 'Requires strict pinned-author scope.';
         }
-        return 'Requires general relay mode.';
+        return 'Requires normal relay scope.';
       default:
         return 'Required feature is off.';
     }
