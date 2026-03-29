@@ -50,6 +50,7 @@
     diagnosticsMirror: [],
     diagnosticsRetention: null,
     diagnosticsError: '',
+    doctorRefreshedAt: 0,
     backgroundMode: false,
     menuBarIcon: false,
     hostStatusItemRelayRunning: null,
@@ -63,6 +64,8 @@
       'file-hashes-deny': ''
     }
   };
+  var DOCTOR_REFRESH_INTERVAL_MS = 30000;
+  var LIVE_REFRESH_INTERVAL_MS = 4000;
 
   var relayLoginDependsOn = ['ENABLE_NIP42'];
 
@@ -995,6 +998,7 @@
     }
     try {
       state.doctor = await backend('doctor', [state.envPath]);
+      state.doctorRefreshedAt = Date.now();
       state.doctorKv = parseKv(state.doctor);
       if (state.doctorKv.env_path && state.doctorKv.env_path !== state.envPath) {
         state.envPath = state.doctorKv.env_path;
@@ -2633,7 +2637,12 @@
       return;
     }
     state.doctor = await backend('doctor', [state.envPath]);
+    state.doctorRefreshedAt = Date.now();
     els.doctorOutput.textContent = state.doctor.trim() || 'No backend output.';
+  }
+
+  function shouldRefreshDoctor() {
+    return !state.doctorRefreshedAt || Date.now() - state.doctorRefreshedAt >= DOCTOR_REFRESH_INTERVAL_MS;
   }
 
   async function loadLog() {
@@ -3635,7 +3644,9 @@
     state.refreshInFlight = true;
     try {
       await refreshStatus();
-      await refreshDoctor();
+      if (shouldRefreshDoctor()) {
+        await refreshDoctor();
+      }
       if (state.activeSection === 'events') {
         await loadEvents();
         renderActiveSection();
@@ -3669,7 +3680,7 @@
           console.error(error);
         });
       }
-    }, 2000);
+    }, LIVE_REFRESH_INTERVAL_MS);
   }
 
   function toBase64(value) {
