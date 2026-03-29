@@ -911,7 +911,7 @@
   }
 
   async function syncHostStatusItemRelayIcon() {
-    if (!state.bridge || !state.backgroundMode || !state.menuBarIcon) {
+    if (!state.bridge || !state.menuBarIcon) {
       state.hostStatusItemRelayRunning = null;
       return;
     }
@@ -958,9 +958,6 @@
     state.startupServiceManager = 'none';
     state.startupServiceBusy = false;
     state.startupServicePendingAction = '';
-    if (!state.backgroundMode) {
-      state.menuBarIcon = false;
-    }
     state.envValues = {};
     state.activeSection = 'relay';
     state.events = [];
@@ -1560,9 +1557,6 @@
       state.backgroundMode,
       function (checked) {
         state.backgroundMode = checked;
-        if (!checked) {
-          state.menuBarIcon = false;
-        }
       },
       'Hide the window instead of quitting the app so the relay keeps running in the background.'
     ));
@@ -1572,12 +1566,9 @@
       state.menuBarIcon,
       function (checked) {
         state.menuBarIcon = checked;
-        if (checked) {
-          state.backgroundMode = true;
-        }
       },
       'Show a menu bar or tray icon so you can reopen the window or quit while the relay keeps running.',
-      !state.backgroundMode
+      false
     ));
 
     grid.appendChild(renderDesktopToggleField(
