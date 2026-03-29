@@ -620,6 +620,13 @@ h4 {
   min-width: 0;
 }
 
+.events-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
 .events-toolbar-spacer {
   flex: 1 1 auto;
 }
@@ -633,6 +640,11 @@ h4 {
   border-color: transparent;
   color: var(--text);
   border-radius: 0.5rem;
+}
+
+.events-toolbar .events-view-toggle .action.mini.primary {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
 }
 
 .events-toolbar .action.mini:hover,

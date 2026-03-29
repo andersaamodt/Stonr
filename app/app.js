@@ -36,6 +36,7 @@
     listSaveTimers: {},
     eventsSearchTimer: null,
     eventsSearch: '',
+    eventsViewMode: 'all',
     eventsLoading: false,
     eventsTotalLoading: false,
     eventsLoadedOnce: false,
@@ -976,6 +977,7 @@
     state.envValues = {};
     state.activeSection = 'relay';
     state.events = [];
+    state.eventsViewMode = prefs.events_view_mode === 'pinned' ? 'pinned' : 'all';
     state.eventsTotal = 0;
     state.eventsBytes = 0;
     state.eventsError = '';
@@ -1939,6 +1941,12 @@
     var controls = document.createElement('div');
     controls.className = 'events-toolbar';
 
+    var viewToggle = document.createElement('div');
+    viewToggle.className = 'events-view-toggle';
+    viewToggle.appendChild(renderEventsViewButton('all', 'All events'));
+    viewToggle.appendChild(renderEventsViewButton('pinned', 'Pinned only'));
+    controls.appendChild(viewToggle);
+
     var searchWrap = document.createElement('label');
     searchWrap.className = 'events-search';
     searchWrap.htmlFor = 'events-search';
@@ -1965,12 +1973,18 @@
 
     var count = document.createElement('span');
     count.className = 'status-pill neutral';
+    var visibleEvents = filteredEvents();
     if (state.eventsLoading) {
       count.textContent = 'Loading events...';
-      count.title = 'Loading up to 60 recent matching events.';
+      count.title = 'Loading recent matching events.';
     } else {
-      count.textContent = 'Showing ' + state.events.length + ' most recent';
-      count.title = 'Showing up to 60 recent matching events. Refreshes automatically every 2 seconds while this tab is open.';
+      if (state.eventsViewMode === 'pinned') {
+        count.textContent = 'Showing ' + visibleEvents.length + ' pinned';
+        count.title = 'Showing pinned matches from recent stored events. Refreshes automatically while this tab is open.';
+      } else {
+        count.textContent = 'Showing ' + visibleEvents.length + ' most recent';
+        count.title = 'Showing recent matching events. Refreshes automatically while this tab is open.';
+      }
     }
     controls.appendChild(count);
 
@@ -2020,7 +2034,7 @@
       return wrap;
     }
 
-    if (state.eventsLoading && !state.events.length) {
+    if (state.eventsLoading && !visibleEvents.length) {
       var loading = document.createElement('p');
       loading.className = 'events-empty';
       loading.innerHTML = '<span>Loading events...</span><span class="action-spinner" aria-hidden="true"></span>';
@@ -2029,12 +2043,18 @@
       return wrap;
     }
 
-    if (!state.events.length) {
+    if (!visibleEvents.length) {
       var empty = document.createElement('p');
       empty.className = 'events-empty';
-      empty.textContent = state.eventsSearch
-        ? 'No stored events match that keyword yet.'
-        : 'No stored events yet. To pull remote events in, turn on Import from relays and add Source relays in Network, or publish directly to this relay.';
+      if (state.eventsViewMode === 'pinned') {
+        empty.textContent = state.eventsSearch
+          ? 'No pinned events match that keyword yet.'
+          : 'No pinned events in the recent feed yet. Add Owner/Follow authors or pinned event IDs in Pinned settings.';
+      } else {
+        empty.textContent = state.eventsSearch
+          ? 'No stored events match that keyword yet.'
+          : 'No stored events yet. To pull remote events in, turn on Import from relays and add Source relays in Network, or publish directly to this relay.';
+      }
       browser.appendChild(empty);
       wrap.appendChild(browser);
       return wrap;
@@ -2042,12 +2062,102 @@
 
     var list = document.createElement('div');
     list.className = 'event-list';
-    state.events.forEach(function (event) {
+    visibleEvents.forEach(function (event) {
       list.appendChild(renderEventRow(event));
     });
     browser.appendChild(list);
     wrap.appendChild(browser);
     return wrap;
+  }
+
+  function renderEventsViewButton(mode, label) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'action mini' + (state.eventsViewMode === mode ? ' primary' : '');
+    button.textContent = label;
+    button.disabled = !state.bridge || state.eventsLoading || state.eventsViewMode === mode;
+    button.title = mode === 'pinned' ? 'Show only owner/follow/pinned-id content.' : 'Show all recent events.';
+    button.addEventListener('click', function () {
+      setEventsViewMode(mode);
+    });
+    return button;
+  }
+
+  function setEventsViewMode(mode) {
+    var next = mode === 'pinned' ? 'pinned' : 'all';
+    if (state.eventsViewMode === next) {
+      return;
+    }
+    state.eventsViewMode = next;
+    saveUiPref('events_view_mode', next);
+    if (state.activeSection === 'events') {
+      renderActiveSection();
+    }
+  }
+
+  function pinnedCriteria() {
+    var ownerPubkeys = readSetPreference('OWNER_PUBKEYS', 'owner_pubkeys');
+    var followPubkeys = readSetPreference('FOLLOW_PUBKEYS', 'follow_pubkeys');
+    var pinnedEventIds = readSetPreference('PIN_EVENT_IDS', 'pin_event_ids');
+    var siteAuthors = readSetPreference('MIRROR_SITE_AUTHOR', 'mirror_site_author');
+    return {
+      pubkeys: mergeSets(ownerPubkeys, followPubkeys, siteAuthors),
+      eventIds: pinnedEventIds
+    };
+  }
+
+  function filteredEvents() {
+    if (state.eventsViewMode !== 'pinned') {
+      return state.events;
+    }
+    var criteria = pinnedCriteria();
+    return state.events.filter(function (event) {
+      var id = String((event && event.id) || '');
+      var pubkey = String((event && event.pubkey) || '');
+      return criteria.eventIds.has(id) || criteria.pubkeys.has(pubkey);
+    });
+  }
+
+  function mergeSets() {
+    var merged = new Set();
+    for (var idx = 0; idx < arguments.length; idx += 1) {
+      var set = arguments[idx];
+      if (!set || !set.forEach) {
+        continue;
+      }
+      set.forEach(function (value) {
+        merged.add(value);
+      });
+    }
+    return merged;
+  }
+
+  function readSetPreference(envKey, path) {
+    var raw = rawEnvValueByKey(envKey);
+    if (typeof raw === 'undefined') {
+      raw = getPath(state.config || {}, path || '');
+    }
+    return parseTokenSet(raw);
+  }
+
+  function parseTokenSet(value) {
+    var set = new Set();
+    if (!value) {
+      return set;
+    }
+    var parts;
+    if (Array.isArray(value)) {
+      parts = value;
+    } else {
+      parts = String(value).split(/[,\r\n]+/);
+    }
+    parts.forEach(function (item) {
+      var token = String(item || '').trim();
+      if (token) {
+        set.add(token);
+      }
+    });
+    return set;
   }
 
   function renderEventRow(event) {
