@@ -58,6 +58,8 @@
     startupServiceManager: 'none',
     startupServiceBusy: false,
     startupServicePendingAction: '',
+    autoStartRelayOnOpen: false,
+    autoStartRelayChecked: false,
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -851,6 +853,7 @@
     }
     await saveUiPref('background_mode', state.backgroundMode ? '1' : '0');
     await saveUiPref('menu_bar_icon', state.menuBarIcon ? '1' : '0');
+    await saveUiPref('auto_start_relay_on_open', state.autoStartRelayOnOpen ? '1' : '0');
     await syncDesktopHostSettings();
   }
 
@@ -962,6 +965,7 @@
     state.envPath = prefs.env_path || state.envPath || '';
     state.backgroundMode = matchesBool(prefs.background_mode || '');
     state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
+    state.autoStartRelayOnOpen = matchesBool(prefs.auto_start_relay_on_open || '');
     state.hostStatusItemRelayRunning = null;
     state.refreshInFlight = false;
     state.refreshQueued = false;
@@ -1018,6 +1022,9 @@
       revealBootUi();
       queuePostBootEventsLoad();
       hydrateAfterBoot(true);
+      maybeAutoStartRelayOnOpen().catch(function (error) {
+        console.error(error);
+      });
     } catch (error) {
       console.error(error);
       toast(summarizeBackendError(error, 'Failed to load relay state'), 'bad');
@@ -1584,6 +1591,15 @@
     ));
 
     grid.appendChild(renderDesktopToggleField(
+      'Start relay when Stonr opens',
+      state.autoStartRelayOnOpen,
+      function (checked) {
+        state.autoStartRelayOnOpen = checked;
+      },
+      'Automatically start the relay each time this app opens.'
+    ));
+
+    grid.appendChild(renderDesktopToggleField(
       'Auto-start relay when system starts',
       state.startupServiceEnabled,
       function () {
@@ -1603,6 +1619,35 @@
 
     card.appendChild(grid);
     return card;
+  }
+
+  async function maybeAutoStartRelayOnOpen() {
+    if (!state.bridge || state.autoStartRelayChecked) {
+      return;
+    }
+    state.autoStartRelayChecked = true;
+    if (!state.autoStartRelayOnOpen || relayRunningNow()) {
+      return;
+    }
+    try {
+      state.relayBusyAction = 'relay-start';
+      syncRelayToggle(state.status || { status: 'stopped' });
+      state.status = parseKv(await backend('relay-start', [state.envPath]));
+      renderRuntime();
+      if (state.activeSection === 'events') {
+        await loadEvents();
+      }
+      if (state.activeSection === 'diagnostics') {
+        await Promise.all([loadLog(), loadDiagnosticsStatus()]);
+      }
+      renderActiveSection();
+    } catch (error) {
+      console.error(error);
+      toast(summarizeBackendError(error, 'Failed to auto-start relay'), 'bad');
+    } finally {
+      state.relayBusyAction = '';
+      syncRelayToggle(state.status || { status: 'stopped' });
+    }
   }
 
   function renderGeneralRuntimeSection() {
