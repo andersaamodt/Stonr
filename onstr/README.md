@@ -33,12 +33,12 @@ Onstr stores durable state as plaintext files under XDG roots.
 
 ## UI model
 
-Onstr app is tabbed with five primary tabs:
+Onstr app uses two primary tabs plus persistent rails/drawers:
 
 - Home
 - Discover
-- Compose
-- Library
-- Network
+- Compose action (top-right) opens a compose drawer
+- Library lives in the left rail (bucket filters + local indexes)
+- Relay/network controls live in Settings
 
 Desktop persistence for theme and UI state is backend-file-backed through `onstr-backend.sh`.

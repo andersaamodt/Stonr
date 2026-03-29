@@ -2,10 +2,10 @@
 
 `onstr/app` is the static UI for Onstr.
 
-- `index.html` defines the five-tab shell (`Home`, `Discover`, `Compose`, `Library`, `Network`).
-- `app.js` enforces a strict backend command allowlist and uses semantic `tablist/tab/tabpanel` navigation.
+- `index.html` defines the two-tab shell (`Home`, `Discover`), a left-rail library listbox, and compose/settings drawers.
+- `app.js` enforces a strict backend command allowlist, uses semantic `tablist/tab/tabpanel` navigation, and drives local-first auto-refresh.
 - `scripts/onstr-backend.sh` is the only shell entrypoint used by the UI.
-- `themes/` is a symlink to the monorepo-shared Wizardry theme source.
+- `themes/` contains the in-repo Wizardry theme CSS files used by desktop packaging.
 
 ## Persistence
 

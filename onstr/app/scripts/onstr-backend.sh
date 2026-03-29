@@ -93,7 +93,7 @@ Commands:
   relay-remove URL
   relay-set-home URL
   relay-probe [URL]
-  timeline-fetch AUTHORS KINDS SEARCH SINCE UNTIL LIMIT INCLUDE_REMOTES
+  timeline-fetch AUTHORS KINDS SEARCH SINCE UNTIL LIMIT INCLUDE_REMOTES [TAG_P]
   discover-search TERM LIMIT
   discover-count TERM
   discover-relay-info URL
@@ -270,6 +270,7 @@ case "$cmd" in
     until=${5-}
     limit=${6-50}
     include_remotes=${7-1}
+    tag_p=${8-}
     set -- timeline fetch --limit "$limit"
     if [ -n "$authors" ]; then
       set -- "$@" --authors "$authors"
@@ -288,6 +289,9 @@ case "$cmd" in
     fi
     if [ "$include_remotes" = "0" ]; then
       set -- "$@" --include-remotes false
+    fi
+    if [ -n "$tag_p" ]; then
+      set -- "$@" --tag-p "$tag_p"
     fi
     run_core "$@"
     ;;

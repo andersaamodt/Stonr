@@ -196,6 +196,8 @@ struct TimelineFetch {
     limit: usize,
     #[arg(long, default_value_t = true)]
     include_remotes: bool,
+    #[arg(long = "tag-p")]
+    tag_p: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -723,6 +725,7 @@ async fn handle_timeline(cmd: TimelineCommand, paths: &Paths) -> Result<()> {
                 args.since,
                 args.until,
                 args.limit,
+                args.tag_p.as_deref(),
             );
             let mut targets = vec![relays.home.clone()];
             if args.include_remotes {
@@ -764,14 +767,15 @@ async fn handle_discover(cmd: DiscoverCommand, paths: &Paths) -> Result<()> {
     let relays: RelayConfig = load_or_default(&paths.relays_file)?;
     match cmd.action {
         DiscoverAction::Search(args) => {
-            let filter = build_filter(None, None, Some(args.term.as_str()), None, None, args.limit);
+            let filter =
+                build_filter(None, None, Some(args.term.as_str()), None, None, args.limit, None);
             let events = fetch_events_ws(&relays.home, &filter, 10)
                 .await
                 .unwrap_or_default();
             print_json(&json!({"ok": true, "events": events}));
         }
         DiscoverAction::Count(args) => {
-            let filter = build_filter(None, None, args.term.as_deref(), None, None, 1_000);
+            let filter = build_filter(None, None, args.term.as_deref(), None, None, 1_000, None);
             let count = count_events_ws(&relays.home, &filter, 10)
                 .await
                 .unwrap_or(0);
@@ -1082,6 +1086,7 @@ fn build_filter(
     since: Option<u64>,
     until: Option<u64>,
     limit: usize,
+    tag_p: Option<&str>,
 ) -> Value {
     let mut object = serde_json::Map::new();
     if let Some(authors) = authors {
@@ -1115,6 +1120,15 @@ fn build_filter(
     }
     if let Some(until) = until {
         object.insert("until".into(), Value::Number(until.into()));
+    }
+    if let Some(tag_p) = tag_p {
+        let values = split_csv_strings(tag_p);
+        if !values.is_empty() {
+            object.insert(
+                "#p".into(),
+                Value::Array(values.into_iter().map(Value::String).collect()),
+            );
+        }
     }
     object.insert("limit".into(), Value::Number((limit as u64).into()));
     Value::Object(object)
