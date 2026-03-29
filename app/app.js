@@ -2707,6 +2707,15 @@
       syncRelayToggle(state.status || { status: 'stopped' });
       state.status = parseKv(await backend(command, [state.envPath]));
       if (command === 'relay-start' && (!state.status || state.status.status !== 'running')) {
+        for (var attempt = 0; attempt < 8; attempt += 1) {
+          await new Promise(function (resolve) { setTimeout(resolve, 250); });
+          state.status = parseKv(await backend('relay-status', [state.envPath]));
+          if (state.status && state.status.status === 'running') {
+            break;
+          }
+        }
+      }
+      if (command === 'relay-start' && (!state.status || state.status.status !== 'running')) {
         throw new Error('Relay failed to start');
       }
       if (command === 'relay-stop' && state.status && state.status.status === 'running') {

@@ -1212,12 +1212,28 @@ case "$cmd" in
     nohup "$bin" --env "$env_path" serve >>"$log_file" 2>&1 &
     pid=$!
     printf '%s\n' "$pid" > "$pid_file"
-    sleep 1
-    if relay_running "$env_path"; then
+    started=0
+    attempt=0
+    while [ "$attempt" -lt 20 ]; do
+      attempt=$((attempt + 1))
+      sleep 0.25
+      if relay_running "$env_path"; then
+        started=1
+        break
+      fi
+    done
+    if [ "$started" -eq 1 ]; then
       status_kv "$env_path"
       exit 0
     fi
     rm -f "$pid_file"
+    if [ -f "$log_file" ]; then
+      reason=$(tail -n 40 "$log_file" 2>/dev/null | sed '/^[[:space:]]*$/d' | tail -n 1)
+      if [ -n "$reason" ]; then
+        printf '%s\n' "stonr-control-backend: relay failed to start: $reason" >&2
+        exit 1
+      fi
+    fi
     printf '%s\n' "stonr-control-backend: relay failed to start" >&2
     exit 1
     ;;
