@@ -247,15 +247,14 @@
       title: 'Pinned Content',
       detail: 'Pin owner/followed content and choose whether to store only pinned-author site traffic.',
       fields: [
-        groupField('Pinned Scope'),
-        radioField('MIRROR_MODE', 'mirror_mode', 'Pinned ingest scope', [
+        groupField('Pinned Author Scope'),
+        radioField('MIRROR_MODE', 'mirror_mode', 'Pinned author ingest scope', [
           { value: 'broad', label: 'Store normal relay traffic' },
-          { value: 'site', label: 'Only store pinned-author site traffic' }
-        ], null, 'Use strict pinned-author mode to mirror only pinned site authors and optional comments.'),
-        withFieldUi(textareaField('MIRROR_SITE_AUTHOR', 'mirror_site_author', 'Pinned site authors', 'Comma-delimited hex pubkeys for site owners', formatList, [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Comma-delimited hex pubkeys whose long-form posts define strict pinned-author scope.'), { collapseWhenUnavailable: true }),
-        withFieldUi(boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Include comments for pinned site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference pinned site posts by `a` tag.'), { collapseWhenUnavailable: true }),
+          { value: 'site', label: 'Only store owner-author site traffic' }
+        ], null, 'Strict mode uses Owner authors below as the allowed site-author list.'),
+        withFieldUi(boolField('MIRROR_SITE_INCLUDE_COMMENTS', 'mirror_site_include_comments', 'Include comments for owner-author site posts', '', [{ envKey: 'MIRROR_MODE', equals: 'site' }], 'Also import kind 1 comments that reference owner-author site posts by `a` tag.'), { collapseWhenUnavailable: true }),
         groupField('Pinned Sets'),
-        textareaField('OWNER_PUBKEYS', 'owner_pubkeys', 'Owner authors (privileged + always kept)', 'One pubkey per line', formatLineList, null, 'Owner pubkeys bypass write auth/rate limits and their content is always retained.'),
+        textareaField('OWNER_PUBKEYS', 'owner_pubkeys', 'Owner authors (used by strict site mode, privileged + always kept)', 'One pubkey per line', formatLineList, null, 'Owner pubkeys define strict site-author scope, bypass write auth/rate limits, and are always retained.'),
         textareaField('FOLLOW_PUBKEYS', 'follow_pubkeys', 'Follow authors (mirror + always kept)', 'One pubkey per line', formatLineList, null, 'These pubkeys are added to mirror author filters and retained from eviction.'),
         textareaField('PIN_EVENT_IDS', 'pin_event_ids', 'Pin specific event IDs', 'One event ID per line', formatLineList, null, 'Exact events that should never be removed by retention.'),
         boolField('PIN_PROTECT_FROM_DELETES', 'pin_protect_from_deletes', 'Ignore delete events against pinned content', '', null, 'Keep owner/follow/pinned content visible even when NIP-09 delete events target it.')
@@ -2991,7 +2990,7 @@
         return 'Requires relay login.';
       case 'MIRROR_MODE':
         if (spec && typeof spec === 'object' && spec.equals === 'site') {
-          return 'Requires strict pinned-author scope.';
+          return 'Requires strict owner-author scope.';
         }
         return 'Requires normal relay scope.';
       default:
@@ -3483,11 +3482,27 @@
     state.saveQueue = state.saveQueue.catch(function () {
       return null;
     }).then(async function () {
+      var strictOwnerValue = '';
       await backend('save-env', [state.envPath, field.envKey, nextValue]);
+      if (field.envKey === 'OWNER_PUBKEYS') {
+        // Keep strict one-site scope aligned with owner authors now that
+        // owners are the single source of truth in the Pinned section.
+        strictOwnerValue = nextValue;
+        await backend('save-env', [state.envPath, 'MIRROR_SITE_AUTHOR', nextValue]);
+      } else if (field.envKey === 'MIRROR_MODE' && String(nextValue) === 'site') {
+        var ownerNode = state.fieldNodes.OWNER_PUBKEYS;
+        strictOwnerValue = ownerNode ? serializeInput(ownerNode.field, ownerNode.input) : String((state.envValues && state.envValues.OWNER_PUBKEYS) || '');
+        await backend('save-env', [state.envPath, 'MIRROR_SITE_AUTHOR', strictOwnerValue]);
+      }
       if (!state.envValues || typeof state.envValues !== 'object') {
         state.envValues = {};
       }
       state.envValues[field.envKey] = nextValue;
+      if (field.envKey === 'OWNER_PUBKEYS') {
+        state.envValues.MIRROR_SITE_AUTHOR = nextValue;
+      } else if (field.envKey === 'MIRROR_MODE' && String(nextValue) === 'site') {
+        state.envValues.MIRROR_SITE_AUTHOR = strictOwnerValue;
+      }
       if (ticket < state.appliedSaveTicket) {
         return;
       }
