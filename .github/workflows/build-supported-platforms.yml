@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build-desktop:
-    name: Desktop Bundle (${{ matrix.os }})
+  build-desktop-stonr:
+    name: Stonr Desktop Bundle (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -31,65 +31,125 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build release binary
-        run: cargo build --release --locked
+      - name: Build stonr release binary
+        run: cargo build --release --locked --manifest-path stonr/Cargo.toml
 
-      - name: Create desktop bundle
+      - name: Create stonr desktop bundle
         shell: bash
         run: |
           set -euo pipefail
-          app_subpath="$(awk -F= '$1 == "app_subpath" { print $2; exit }' wizardry.workspace.conf | tr -d '\r')"
-          if [ -z "${app_subpath}" ]; then
-            app_subpath="app"
-          fi
           package_dir="stonr-${{ matrix.archive_suffix }}"
           mkdir -p "dist/${package_dir}"
           cp target/release/stonr "dist/${package_dir}/"
-          cp -R "${app_subpath}" "dist/${package_dir}/app"
-          cp README.md LICENSE PRODUCTION_CHECKLIST.md CHANGELOG.md "dist/${package_dir}/"
+          cp -R stonr/app "dist/${package_dir}/app"
+          cp stonr/README.md stonr/LICENSE stonr/PRODUCTION_CHECKLIST.md stonr/CHANGELOG.md "dist/${package_dir}/"
           tar -C dist -czf "${package_dir}.tar.gz" "${package_dir}"
 
-      - name: Upload desktop bundle
+      - name: Upload stonr desktop bundle
         uses: actions/upload-artifact@v4
         with:
           name: stonr-${{ matrix.archive_suffix }}
           path: stonr-${{ matrix.archive_suffix }}.tar.gz
           if-no-files-found: error
 
-  build-hosted-web:
-    name: Hosted Web Bundle
+  build-hosted-web-stonr:
+    name: Stonr Hosted Web Bundle
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create hosted web bundle
+      - name: Create stonr hosted web bundle
         shell: bash
         run: |
           set -euo pipefail
-          app_subpath="$(awk -F= '$1 == "app_subpath" { print $2; exit }' wizardry.workspace.conf | tr -d '\r')"
-          if [ -z "${app_subpath}" ]; then
-            app_subpath="app"
-          fi
           package_dir="stonr-hosted-web"
           mkdir -p "dist/${package_dir}"
-          cp -R "${app_subpath}" "dist/${package_dir}/app"
-          cp README.md LICENSE PRODUCTION_CHECKLIST.md CHANGELOG.md "dist/${package_dir}/"
+          cp -R stonr/app "dist/${package_dir}/app"
+          cp stonr/README.md stonr/LICENSE stonr/PRODUCTION_CHECKLIST.md stonr/CHANGELOG.md "dist/${package_dir}/"
           tar -C dist -czf "${package_dir}.tar.gz" "${package_dir}"
 
-      - name: Upload hosted web bundle
+      - name: Upload stonr hosted web bundle
         uses: actions/upload-artifact@v4
         with:
           name: stonr-hosted-web
           path: stonr-hosted-web.tar.gz
           if-no-files-found: error
 
+  build-desktop-onstr:
+    name: Onstr Desktop Bundle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            archive_suffix: linux-x86_64
+          - os: macos-latest
+            archive_suffix: macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build onstr-core release binary
+        run: cargo build --release --locked --manifest-path onstr/core/Cargo.toml
+
+      - name: Create onstr desktop bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="onstr-${{ matrix.archive_suffix }}"
+          mkdir -p "dist/${package_dir}"
+          cp target/release/onstr-core "dist/${package_dir}/"
+          cp -R onstr/app "dist/${package_dir}/app"
+          cp onstr/README.md stonr/LICENSE "dist/${package_dir}/"
+          tar -C dist -czf "${package_dir}.tar.gz" "${package_dir}"
+
+      - name: Upload onstr desktop bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: onstr-${{ matrix.archive_suffix }}
+          path: onstr-${{ matrix.archive_suffix }}.tar.gz
+          if-no-files-found: error
+
+  build-hosted-web-onstr:
+    name: Onstr Hosted Web Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create onstr hosted web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="onstr-hosted-web"
+          mkdir -p "dist/${package_dir}"
+          cp -R onstr/app "dist/${package_dir}/app"
+          cp onstr/README.md stonr/LICENSE "dist/${package_dir}/"
+          tar -C dist -czf "${package_dir}.tar.gz" "${package_dir}"
+
+      - name: Upload onstr hosted web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: onstr-hosted-web
+          path: onstr-hosted-web.tar.gz
+          if-no-files-found: error
+
   publish-release-assets:
     name: Publish Release Assets
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
-      - build-desktop
-      - build-hosted-web
+      - build-desktop-stonr
+      - build-hosted-web-stonr
+      - build-desktop-onstr
+      - build-hosted-web-onstr
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

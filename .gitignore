@@ -2,3 +2,7 @@
 .env
 .log
 apps/stonr-control/.log
+/dist
+/.DS_Store
+onstr/app/.log
+stonr/app/.log

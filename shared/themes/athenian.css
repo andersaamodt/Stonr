@@ -1,0 +1,32 @@
+:root {
+  --primary: #1f2a23;
+  --accent: #1b8a63;
+  --accent-dark: #0f6b4b;
+  --teal: #2b7a66;
+  --green: #2f7a54;
+  --purple: #4f79a3;
+  --violet: #89a9c8;
+  --text: #1f2a23;
+  --light-text: #5c6e63;
+  --heading-color: #163d2d;
+  --border: #cfd9cf;
+  --bg: #f2f6f2;
+  --light-bg: #e6efe8;
+  --code-bg: #edf3ee;
+  --shadow: rgba(31, 48, 37, 0.14);
+  --nav-link-hover: #dde8df;
+  --nav-link-active: #1b8a63;
+  --nav-icon: #0f6b4b;
+  --theme_blue: #5f9cd1;
+  --theme_blue_fg: #2f688f;
+  --theme_blue_bg: rgba(95, 156, 209, 0.16);
+  --theme_blue_border: rgba(95, 156, 209, 0.4);
+  --theme_purple: #5f7aa5;
+  --theme_purple_fg: #3f5f86;
+  --theme_purple_bg: rgba(95, 122, 165, 0.16);
+  --theme_purple_border: rgba(95, 122, 165, 0.4);
+  --theme_green: #1b8a63;
+  --theme_green_fg: #0f6b4b;
+  --theme_green_bg: rgba(27, 138, 99, 0.16);
+  --theme_green_border: rgba(27, 138, 99, 0.4);
+}

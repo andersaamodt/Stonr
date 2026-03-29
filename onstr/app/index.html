@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Onstr</title>
+  <link id="theme-link" rel="stylesheet" href="themes/wizard.css">
+  <link rel="stylesheet" href="style.css?v=onstr-20260329a">
+</head>
+<body class="onstr-booting">
+  <div class="boot-splash" aria-hidden="true">
+    <div class="boot-mark">
+      <img src="assets/icon-192.png" alt="Onstr logo">
+      <strong>Onstr</strong>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <aside class="rail" aria-label="Onstr rail">
+      <div class="rail-head">
+        <h1>Onstr</h1>
+        <p class="sub">Local-first Nostr client.</p>
+      </div>
+
+      <div class="rail-status" id="rail-status">Bridge: unknown</div>
+
+      <button id="open-settings" class="icon-btn" type="button" title="Open settings" aria-label="Open settings">
+        <img src="assets/settings-gear.svg" alt="">
+      </button>
+
+      <label class="theme-quick" for="theme-quick-select">Theme
+        <select id="theme-quick-select" aria-label="Quick theme picker"></select>
+      </label>
+    </aside>
+
+    <main class="stage">
+      <header class="stage-head">
+        <div>
+          <h2 id="active-title">Home</h2>
+          <p id="active-subtitle" class="sub">Timeline and thread drill-down.</p>
+        </div>
+        <div class="head-actions">
+          <button id="refresh-active" class="action" type="button">Refresh</button>
+          <span id="bridge-pill" class="pill neutral">Bridge pending</span>
+        </div>
+      </header>
+
+      <nav id="primary-tabs" class="tab-strip" role="tablist" aria-label="Onstr primary sections">
+        <button id="tab-btn-home" class="tab is-active" type="button" role="tab" aria-selected="true" aria-controls="tab-home" tabindex="0">Home</button>
+        <button id="tab-btn-discover" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-discover" tabindex="-1">Discover</button>
+        <button id="tab-btn-compose" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-compose" tabindex="-1">Compose</button>
+        <button id="tab-btn-library" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-library" tabindex="-1">Library</button>
+        <button id="tab-btn-network" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-network" tabindex="-1">Network</button>
+      </nav>
+
+      <section id="tab-home" class="tab-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-home">
+        <div class="panel-grid">
+          <section class="card">
+            <header class="card-head">
+              <h3>Timeline</h3>
+            </header>
+            <form id="home-form" class="form-row" autocomplete="off">
+              <label>Authors
+                <input id="home-authors" type="text" placeholder="pubkey1,pubkey2">
+              </label>
+              <label>Kinds
+                <input id="home-kinds" type="text" placeholder="1,7,30023">
+              </label>
+              <label>Search
+                <input id="home-search" type="text" placeholder="nostr">
+              </label>
+              <label>Limit
+                <input id="home-limit" class="narrow" type="number" min="1" max="200" value="50">
+              </label>
+              <label class="toggle-row">
+                <input id="home-include-remotes" type="checkbox" checked>
+                Include remotes
+              </label>
+              <button class="action" type="submit">Fetch</button>
+            </form>
+            <div id="home-feed" class="feed" aria-live="polite"></div>
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <h3>Home Log</h3>
+            </header>
+            <pre id="home-log" class="log">Waiting for timeline fetch.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-discover" class="tab-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-discover">
+        <div class="panel-grid">
+          <section class="card">
+            <header class="card-head">
+              <h3>Search</h3>
+            </header>
+            <form id="discover-form" class="form-row" autocomplete="off">
+              <label>Term
+                <input id="discover-term" type="text" placeholder="search relay text">
+              </label>
+              <label>Limit
+                <input id="discover-limit" class="narrow" type="number" min="1" max="200" value="30">
+              </label>
+              <button class="action" type="submit">Search</button>
+              <button id="discover-count" class="action" type="button">Count</button>
+            </form>
+            <form id="discover-filter-form" class="form-row" autocomplete="off">
+              <label>Authors
+                <input id="discover-authors" type="text" placeholder="pubkey1,pubkey2">
+              </label>
+              <label>Kinds
+                <input id="discover-kinds" type="text" placeholder="1,6,7">
+              </label>
+              <label>Since
+                <input id="discover-since" class="narrow" type="number" min="0" placeholder="unix">
+              </label>
+              <label>Until
+                <input id="discover-until" class="narrow" type="number" min="0" placeholder="unix">
+              </label>
+              <button id="discover-filter-search" class="action" type="button">Filter Search</button>
+            </form>
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <h3>Relay Probe</h3>
+            </header>
+            <form id="relay-info-form" class="form-row" autocomplete="off">
+              <label>Relay URL
+                <input id="relay-info-url" type="text" placeholder="wss://relay.example.com">
+              </label>
+              <button class="action" type="submit">NIP-11</button>
+            </form>
+            <pre id="discover-log" class="log">No discover actions yet.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-compose" class="tab-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-compose">
+        <div class="panel-grid">
+          <section class="card">
+            <header class="card-head">
+              <h3>Compose</h3>
+            </header>
+            <form id="compose-form" class="compose-form" autocomplete="off">
+              <label>Type
+                <select id="compose-type">
+                  <option value="note">Note</option>
+                  <option value="reply">Reply</option>
+                  <option value="longform">Long-form</option>
+                  <option value="file-metadata">File metadata</option>
+                  <option value="delete">Delete</option>
+                </select>
+              </label>
+
+              <label id="compose-content-row">Content
+                <textarea id="compose-content" class="wide" placeholder="Write your event"></textarea>
+              </label>
+
+              <div id="compose-note-fields" class="flow-row">
+                <label>Tags
+                  <input id="compose-tags" type="text" placeholder="e:eventid,p:pubkey,t:topic">
+                </label>
+              </div>
+
+              <div id="compose-reply-fields" class="flow-row hidden">
+                <label>Reply Event ID
+                  <input id="compose-reply-event" type="text" placeholder="hex event id">
+                </label>
+              </div>
+
+              <div id="compose-longform-fields" class="flow-row hidden">
+                <label>Title
+                  <input id="compose-title" type="text" placeholder="Article title">
+                </label>
+                <label>Identifier
+                  <input id="compose-identifier" type="text" placeholder="slug-or-key">
+                </label>
+                <label>Summary
+                  <input id="compose-summary" type="text" placeholder="Optional summary">
+                </label>
+              </div>
+
+              <div id="compose-file-fields" class="flow-row hidden">
+                <label>File URL
+                  <input id="compose-file-url" type="text" placeholder="https://example/file.png">
+                </label>
+                <label>SHA-256
+                  <input id="compose-file-hash" type="text" placeholder="hex sha256">
+                </label>
+                <label>MIME
+                  <input id="compose-file-mime" type="text" placeholder="image/png">
+                </label>
+                <label>Size
+                  <input id="compose-file-size" class="narrow" type="number" min="1" placeholder="bytes">
+                </label>
+              </div>
+
+              <div id="compose-delete-fields" class="flow-row hidden">
+                <label>Delete Event ID
+                  <input id="compose-delete-id" type="text" placeholder="hex event id">
+                </label>
+                <label>Reason
+                  <input id="compose-delete-reason" type="text" placeholder="Optional reason">
+                </label>
+              </div>
+
+              <div class="flow-row">
+                <label>Draft Name
+                  <input id="compose-draft" type="text" placeholder="draft-name">
+                </label>
+                <button class="action" type="submit">Create Draft</button>
+                <button id="compose-preview" class="action" type="button">Preview</button>
+                <button id="compose-list" class="action" type="button">List Drafts</button>
+              </div>
+
+              <div class="flow-row">
+                <label>Password
+                  <input id="compose-password" type="password" placeholder="unlock password">
+                </label>
+                <label>Profile ID
+                  <input id="compose-profile-id" type="text" placeholder="optional profile id">
+                </label>
+                <label>Relays CSV
+                  <input id="compose-relays" type="text" placeholder="wss://relay-a,wss://relay-b">
+                </label>
+                <button id="compose-sign" class="action" type="button">Sign Draft</button>
+                <button id="compose-publish" class="action" type="button">Publish Draft</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <h3>Compose Log</h3>
+            </header>
+            <pre id="compose-log" class="log">No compose actions yet.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-library" class="tab-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-library">
+        <div class="panel-grid">
+          <section class="card">
+            <header class="card-head">
+              <h3>Library</h3>
+            </header>
+            <form id="library-form" class="form-row" autocomplete="off">
+              <label>Bucket
+                <select id="library-bucket">
+                  <option value="all">All</option>
+                  <option value="liked">Liked</option>
+                  <option value="commented">Commented</option>
+                  <option value="starred">Starred</option>
+                  <option value="saved">Saved</option>
+                </select>
+              </label>
+              <button class="action" type="submit">Load</button>
+              <button id="library-reindex" class="action" type="button">Reindex</button>
+            </form>
+
+            <form id="library-mutation-form" class="form-row" autocomplete="off">
+              <label>Event ID
+                <input id="library-event-id" type="text" placeholder="hex event id">
+              </label>
+              <button id="library-star" class="action" type="button">Star</button>
+              <button id="library-unstar" class="action" type="button">Unstar</button>
+              <button id="library-save" class="action" type="button">Save</button>
+              <button id="library-unsave" class="action" type="button">Unsave</button>
+            </form>
+
+            <form id="library-ingest-form" class="form-row" autocomplete="off">
+              <label>Authored Events JSONL
+                <input id="library-authored-path" type="text" placeholder="/path/to/authored.jsonl">
+              </label>
+              <button class="action" type="submit">Ingest Authored</button>
+            </form>
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <h3>Library Log</h3>
+            </header>
+            <pre id="library-log" class="log">No library actions yet.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-network" class="tab-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-network">
+        <div class="panel-grid">
+          <section class="card">
+            <header class="card-head">
+              <h3>Relay Network</h3>
+            </header>
+            <form id="network-relay-form" class="form-row" autocomplete="off">
+              <label>Relay URL
+                <input id="network-relay-url" type="text" placeholder="wss://relay.example.com">
+              </label>
+              <label>Mode
+                <select id="network-relay-mode">
+                  <option value="both">Read + write</option>
+                  <option value="read">Read only</option>
+                  <option value="write">Write only</option>
+                </select>
+              </label>
+              <button id="network-relay-add" class="action" type="button">Add</button>
+              <button id="network-relay-remove" class="action" type="button">Remove</button>
+              <button id="network-relay-home" class="action" type="button">Set Home</button>
+              <button id="network-relay-probe" class="action" type="button">Probe</button>
+              <button id="network-relay-list" class="action" type="button">List</button>
+            </form>
+            <div class="flow-row">
+              <button id="network-doctor" class="action" type="button">Run Doctor</button>
+            </div>
+            <form id="network-stonr-form" class="form-row" autocomplete="off">
+              <label>Stonr Env Path
+                <input id="network-stonr-env" type="text" placeholder=".env">
+              </label>
+              <button id="network-stonr-config" class="action" type="button">Stonr Config</button>
+              <button id="network-stonr-mirror" class="action" type="button">Mirror Status</button>
+              <button id="network-stonr-retention" class="action" type="button">Retention Status</button>
+            </form>
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <h3>Network Log</h3>
+            </header>
+            <pre id="network-log" class="log">No network actions yet.</pre>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
+    <aside id="settings-drawer" class="drawer" aria-label="Onstr settings">
+      <header class="drawer-head">
+        <h3>Onstr Settings</h3>
+        <button id="close-settings" class="action" type="button">Close</button>
+      </header>
+
+      <section class="drawer-body">
+        <section class="drawer-section">
+          <h4>Theme</h4>
+          <label for="theme-select">Theme</label>
+          <select id="theme-select" aria-label="Theme picker"></select>
+          <p class="sub">Use arrow keys to cycle and apply instantly.</p>
+        </section>
+
+        <section class="drawer-section">
+          <h4>Bridge</h4>
+          <p id="bridge-copy" class="sub">Waiting for bridge status.</p>
+        </section>
+
+        <section class="drawer-section">
+          <h4>Backend Health</h4>
+          <pre id="doctor-output" class="log">No doctor run yet.</pre>
+          <button id="settings-run-doctor" class="action" type="button">Run Doctor</button>
+        </section>
+      </section>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js?v=onstr-20260329a"></script>
+</body>
+</html>

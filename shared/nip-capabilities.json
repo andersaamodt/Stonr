@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "baseline": "NIP-01",
+  "required": [
+    {
+      "id": "NIP-09",
+      "number": 9,
+      "description": "Event deletion"
+    },
+    {
+      "id": "NIP-11",
+      "number": 11,
+      "description": "Relay information document"
+    },
+    {
+      "id": "NIP-12",
+      "number": 12,
+      "description": "Generic tag queries"
+    },
+    {
+      "id": "NIP-40",
+      "number": 40,
+      "description": "Expiration timestamp"
+    },
+    {
+      "id": "NIP-42",
+      "number": 42,
+      "description": "Authentication of clients to relays"
+    },
+    {
+      "id": "NIP-45",
+      "number": 45,
+      "description": "Count event requests"
+    },
+    {
+      "id": "NIP-50",
+      "number": 50,
+      "description": "Search capability"
+    },
+    {
+      "id": "NIP-94",
+      "number": 94,
+      "description": "File metadata events"
+    },
+    {
+      "id": "NIP-96",
+      "number": 96,
+      "description": "HTTP file storage integration"
+    },
+    {
+      "id": "NIP-98",
+      "number": 98,
+      "description": "HTTP auth"
+    },
+    {
+      "id": "NIP-B7",
+      "number": null,
+      "description": "Blossom"
+    }
+  ]
+}
