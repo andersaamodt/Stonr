@@ -1258,6 +1258,15 @@ h4 {
   gap: 0.38rem;
   font-size: 0.74rem;
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.desktop-toggle-busy .action-spinner {
+  flex: 0 0 auto;
+  width: 0.86rem;
+  height: 0.86rem;
+  border-color: color-mix(in srgb, currentColor 35%, transparent);
+  border-top-color: currentColor;
 }
 
 .card-head,
