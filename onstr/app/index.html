@@ -112,6 +112,26 @@
       </header>
 
       <section id="tab-home" class="tab-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-home">
+        <section id="setup-panel" class="stage-section setup-panel">
+          <header class="inline-head setup-head">
+            <div>
+              <h3>Finish Setup</h3>
+              <p id="setup-summary" class="support-copy">Create a profile and add a relay so Home and Discover can do real work.</p>
+            </div>
+            <button id="setup-open-settings" class="action" type="button">Open Settings</button>
+          </header>
+          <div id="setup-status-list" class="setup-status-list" aria-live="polite">
+            <article class="setup-status-card">
+              <h4>Profile</h4>
+              <p id="setup-profile-status">No active profile yet.</p>
+            </article>
+            <article class="setup-status-card">
+              <h4>Relay</h4>
+              <p id="setup-relay-status">No relay configured yet.</p>
+            </article>
+          </div>
+        </section>
+
         <section class="stage-section">
           <form id="home-form" class="form-row" autocomplete="off">
             <label>Authors
@@ -211,8 +231,8 @@
             <input id="compose-draft" type="text" placeholder="draft-name">
           </label>
 
-          <label>Post Name
-            <input id="compose-name" type="text" placeholder="Title/name">
+          <label id="compose-name-row" class="hidden">Title
+            <input id="compose-name" type="text" placeholder="Long-form title">
           </label>
 
           <div id="compose-type-group" class="type-pills" role="tablist" aria-label="Compose type">
@@ -344,6 +364,46 @@
       </header>
 
       <section class="drawer-body">
+        <section class="drawer-section">
+          <div class="section-head-row">
+            <div>
+              <h4>Profiles</h4>
+              <p id="profile-summary" class="support-copy">No active profile yet.</p>
+            </div>
+            <button id="profile-use" class="action" type="button">Use Selected</button>
+          </div>
+          <div id="profile-listbox" class="rail-listbox settings-listbox" role="listbox" aria-label="Profiles"></div>
+          <form id="profile-create-form" class="form-row" autocomplete="off">
+            <label>Profile Name
+              <input id="profile-create-name" type="text" placeholder="Codex Test">
+            </label>
+            <label>Password
+              <input id="profile-create-password" type="password" placeholder="unlock password">
+            </label>
+            <label>Secret Key (optional)
+              <input id="profile-create-secret" type="text" placeholder="hex secret key">
+            </label>
+            <label class="toggle-row">
+              <input id="profile-create-set-active" type="checkbox" checked>
+              Set active
+            </label>
+            <button class="action" type="submit">Create Profile</button>
+          </form>
+          <form id="profile-import-form" class="form-row" autocomplete="off">
+            <label>Import Name
+              <input id="profile-import-name" type="text" placeholder="Imported profile">
+            </label>
+            <label>Password
+              <input id="profile-import-password" type="password" placeholder="ncryptsec password">
+            </label>
+            <label class="wide-label">ncryptsec
+              <input id="profile-import-ncryptsec" type="text" placeholder="ncryptsec1...">
+            </label>
+            <button class="action" type="submit">Import ncryptsec</button>
+          </form>
+          <pre id="profile-log" class="log">No profile actions yet.</pre>
+        </section>
+
         <section class="drawer-section">
           <h4>Theme</h4>
           <label for="theme-select">Theme</label>

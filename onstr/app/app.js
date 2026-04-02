@@ -5,11 +5,17 @@
     activeTab: 'home',
     activeLibraryBucket: 'all',
     activeLibraryEventId: '',
+    activeProfileId: '',
+    activeProfileName: '',
     activeProfilePubkey: '',
+    selectedProfileId: '',
+    relayReady: false,
+    homeRelayUrl: '',
     themes: [],
     theme: 'wizard',
     openMenu: null,
-    refreshTimer: null
+    refreshTimer: null,
+    settingsReturnFocus: null
   };
 
   var TAB_IDS = ['home', 'discover'];
@@ -20,6 +26,9 @@
     'set-ui-pref': true,
     'list-themes': true,
     'profile-list': true,
+    'profile-create': true,
+    'profile-import': true,
+    'profile-use': true,
     'timeline-fetch': true,
     'discover-search': true,
     'discover-count': true,
@@ -81,6 +90,11 @@
     homeSearch: document.getElementById('home-search'),
     homeLimit: document.getElementById('home-limit'),
     homeIncludeRemotes: document.getElementById('home-include-remotes'),
+    setupPanel: document.getElementById('setup-panel'),
+    setupSummary: document.getElementById('setup-summary'),
+    setupOpenSettings: document.getElementById('setup-open-settings'),
+    setupProfileStatus: document.getElementById('setup-profile-status'),
+    setupRelayStatus: document.getElementById('setup-relay-status'),
     homeFeed: document.getElementById('home-feed'),
     homeLog: document.getElementById('home-log'),
 
@@ -105,6 +119,7 @@
     composeType: document.getElementById('compose-type'),
     composeTypeGroup: document.getElementById('compose-type-group'),
     composeForm: document.getElementById('compose-form'),
+    composeNameRow: document.getElementById('compose-name-row'),
     composeName: document.getElementById('compose-name'),
     composeNoteFields: document.getElementById('compose-note-fields'),
     composeReplyFields: document.getElementById('compose-reply-fields'),
@@ -155,6 +170,20 @@
     libraryAuthoredPath: document.getElementById('library-authored-path'),
 
     relayListbox: document.getElementById('relay-listbox'),
+
+    profileSummary: document.getElementById('profile-summary'),
+    profileListbox: document.getElementById('profile-listbox'),
+    profileCreateForm: document.getElementById('profile-create-form'),
+    profileCreateName: document.getElementById('profile-create-name'),
+    profileCreatePassword: document.getElementById('profile-create-password'),
+    profileCreateSecret: document.getElementById('profile-create-secret'),
+    profileCreateSetActive: document.getElementById('profile-create-set-active'),
+    profileImportForm: document.getElementById('profile-import-form'),
+    profileImportName: document.getElementById('profile-import-name'),
+    profileImportPassword: document.getElementById('profile-import-password'),
+    profileImportNcryptsec: document.getElementById('profile-import-ncryptsec'),
+    profileUse: document.getElementById('profile-use'),
+    profileLog: document.getElementById('profile-log'),
 
     networkRelayUrl: document.getElementById('network-relay-url'),
     networkRelayMode: document.getElementById('network-relay-mode'),
@@ -272,6 +301,65 @@
     return text.slice(0, 8) + '…' + text.slice(-6);
   }
 
+  function relayConfigured(relays) {
+    if (!relays || typeof relays !== 'object') {
+      return false;
+    }
+    return !!(
+      String(relays.home || '').trim() ||
+      (Array.isArray(relays.read) && relays.read.some(function (relay) { return String(relay || '').trim(); })) ||
+      (Array.isArray(relays.write) && relays.write.some(function (relay) { return String(relay || '').trim(); }))
+    );
+  }
+
+  function activeProfileLabel() {
+    if (!state.activeProfileId) {
+      return 'No active profile yet.';
+    }
+    var name = String(state.activeProfileName || '').trim();
+    var pubkey = String(state.activeProfilePubkey || '').trim();
+    if (name && pubkey) {
+      return name + ' · ' + shortId(pubkey);
+    }
+    return name || pubkey || state.activeProfileId;
+  }
+
+  function relayLabel() {
+    if (!state.relayReady) {
+      return 'No relay configured yet.';
+    }
+    return state.homeRelayUrl ? 'Home relay: ' + state.homeRelayUrl : 'Relay configured.';
+  }
+
+  function renderSetupPanel() {
+    if (els.setupProfileStatus) {
+      els.setupProfileStatus.textContent = activeProfileLabel();
+    }
+    if (els.setupRelayStatus) {
+      els.setupRelayStatus.textContent = relayLabel();
+    }
+    if (!els.setupSummary) {
+      return;
+    }
+    if (!state.activeProfileId && !state.relayReady) {
+      els.setupSummary.textContent = 'Create a profile and add a relay so Home, Discover, and publish flows can do real work.';
+      return;
+    }
+    if (!state.activeProfileId) {
+      els.setupSummary.textContent = 'Relay is ready. Create or import a profile before you publish or load follow relationships.';
+      return;
+    }
+    if (!state.relayReady) {
+      els.setupSummary.textContent = 'Profile is ready. Add a home relay before you fetch timelines or publish drafts.';
+      return;
+    }
+    els.setupSummary.textContent = 'Profile and relay are ready. Home and Discover now use your configured network state.';
+  }
+
+  function renderHomeEmptyState(message) {
+    els.homeFeed.textContent = message;
+  }
+
   function revealBootUi() {
     document.body.classList.remove('onstr-booting');
     if (state.hostBootReadySent || !state.bridge) {
@@ -357,13 +445,16 @@
     });
   }
 
-  function openSettings(focusRelays) {
+  function openSettings(focusRelays, trigger) {
     closeThemeMenu(false);
+    state.settingsReturnFocus = trigger || (focusRelays ? els.settingsOpenRelays : els.settingsOpen);
     els.settingsBackdrop.classList.remove('hidden');
     els.settingsBackdrop.setAttribute('aria-hidden', 'false');
     els.settingsOpen.classList.add('active');
     if (focusRelays) {
       els.networkRelayUrl.focus();
+    } else if (!state.activeProfileId && els.profileCreateName) {
+      els.profileCreateName.focus();
     } else {
       els.themeSelect.focus();
     }
@@ -373,6 +464,10 @@
     els.settingsBackdrop.classList.add('hidden');
     els.settingsBackdrop.setAttribute('aria-hidden', 'true');
     els.settingsOpen.classList.remove('active');
+    if (state.settingsReturnFocus && typeof state.settingsReturnFocus.focus === 'function') {
+      state.settingsReturnFocus.focus();
+      return;
+    }
     els.settingsOpen.focus();
   }
 
@@ -586,6 +681,9 @@
 
   function setComposeTypeUi() {
     var type = String(els.composeType.value || 'note');
+    if (els.composeNameRow) {
+      els.composeNameRow.classList.toggle('hidden', type !== 'longform');
+    }
     els.composeNoteFields.classList.toggle('hidden', type !== 'note');
     els.composeReplyFields.classList.toggle('hidden', type !== 'reply');
     els.composeLongformFields.classList.toggle('hidden', type !== 'longform');
@@ -605,18 +703,6 @@
     setComposeTypeUi();
   }
 
-  function composeTagsWithName() {
-    var raw = String(els.composeTags.value || '').trim();
-    var name = String(els.composeName.value || '').trim();
-    if (!name) {
-      return raw;
-    }
-    if (!raw) {
-      return 'title:' + name;
-    }
-    return raw + ',title:' + name;
-  }
-
   function composeArgsForType(type) {
     var draft = String(els.composeDraft.value || '').trim();
     var name = String(els.composeName.value || '').trim();
@@ -629,7 +715,7 @@
       if (!content) {
         throw new Error('Note body is required.');
       }
-      return ['compose-note', [content, composeTagsWithName(), draft]];
+      return ['compose-note', [content, String(els.composeTags.value || '').trim(), draft]];
     }
 
     if (type === 'reply') {
@@ -976,16 +1062,19 @@
   }
 
   function renderRelayList(payload) {
+    var relays = payload && payload.relays ? payload.relays : null;
+    state.relayReady = relayConfigured(relays);
+    state.homeRelayUrl = relays && relays.home ? String(relays.home || '').trim() : '';
+    renderSetupPanel();
     els.relayListbox.innerHTML = '';
-    if (!payload || !payload.relays) {
+    if (!relays || !state.relayReady) {
       var empty = document.createElement('div');
       empty.className = 'rail-list-option is-empty';
-      empty.textContent = 'No relay config yet.';
+      empty.textContent = 'No relay configured yet.';
       els.relayListbox.appendChild(empty);
       return;
     }
 
-    var relays = payload.relays;
     var all = {};
     [relays.home].concat(relays.read || []).concat(relays.write || []).forEach(function (url) {
       if (!url) {
@@ -1028,7 +1117,7 @@
       row.appendChild(right);
       row.addEventListener('click', function () {
         els.networkRelayUrl.value = url;
-        openSettings(true);
+        openSettings(true, row);
       });
 
       els.relayListbox.appendChild(row);
@@ -1197,6 +1286,10 @@
     ];
     var blob = await safeBackend('timeline-fetch', args, 'Failed to fetch timeline');
     var parsed = writeLog(els.homeLog, 'Timeline fetch', blob);
+    if (parsed && parsed.needs_relay) {
+      renderHomeEmptyState('Add a relay in Settings to load your timeline.');
+      return;
+    }
     renderHomeFeed(parsed);
   }
 
@@ -1271,6 +1364,10 @@
       'Failed to load following'
     );
     var parsed = parseMaybeJson(blob);
+    if (parsed && parsed.needs_relay) {
+      toast('Add a relay first.', 'bad');
+      return;
+    }
     var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
     if (!events.length) {
       renderPeopleRows([], 'following');
@@ -1315,6 +1412,10 @@
       'Failed to load followers'
     );
     var parsed = parseMaybeJson(blob);
+    if (parsed && parsed.needs_relay) {
+      toast('Add a relay first.', 'bad');
+      return;
+    }
     var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
     var seen = {};
     var followers = [];
@@ -1360,31 +1461,165 @@
     writeLog(els.networkLog, label, blob);
   }
 
-  async function loadActiveProfile() {
+  function setSelectedProfile(profileId) {
+    state.selectedProfileId = String(profileId || '').trim();
+    if (!els.profileListbox) {
+      return;
+    }
+    var options = els.profileListbox.querySelectorAll('.rail-list-option');
+    options.forEach(function (node) {
+      var active = node.getAttribute('data-profile-id') === state.selectedProfileId;
+      node.classList.toggle('is-active', active);
+      node.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function renderProfileList(parsed) {
+    if (!els.profileListbox) {
+      return;
+    }
+    var profiles = parsed && Array.isArray(parsed.profiles) ? parsed.profiles.slice() : [];
+    els.profileListbox.innerHTML = '';
+
+    if (!profiles.length) {
+      var empty = document.createElement('div');
+      empty.className = 'rail-list-option is-empty';
+      empty.textContent = 'No profiles yet.';
+      els.profileListbox.appendChild(empty);
+      setSelectedProfile('');
+      return;
+    }
+
+    profiles.forEach(function (profile) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'rail-list-option';
+      button.setAttribute('role', 'option');
+      button.setAttribute('data-profile-id', String(profile.id || ''));
+
+      var left = document.createElement('span');
+      left.textContent = String(profile.name || 'Unnamed profile');
+      left.title = String(profile.pubkey || '');
+
+      var right = document.createElement('span');
+      right.textContent = shortId(String(profile.pubkey || profile.id || ''));
+      right.style.color = 'var(--text-muted)';
+      right.style.fontSize = '0.72rem';
+
+      button.appendChild(left);
+      button.appendChild(right);
+      button.addEventListener('click', function () {
+        setSelectedProfile(profile.id);
+      });
+      button.addEventListener('dblclick', function () {
+        setSelectedProfile(profile.id);
+        runProfileUse().catch(function () {
+          return;
+        });
+      });
+
+      els.profileListbox.appendChild(button);
+    });
+
+    var preferred = state.selectedProfileId || state.activeProfileId || '';
+    if (!profiles.some(function (profile) { return profile.id === preferred; })) {
+      preferred = profiles[0].id;
+    }
+    setSelectedProfile(preferred);
+  }
+
+  async function loadProfiles() {
     if (!state.bridge) {
       return;
     }
+    state.activeProfileId = '';
+    state.activeProfileName = '';
+    state.activeProfilePubkey = '';
     try {
       var blob = await backend('profile-list', []);
       var parsed = parseMaybeJson(blob);
       if (!parsed || !Array.isArray(parsed.profiles)) {
+        renderProfileList({ profiles: [] });
+        if (els.profileSummary) {
+          els.profileSummary.textContent = activeProfileLabel();
+        }
+        renderSetupPanel();
         return;
       }
-      var activeId = parsed.active_profile;
-      if (!activeId) {
-        return;
-      }
+
+      state.activeProfileId = String(parsed.active_profile || '').trim();
       parsed.profiles.forEach(function (profile) {
-        if (profile.id === activeId && profile.pubkey) {
-          state.activeProfilePubkey = String(profile.pubkey);
+        if (profile.id === state.activeProfileId) {
+          state.activeProfileName = String(profile.name || '').trim();
+          state.activeProfilePubkey = String(profile.pubkey || '').trim();
         }
       });
+
+      if (els.profileSummary) {
+        els.profileSummary.textContent = activeProfileLabel();
+      }
       if (state.activeProfilePubkey && !els.peoplePubkey.value) {
         els.peoplePubkey.value = state.activeProfilePubkey;
       }
+      renderProfileList(parsed);
+      renderSetupPanel();
     } catch (_error) {
+      renderProfileList({ profiles: [] });
+      if (els.profileSummary) {
+        els.profileSummary.textContent = activeProfileLabel();
+      }
+      renderSetupPanel();
       return;
     }
+  }
+
+  async function runProfileCreate() {
+    var name = String(els.profileCreateName.value || '').trim();
+    var password = String(els.profileCreatePassword.value || '');
+    var secret = String(els.profileCreateSecret.value || '').trim();
+    var setActive = els.profileCreateSetActive && els.profileCreateSetActive.checked ? '1' : '0';
+    if (!name || !password) {
+      toast('Profile name and password are required.', 'bad');
+      return;
+    }
+    var blob = await safeBackend('profile-create', [name, password, secret, setActive], 'Profile create failed');
+    writeLog(els.profileLog, 'Profile created', blob);
+    els.profileCreatePassword.value = '';
+    els.profileCreateSecret.value = '';
+    if (setActive === '1') {
+      els.profileCreateName.value = '';
+    }
+    await loadProfiles();
+    toast('Profile created.', 'good');
+  }
+
+  async function runProfileImport() {
+    var name = String(els.profileImportName.value || '').trim();
+    var password = String(els.profileImportPassword.value || '');
+    var ncryptsec = String(els.profileImportNcryptsec.value || '').trim();
+    if (!name || !password || !ncryptsec) {
+      toast('Import name, password, and ncryptsec are required.', 'bad');
+      return;
+    }
+    var blob = await safeBackend('profile-import', [name, password, ncryptsec, '1'], 'Profile import failed');
+    writeLog(els.profileLog, 'Profile imported', blob);
+    els.profileImportPassword.value = '';
+    els.profileImportNcryptsec.value = '';
+    els.profileImportName.value = '';
+    await loadProfiles();
+    toast('Profile imported.', 'good');
+  }
+
+  async function runProfileUse() {
+    var profileId = String(state.selectedProfileId || '').trim();
+    if (!profileId) {
+      toast('Select a profile first.', 'bad');
+      return;
+    }
+    var blob = await safeBackend('profile-use', [profileId], 'Profile switch failed');
+    writeLog(els.profileLog, 'Active profile', blob);
+    await loadProfiles();
+    toast('Active profile updated.', 'good');
   }
 
   function bindComposeTypePills() {
@@ -1398,6 +1633,12 @@
   }
 
   function bindForms() {
+    if (els.setupOpenSettings) {
+      els.setupOpenSettings.addEventListener('click', function () {
+        openSettings(false, els.setupOpenSettings);
+      });
+    }
+
     els.homeForm.addEventListener('submit', function (event) {
       event.preventDefault();
       runHomeFetch().catch(function () {
@@ -1444,6 +1685,32 @@
     });
 
     bindComposeTypePills();
+
+    if (els.profileCreateForm) {
+      els.profileCreateForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        runProfileCreate().catch(function () {
+          return;
+        });
+      });
+    }
+
+    if (els.profileImportForm) {
+      els.profileImportForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        runProfileImport().catch(function () {
+          return;
+        });
+      });
+    }
+
+    if (els.profileUse) {
+      els.profileUse.addEventListener('click', function () {
+        runProfileUse().catch(function () {
+          return;
+        });
+      });
+    }
 
     els.composeForm.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -1633,13 +1900,13 @@
   function bindDrawers() {
     els.settingsOpen.addEventListener('click', function () {
       if (els.settingsBackdrop.classList.contains('hidden')) {
-        openSettings(false);
+        openSettings(false, els.settingsOpen);
       } else {
         closeSettings();
       }
     });
     els.settingsOpenRelays.addEventListener('click', function () {
-      openSettings(true);
+      openSettings(true, els.settingsOpenRelays);
     });
     els.settingsClose.addEventListener('click', closeSettings);
 
@@ -1694,12 +1961,24 @@
     }
     var interactive = document.querySelectorAll('button, input, select, textarea');
     interactive.forEach(function (node) {
-      if (node === els.settingsOpen || node === els.themePickerBtn || node === els.themeSelect) {
+      if (
+        node === els.settingsOpen ||
+        node === els.settingsOpenRelays ||
+        node === els.setupOpenSettings ||
+        node === els.themePickerBtn ||
+        node === els.themeSelect
+      ) {
         return;
       }
       node.disabled = true;
     });
     els.settingsOpen.disabled = false;
+    if (els.settingsOpenRelays) {
+      els.settingsOpenRelays.disabled = false;
+    }
+    if (els.setupOpenSettings) {
+      els.setupOpenSettings.disabled = false;
+    }
     if (els.themePickerBtn) {
       els.themePickerBtn.disabled = false;
     }
@@ -1748,6 +2027,9 @@
         return;
       }
       if (!els.deleteBackdrop.classList.contains('hidden')) {
+        return;
+      }
+      if (!els.settingsBackdrop.classList.contains('hidden')) {
         return;
       }
 
@@ -1826,18 +2108,25 @@
       prefBucket = 'all';
     }
     state.activeLibraryBucket = prefBucket;
+    renderSetupPanel();
 
     if (state.bridge) {
-      await loadActiveProfile();
+      await loadProfiles();
       await runRelayList().catch(function () {
         return;
       });
       await runLibraryList(state.activeLibraryBucket).catch(function () {
         return;
       });
-      runHomeFetch().catch(function () {
-        return;
-      });
+      if (state.relayReady) {
+        runHomeFetch().catch(function () {
+          return;
+        });
+      } else {
+        renderHomeEmptyState('Add a relay in Settings to load your timeline.');
+      }
+    } else {
+      renderHomeEmptyState('Open this app in the Wizardry desktop host to load backend data.');
     }
 
     setLibraryBucket(state.activeLibraryBucket);

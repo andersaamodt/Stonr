@@ -458,11 +458,10 @@ struct RelayConfig {
 
 impl Default for RelayConfig {
     fn default() -> Self {
-        let home = "ws://127.0.0.1:7778".to_string();
         Self {
-            home: home.clone(),
-            read: vec![home.clone()],
-            write: vec![home],
+            home: String::new(),
+            read: Vec::new(),
+            write: Vec::new(),
         }
     }
 }
@@ -677,7 +676,8 @@ async fn handle_relay(cmd: RelayCommand, paths: &Paths) -> Result<()> {
                     .read
                     .first()
                     .cloned()
-                    .unwrap_or_else(|| "ws://127.0.0.1:7778".to_string());
+                    .or_else(|| relays.write.first().cloned())
+                    .unwrap_or_default();
             }
             save_json_pretty(&paths.relays_file, &relays)?;
             print_json(&json!({"ok": true, "relays": relays}));
@@ -695,15 +695,25 @@ async fn handle_relay(cmd: RelayCommand, paths: &Paths) -> Result<()> {
                 vec![normalize_relay_url(&url)?]
             } else {
                 let mut set = BTreeSet::new();
-                set.insert(relays.home.clone());
+                if !relays.home.trim().is_empty() {
+                    set.insert(relays.home.clone());
+                }
                 for relay in &relays.read {
-                    set.insert(relay.clone());
+                    if !relay.trim().is_empty() {
+                        set.insert(relay.clone());
+                    }
                 }
                 for relay in &relays.write {
-                    set.insert(relay.clone());
+                    if !relay.trim().is_empty() {
+                        set.insert(relay.clone());
+                    }
                 }
                 set.into_iter().collect()
             };
+            if targets.is_empty() {
+                print_json(&json!({"ok": true, "needs_relay": true, "probes": []}));
+                return Ok(());
+            }
             let mut results = Vec::new();
             for relay in targets {
                 results.push(probe_relay(&relay).await);
@@ -727,13 +737,15 @@ async fn handle_timeline(cmd: TimelineCommand, paths: &Paths) -> Result<()> {
                 args.limit,
                 args.tag_p.as_deref(),
             );
-            let mut targets = vec![relays.home.clone()];
-            if args.include_remotes {
-                for relay in relays.read {
-                    if !targets.iter().any(|value| value == &relay) {
-                        targets.push(relay);
-                    }
-                }
+            let targets = configured_read_targets(&relays, args.include_remotes);
+            if targets.is_empty() {
+                print_json(&json!({
+                    "ok": true,
+                    "needs_relay": true,
+                    "events": [],
+                    "per_relay": {},
+                }));
+                return Ok(());
             }
 
             let mut merged = Vec::<Event>::new();
@@ -767,6 +779,10 @@ async fn handle_discover(cmd: DiscoverCommand, paths: &Paths) -> Result<()> {
     let relays: RelayConfig = load_or_default(&paths.relays_file)?;
     match cmd.action {
         DiscoverAction::Search(args) => {
+            if relays.home.trim().is_empty() {
+                print_json(&json!({"ok": true, "needs_relay": true, "events": []}));
+                return Ok(());
+            }
             let filter =
                 build_filter(None, None, Some(args.term.as_str()), None, None, args.limit, None);
             let events = fetch_events_ws(&relays.home, &filter, 10)
@@ -775,6 +791,10 @@ async fn handle_discover(cmd: DiscoverCommand, paths: &Paths) -> Result<()> {
             print_json(&json!({"ok": true, "events": events}));
         }
         DiscoverAction::Count(args) => {
+            if relays.home.trim().is_empty() {
+                print_json(&json!({"ok": true, "needs_relay": true, "count": 0}));
+                return Ok(());
+            }
             let filter = build_filter(None, None, args.term.as_deref(), None, None, 1_000, None);
             let count = count_events_ws(&relays.home, &filter, 10)
                 .await
@@ -894,13 +914,16 @@ async fn handle_publish(cmd: PublishCommand, paths: &Paths) -> Result<()> {
     }
 
     let targets = if explicit_relays.is_empty() {
-        relays.write
+        configured_write_targets(&relays)
     } else {
         explicit_relays
             .iter()
             .map(|relay| normalize_relay_url(relay))
             .collect::<Result<Vec<_>>>()?
     };
+    if targets.is_empty() {
+        bail!("no write relays configured");
+    }
 
     let mut results = Vec::new();
     for relay in targets {
@@ -1067,6 +1090,7 @@ fn handle_doctor(paths: &Paths) -> Result<()> {
             "active_profile": profiles.active_profile,
         },
         "relays": relays,
+        "relay_ready": relay_configured(&relays),
         "library_counts": {
             "starred": library.starred.len(),
             "saved": library.saved.len(),
@@ -1629,6 +1653,39 @@ fn normalize_relay_url(url: &str) -> Result<String> {
     Ok(parsed.to_string().trim_end_matches('/').to_string())
 }
 
+fn relay_configured(relays: &RelayConfig) -> bool {
+    !relays.home.trim().is_empty()
+        || relays.read.iter().any(|relay| !relay.trim().is_empty())
+        || relays.write.iter().any(|relay| !relay.trim().is_empty())
+}
+
+fn configured_read_targets(relays: &RelayConfig, include_remotes: bool) -> Vec<String> {
+    let mut targets = Vec::new();
+    if !relays.home.trim().is_empty() {
+        targets.push(relays.home.clone());
+    }
+    if include_remotes {
+        for relay in &relays.read {
+            if relay.trim().is_empty() || targets.iter().any(|value| value == relay) {
+                continue;
+            }
+            targets.push(relay.clone());
+        }
+    }
+    targets
+}
+
+fn configured_write_targets(relays: &RelayConfig) -> Vec<String> {
+    let mut targets = Vec::new();
+    for relay in &relays.write {
+        if relay.trim().is_empty() || targets.iter().any(|value| value == relay) {
+            continue;
+        }
+        targets.push(relay.clone());
+    }
+    targets
+}
+
 fn split_csv_strings(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -1713,4 +1770,18 @@ fn print_json(value: &Value) {
         "{}",
         serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RelayConfig;
+
+    #[test]
+    fn relay_default_does_not_assume_localhost_service() {
+        let relays = RelayConfig::default();
+
+        assert!(relays.home.is_empty());
+        assert!(relays.read.is_empty());
+        assert!(relays.write.is_empty());
+    }
 }
