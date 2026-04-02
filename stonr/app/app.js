@@ -1906,12 +1906,19 @@
     grid.className = 'field-grid';
 
     grid.appendChild(renderDesktopToggleField(
-      'Keep running when window closes',
+      'Allow relay to run in background',
       state.backgroundMode,
       function (checked) {
         state.backgroundMode = checked;
       },
-      'Hide the window instead of quitting the app so the relay keeps running in the background.'
+      'Keep relay runtime available after closing the window.',
+      false,
+      async function (checked) {
+        await saveDesktopPrefs();
+        if (!checked && state.startupServiceEnabled) {
+          await setStartupServiceEnabled(false);
+        }
+      }
     ));
 
     grid.appendChild(renderDesktopToggleField(
@@ -1933,23 +1940,27 @@
       'Automatically start the relay each time this app opens.'
     ));
 
-    grid.appendChild(renderDesktopToggleField(
+    var startupField = renderDesktopToggleField(
       'Auto-start relay when system starts',
       state.startupServiceEnabled,
       function () {
         return;
       },
-      state.startupServiceManager === 'none'
+      !state.backgroundMode
+        ? 'Enable background runtime first.'
+        : state.startupServiceManager === 'none'
         ? 'Startup service is unavailable on this host.'
         : 'Install a user startup service so the relay starts automatically when your system starts.',
-      state.startupServiceBusy || state.startupServiceManager === 'none',
+      state.startupServiceBusy || state.startupServiceManager === 'none' || !state.backgroundMode,
       function (checked) {
         return setStartupServiceEnabled(checked);
       },
       state.startupServiceBusy
         ? (state.startupServicePendingAction === 'disable' ? 'Disabling...' : 'Enabling...')
         : ''
-    ));
+    );
+    startupField.classList.add('desktop-child-toggle');
+    grid.appendChild(startupField);
 
     card.appendChild(grid);
     return card;
@@ -3868,6 +3879,10 @@
 
   async function setStartupServiceEnabled(nextEnabled) {
     if (!state.bridge) {
+      return;
+    }
+    if (nextEnabled && !state.backgroundMode) {
+      toast('Enable background runtime first.', 'bad');
       return;
     }
     state.startupServiceBusy = true;
