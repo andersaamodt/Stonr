@@ -52,6 +52,26 @@ fn library_maintenance_lives_in_settings_not_the_rail() {
 }
 
 #[test]
+fn first_run_surface_offers_recommended_relays_notice() {
+    let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
+    let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
+
+    assert!(index_html.contains("id=\"recommended-relays-notice\""));
+    assert!(index_html.contains("id=\"recommended-relays-add\""));
+    assert!(index_html.contains("id=\"settings-add-recommended-relays\""));
+    assert!(app_js.contains("RECOMMENDED_RELAYS = Object.freeze"));
+    assert!(app_js.contains("function addRecommendedRelays()"));
+}
+
+#[test]
+fn backend_prefs_expose_recommended_relays_notice_state() {
+    let backend_sh = read_file(&format!("{}/../app/scripts/onstr-backend.sh", env!("CARGO_MANIFEST_DIR")));
+
+    assert!(backend_sh.contains("recommended_relays_notice=$(pref_get recommended_relays_notice"));
+    assert!(backend_sh.contains("printf 'recommended_relays_notice=%s\\n'"));
+}
+
+#[test]
 fn note_compose_does_not_inject_title_shorthand_tags() {
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 

@@ -128,6 +128,22 @@
         <button id="open-compose" class="action primary" type="button">Compose</button>
       </header>
 
+      <aside id="recommended-relays-notice" class="persistent-notice hidden" aria-live="polite">
+        <div class="persistent-notice-head">
+          <div>
+            <strong>Add Recommended Relays</strong>
+            <p class="support-copy">Onstr can add a current default relay set and make the first relay your home relay.</p>
+          </div>
+          <button id="recommended-relays-dismiss" class="notice-close-btn" type="button" aria-label="Dismiss recommended relays notice">X</button>
+        </div>
+        <p id="recommended-relays-copy" class="support-copy">Recommended defaults:</p>
+        <ul id="recommended-relays-list" class="relay-chip-list"></ul>
+        <div class="flow-row compact">
+          <button id="recommended-relays-add" class="action primary" type="button">Add Recommended Relays</button>
+          <button id="recommended-relays-open-settings" class="action" type="button">Review In Settings</button>
+        </div>
+      </aside>
+
       <section id="tab-home" class="tab-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-home">
         <section id="setup-panel" class="stage-section setup-panel">
           <header class="inline-head setup-head">
@@ -503,6 +519,16 @@
 
         <section class="drawer-section">
           <h4>Relays</h4>
+          <div class="drawer-helper-card">
+            <div class="section-head-row">
+              <div>
+                <h5>Recommended Defaults</h5>
+                <p class="support-copy">Verified public relays Onstr can add for a sane first-run network setup.</p>
+              </div>
+              <button id="settings-add-recommended-relays" class="action" type="button">Add Recommended</button>
+            </div>
+            <ul id="settings-recommended-relays-list" class="relay-chip-list"></ul>
+          </div>
           <form id="network-relay-form" class="form-row" autocomplete="off">
             <label>Relay URL
               <input id="network-relay-url" type="text" placeholder="wss://relay.example.com">

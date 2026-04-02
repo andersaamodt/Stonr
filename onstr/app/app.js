@@ -1,4 +1,12 @@
 (function () {
+  var RECOMMENDED_RELAYS = Object.freeze([
+    'wss://relay.damus.io',
+    'wss://relay.primal.net',
+    'wss://nos.lol',
+    'wss://offchain.pub',
+    'wss://relay.snort.social'
+  ]);
+
   var state = {
     bridge: false,
     hostBootReadySent: false,
@@ -10,6 +18,7 @@
     activeProfileName: '',
     activeProfilePubkey: '',
     selectedProfileId: '',
+    recommendedRelaysNotice: '',
     relayReady: false,
     homeRelayUrl: '',
     relayRows: [],
@@ -74,6 +83,13 @@
     railOverviewTitle: document.getElementById('rail-overview-title'),
     railOverviewSummary: document.getElementById('rail-overview-summary'),
     railOpenSettings: document.getElementById('rail-open-settings'),
+    recommendedRelaysNotice: document.getElementById('recommended-relays-notice'),
+    recommendedRelaysDismiss: document.getElementById('recommended-relays-dismiss'),
+    recommendedRelaysAdd: document.getElementById('recommended-relays-add'),
+    recommendedRelaysOpenSettings: document.getElementById('recommended-relays-open-settings'),
+    recommendedRelaysList: document.getElementById('recommended-relays-list'),
+    settingsRecommendedRelaysList: document.getElementById('settings-recommended-relays-list'),
+    settingsAddRecommendedRelays: document.getElementById('settings-add-recommended-relays'),
 
     themeLink: document.getElementById('theme-link'),
     themeSelect: document.getElementById('theme-select'),
@@ -475,6 +491,78 @@
     return state.homeRelayUrl ? 'Home relay: ' + state.homeRelayUrl : 'Relay configured.';
   }
 
+  function renderRecommendedRelayLists() {
+    [els.recommendedRelaysList, els.settingsRecommendedRelaysList].forEach(function (node) {
+      if (!node) {
+        return;
+      }
+      node.innerHTML = '';
+      RECOMMENDED_RELAYS.forEach(function (relay) {
+        var item = document.createElement('li');
+        item.textContent = relayDisplayLabel(relay);
+        item.title = relay;
+        node.appendChild(item);
+      });
+    });
+  }
+
+  async function saveRecommendedRelaysNotice(value) {
+    state.recommendedRelaysNotice = String(value || '').trim();
+    if (!state.bridge) {
+      renderRecommendedRelaysNotice();
+      return;
+    }
+    await saveUiPref('recommended_relays_notice', state.recommendedRelaysNotice);
+    renderRecommendedRelaysNotice();
+  }
+
+  function renderRecommendedRelaysNotice() {
+    if (!els.recommendedRelaysNotice) {
+      return;
+    }
+    var shouldShow = state.bridge && !state.relayReady && state.recommendedRelaysNotice !== 'dismissed' && state.recommendedRelaysNotice !== 'accepted';
+    els.recommendedRelaysNotice.classList.toggle('hidden', !shouldShow);
+  }
+
+  async function addRecommendedRelays() {
+    var relaysBlob = await safeBackend('relay-list', [], 'Failed to inspect current relays');
+    var parsed = parseMaybeJson(relaysBlob);
+    var relays = parsed && parsed.relays ? parsed.relays : { home: '', read: [], write: [] };
+    var existing = {};
+
+    [relays.home].concat(relays.read || []).concat(relays.write || []).forEach(function (relay) {
+      var url = String(relay || '').trim();
+      if (url) {
+        existing[url] = true;
+      }
+    });
+
+    for (var i = 0; i < RECOMMENDED_RELAYS.length; i += 1) {
+      var relay = RECOMMENDED_RELAYS[i];
+      if (existing[relay]) {
+        continue;
+      }
+      await safeBackend('relay-add', [relay, 'both'], 'Failed to add recommended relay');
+      existing[relay] = true;
+    }
+
+    var homeRelay = String(relays.home || '').trim();
+    if (!homeRelay) {
+      await safeBackend('relay-set-home', [RECOMMENDED_RELAYS[0]], 'Failed to set recommended home relay');
+    }
+
+    await saveRecommendedRelaysNotice('accepted');
+    await runRelayList().catch(function () {
+      return;
+    });
+    if (state.activeTab === 'home') {
+      await runHomeFetch().catch(function () {
+        return;
+      });
+    }
+    toast('Recommended relays added.', 'good');
+  }
+
   function renderRailOverview() {
     if (!els.railOverviewTitle || !els.railOverviewSummary) {
       return;
@@ -507,6 +595,7 @@
       els.setupRelayStatus.textContent = relayLabel();
     }
     renderRailOverview();
+    renderRecommendedRelaysNotice();
     if (!els.setupSummary) {
       return;
     }
@@ -2139,6 +2228,36 @@
   }
 
   function bindForms() {
+    if (els.recommendedRelaysDismiss) {
+      els.recommendedRelaysDismiss.addEventListener('click', function () {
+        saveRecommendedRelaysNotice('dismissed').catch(function () {
+          return;
+        });
+      });
+    }
+
+    if (els.recommendedRelaysAdd) {
+      els.recommendedRelaysAdd.addEventListener('click', function () {
+        addRecommendedRelays().catch(function () {
+          return;
+        });
+      });
+    }
+
+    if (els.recommendedRelaysOpenSettings) {
+      els.recommendedRelaysOpenSettings.addEventListener('click', function () {
+        openSettings(true, els.recommendedRelaysOpenSettings);
+      });
+    }
+
+    if (els.settingsAddRecommendedRelays) {
+      els.settingsAddRecommendedRelays.addEventListener('click', function () {
+        addRecommendedRelays().catch(function () {
+          return;
+        });
+      });
+    }
+
     if (els.railOpenSettings) {
       els.railOpenSettings.addEventListener('click', function () {
         openSettings(false, els.railOpenSettings);
@@ -2657,6 +2776,7 @@
     bindDrawers();
     bindThemeControls();
     setComposeType('note');
+    renderRecommendedRelayLists();
     revealBootUi();
 
     document.addEventListener('click', function (event) {
@@ -2689,6 +2809,7 @@
     if (BUCKETS.indexOf(prefBucket) < 0) {
       prefBucket = 'all';
     }
+    state.recommendedRelaysNotice = String(prefs.recommended_relays_notice || '').trim();
     state.activeLibraryBucket = prefBucket;
     renderSetupPanel();
     renderRelaySelectionCard();

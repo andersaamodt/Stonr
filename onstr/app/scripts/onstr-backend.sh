@@ -151,9 +151,11 @@ case "$cmd" in
     theme=$(pref_get theme 2>/dev/null || printf 'wizard')
     active_tab=$(pref_get active_tab 2>/dev/null || printf 'home')
     library_bucket=$(pref_get library_bucket 2>/dev/null || printf 'all')
+    recommended_relays_notice=$(pref_get recommended_relays_notice 2>/dev/null || printf '')
     printf 'theme=%s\n' "$theme"
     printf 'active_tab=%s\n' "$active_tab"
     printf 'library_bucket=%s\n' "$library_bucket"
+    printf 'recommended_relays_notice=%s\n' "$recommended_relays_notice"
     ;;
   set-ui-pref)
     key=${1-}

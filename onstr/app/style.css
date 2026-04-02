@@ -573,6 +573,64 @@ h5 {
   gap: 0.86rem;
 }
 
+.persistent-notice {
+  position: fixed;
+  right: 1rem;
+  bottom: 4.2rem;
+  width: min(28rem, calc(100vw - 2rem));
+  border: 1px solid color-mix(in srgb, var(--accent-main) 40%, var(--line-strong));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 96%, black 4%);
+  box-shadow: 0 16px 34px color-mix(in srgb, black 28%, transparent);
+  padding: 0.78rem 0.86rem;
+  display: grid;
+  gap: 0.58rem;
+  z-index: 1350;
+}
+
+.persistent-notice-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.notice-close-btn {
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+  line-height: 1;
+}
+
+.notice-close-btn:hover,
+.notice-close-btn:focus-visible {
+  background: color-mix(in srgb, var(--surface-soft) 74%, transparent);
+  border-color: color-mix(in srgb, var(--accent-main) 24%, var(--line));
+  color: var(--text-main);
+}
+
+.relay-chip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.relay-chip-list li {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.18rem 0.56rem;
+  background: color-mix(in srgb, var(--surface-soft) 70%, transparent);
+  color: var(--text-main);
+  font-size: 0.76rem;
+}
+
 .stage-head {
   display: flex;
   align-items: end;
@@ -1051,6 +1109,22 @@ label {
 .drawer-section select {
   width: fit-content;
   min-width: 10.5rem;
+}
+
+.drawer-helper-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-soft) 38%, transparent);
+  padding: 0.64rem 0.7rem;
+  display: grid;
+  gap: 0.52rem;
+}
+
+.drawer-helper-card h5 {
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .settings-listbox {
