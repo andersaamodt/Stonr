@@ -63,8 +63,8 @@
     autoStartRelayChecked: false,
     suppressDependencyAnimationOnce: false,
     confirmDialogResolve: null,
+    relayPresetSelection: '',
     relayPresetBusy: {},
-    relayPresetPendingAction: {},
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -546,7 +546,7 @@
     confirmDialog: document.getElementById('confirm-dialog'),
     confirmDialogTitle: document.getElementById('confirm-dialog-title'),
     confirmDialogLead: document.getElementById('confirm-dialog-lead'),
-    confirmDialogList: document.getElementById('confirm-dialog-list'),
+    confirmDialogBody: document.getElementById('confirm-dialog-body'),
     confirmDialogCancel: document.getElementById('confirm-dialog-cancel'),
     confirmDialogApply: document.getElementById('confirm-dialog-apply'),
     diagnosticsDoctor: null
@@ -1592,51 +1592,103 @@
     title.textContent = 'Presets';
     wrap.appendChild(title);
 
-    var toggles = document.createElement('div');
-    toggles.className = 'relay-presets-grid';
-    toggles.appendChild(renderRelayPresetToggle(
-      'file_sharing',
-      'Enable file sharing',
-      'Turns file metadata + file APIs on or off.',
-      relayPresetEnabled('file_sharing')
-    ));
-    toggles.appendChild(renderRelayPresetToggle(
-      'host_others',
-      'Import and host others\' content',
-      'Turns relay mirroring from upstream relays on or off.',
-      relayPresetEnabled('host_others')
-    ));
-    toggles.appendChild(renderRelayPresetToggle(
-      'accept_publishes',
-      'Accept published content',
-      'Allows or blocks client EVENT publish writes.',
-      relayPresetEnabled('accept_publishes')
-    ));
-    toggles.appendChild(renderRelayPresetToggle(
-      'owner_only_scope',
-      'Store only owner-author site content',
-      'Switches between strict owner-only scope and general scope.',
-      relayPresetEnabled('owner_only_scope')
-    ));
-    wrap.appendChild(toggles);
+    var controls = document.createElement('div');
+    controls.className = 'relay-presets-controls';
+
+    var select = document.createElement('select');
+    select.className = 'relay-presets-select';
+    select.disabled = !state.bridge;
+    select.title = 'Choose a preset action, then apply it.';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Choose preset action...';
+    select.appendChild(placeholder);
+    relayPresetActionOptions().forEach(function (option) {
+      var entry = document.createElement('option');
+      entry.value = option.value;
+      entry.textContent = option.label;
+      select.appendChild(entry);
+    });
+    select.value = state.relayPresetSelection || '';
+    select.addEventListener('change', function () {
+      state.relayPresetSelection = select.value;
+      renderActiveSection(false);
+    });
+    controls.appendChild(select);
+
+    var apply = document.createElement('button');
+    apply.type = 'button';
+    apply.className = 'action mini';
+    apply.textContent = relayPresetAnyBusy() ? 'Applying...' : 'Apply preset';
+    apply.disabled = !state.bridge || !state.relayPresetSelection || relayPresetAnyBusy();
+    apply.addEventListener('click', function () {
+      var parsed = parseRelayPresetSelection(state.relayPresetSelection);
+      if (!parsed) {
+        return;
+      }
+      setRelayPresetEnabled(parsed.id, parsed.enabled).catch(function (error) {
+        console.error(error);
+        toast(summarizeBackendError(error, 'Failed to apply preset'), 'bad');
+      });
+    });
+    controls.appendChild(apply);
+    wrap.appendChild(controls);
+
+    var hint = document.createElement('p');
+    hint.className = 'section-note';
+    hint.textContent = 'Presets can overlap. Applying one may override values currently set by another preset.';
+    wrap.appendChild(hint);
+
+    var status = document.createElement('div');
+    status.className = 'relay-presets-status';
+    relayPresetSummaryRows().forEach(function (row) {
+      var item = document.createElement('p');
+      item.className = 'relay-presets-status-item';
+      item.textContent = row;
+      status.appendChild(item);
+    });
+    wrap.appendChild(status);
     return wrap;
   }
 
-  function renderRelayPresetToggle(id, label, helpText, checked) {
-    var pending = state.relayPresetPendingAction[id] || '';
-    return renderDesktopToggleField(
-      label,
-      checked,
-      function () {
-        return;
-      },
-      helpText,
-      !!state.relayPresetBusy[id],
-      function (nextChecked) {
-        return setRelayPresetEnabled(id, nextChecked);
-      },
-      state.relayPresetBusy[id] ? (pending === 'disable' ? 'Disabling...' : 'Enabling...') : ''
-    );
+  function relayPresetAnyBusy() {
+    return Object.keys(state.relayPresetBusy || {}).some(function (id) {
+      return !!state.relayPresetBusy[id];
+    });
+  }
+
+  function relayPresetActionOptions() {
+    return [
+      { value: 'accept_publishes:1', label: '1. Accept published content' },
+      { value: 'host_others:1', label: '2. Import and host others\' content' },
+      { value: 'file_sharing:1', label: '3. Enable file sharing' },
+      { value: 'owner_only_scope:1', label: '4. Use owner-author site scope only' },
+      { value: 'accept_publishes:0', label: '5. Block published content' },
+      { value: 'host_others:0', label: '6. Stop importing others\' content' },
+      { value: 'file_sharing:0', label: '7. Disable file sharing' },
+      { value: 'owner_only_scope:0', label: '8. Use general author scope' }
+    ];
+  }
+
+  function parseRelayPresetSelection(value) {
+    var text = String(value || '').trim();
+    if (!text || text.indexOf(':') < 0) {
+      return null;
+    }
+    var parts = text.split(':');
+    return {
+      id: parts[0],
+      enabled: parts[1] === '1'
+    };
+  }
+
+  function relayPresetSummaryRows() {
+    return [
+      'Publishes: ' + (relayPresetEnabled('accept_publishes') ? 'allowed' : 'blocked'),
+      'Importing: ' + (relayPresetEnabled('host_others') ? 'enabled' : 'disabled'),
+      'File sharing: ' + (relayPresetEnabled('file_sharing') ? 'enabled' : 'disabled'),
+      'Author scope: ' + (relayPresetEnabled('owner_only_scope') ? 'owner-only' : 'general')
+    ];
   }
 
   function relayPresetEnabled(id) {
@@ -1671,8 +1723,8 @@
     if (!(await confirmRelayPresetChange(id, nextEnabled, updates))) {
       return;
     }
+    state.relayPresetSelection = '';
     state.relayPresetBusy[id] = true;
-    state.relayPresetPendingAction[id] = nextEnabled ? 'enable' : 'disable';
     renderActiveSection(false);
     try {
       for (var index = 0; index < updates.length; index += 1) {
@@ -1687,29 +1739,39 @@
       syncFieldDependencies();
     } finally {
       delete state.relayPresetBusy[id];
-      delete state.relayPresetPendingAction[id];
     }
   }
 
   async function confirmRelayPresetChange(id, nextEnabled, updates) {
     var label = relayPresetTitle(id);
-    var heading = (nextEnabled ? 'Enable' : 'Disable') + ' preset: ' + label;
-    var lead = 'This will update the following relay settings:';
+    var heading = 'Apply preset action: ' + (nextEnabled ? label : relayPresetDisableTitle(id));
+    var lead = 'Review the setting changes before applying.';
     var lines = updates.map(function (pair) {
       var key = pair[0];
       var next = pair[1];
       return relayPresetSettingLabel(key) + ': ' + formatEnvValueForDialog(key, currentEnvValue(key)) + ' -> ' + formatEnvValueForDialog(key, next);
     });
+    var overrides = relayPresetOverrideLines(id, updates);
+    var sections = [
+      { title: 'Changes', lines: lines }
+    ];
+    if (overrides.length) {
+      sections.push({
+        title: 'Also overrides values tied to other presets',
+        lines: overrides,
+        kind: 'warn'
+      });
+    }
     return showConfirmDialog({
       title: heading,
       lead: lead,
-      lines: lines,
-      applyLabel: nextEnabled ? 'Enable preset' : 'Disable preset'
+      sections: sections,
+      applyLabel: 'Apply preset'
     });
   }
 
   function showConfirmDialog(config) {
-    if (!els.confirmDialog || !els.confirmDialogTitle || !els.confirmDialogLead || !els.confirmDialogList) {
+    if (!els.confirmDialog || !els.confirmDialogTitle || !els.confirmDialogLead || !els.confirmDialogBody) {
       return Promise.resolve(window.confirm((config && config.title) || 'Apply changes?'));
     }
     if (typeof state.confirmDialogResolve === 'function') {
@@ -1718,17 +1780,28 @@
     }
     var title = String((config && config.title) || 'Apply changes?');
     var lead = String((config && config.lead) || '');
-    var lines = Array.isArray(config && config.lines) ? config.lines : [];
+    var sections = Array.isArray(config && config.sections) ? config.sections : [];
     var applyLabel = String((config && config.applyLabel) || 'Apply changes');
     var cancelLabel = String((config && config.cancelLabel) || 'Cancel');
 
     els.confirmDialogTitle.textContent = title;
     els.confirmDialogLead.textContent = lead;
-    els.confirmDialogList.innerHTML = '';
-    lines.forEach(function (line) {
-      var li = document.createElement('li');
-      li.textContent = String(line || '');
-      els.confirmDialogList.appendChild(li);
+    els.confirmDialogBody.innerHTML = '';
+    sections.forEach(function (section) {
+      var block = document.createElement('section');
+      block.className = 'confirm-dialog-section' + (section && section.kind ? (' ' + String(section.kind)) : '');
+      var heading = document.createElement('h4');
+      heading.textContent = String((section && section.title) || 'Changes');
+      block.appendChild(heading);
+      var list = document.createElement('ul');
+      list.className = 'confirm-dialog-list';
+      (Array.isArray(section && section.lines) ? section.lines : []).forEach(function (line) {
+        var li = document.createElement('li');
+        li.textContent = String(line || '');
+        list.appendChild(li);
+      });
+      block.appendChild(list);
+      els.confirmDialogBody.appendChild(block);
     });
     if (els.confirmDialogApply) {
       els.confirmDialogApply.textContent = applyLabel;
@@ -1773,6 +1846,21 @@
         return 'Store only owner-author site content';
       default:
         return 'Relay preset';
+    }
+  }
+
+  function relayPresetDisableTitle(id) {
+    switch (id) {
+      case 'file_sharing':
+        return 'Disable file sharing';
+      case 'host_others':
+        return 'Stop importing others\' content';
+      case 'accept_publishes':
+        return 'Block published content';
+      case 'owner_only_scope':
+        return 'Use general author scope';
+      default:
+        return 'Preset action';
     }
   }
 
@@ -1848,14 +1936,62 @@
           ['ENABLE_BLOSSOM_LIST', enabled ? '1' : '0']
         ];
       case 'host_others':
-        return [['ENABLE_MIRRORING', enabled ? '1' : '0']];
+        return enabled
+          ? [
+            ['ENABLE_MIRRORING', '1'],
+            ['MIRROR_MODE', 'broad']
+          ]
+          : [['ENABLE_MIRRORING', '0']];
       case 'accept_publishes':
         return [['ENABLE_PUBLISH', enabled ? '1' : '0']];
       case 'owner_only_scope':
-        return [['MIRROR_MODE', enabled ? 'site' : 'broad']];
+        return enabled
+          ? [
+            ['MIRROR_MODE', 'site'],
+            ['ENABLE_MIRRORING', '1']
+          ]
+          : [['MIRROR_MODE', 'broad']];
       default:
         return [];
     }
+  }
+
+  function relayPresetIds() {
+    return ['accept_publishes', 'host_others', 'file_sharing', 'owner_only_scope'];
+  }
+
+  function relayPresetExpectedValue(id, enabled, envKey) {
+    var match = relayPresetUpdates(id, enabled).find(function (pair) {
+      return pair[0] === envKey;
+    });
+    if (!match) {
+      return null;
+    }
+    return match[1];
+  }
+
+  function relayPresetOverrideLines(activePresetId, updates) {
+    var warnings = [];
+    updates.forEach(function (pair) {
+      var envKey = pair[0];
+      var nextValue = pair[1];
+      relayPresetIds().forEach(function (otherId) {
+        if (otherId === activePresetId) {
+          return;
+        }
+        var expectedWhenOn = relayPresetExpectedValue(otherId, true, envKey);
+        if (expectedWhenOn === null) {
+          return;
+        }
+        var current = currentEnvValue(envKey);
+        var currentMatchesOther = normalizeEnvValueForCompare(envKey, current) === normalizeEnvValueForCompare(envKey, expectedWhenOn);
+        var nextDiffers = normalizeEnvValueForCompare(envKey, nextValue) !== normalizeEnvValueForCompare(envKey, expectedWhenOn);
+        if (relayPresetEnabled(otherId) && currentMatchesOther && nextDiffers) {
+          warnings.push(relayPresetSettingLabel(envKey) + ' currently matches "' + relayPresetTitle(otherId) + '" and will be changed.');
+        }
+      });
+    });
+    return Array.from(new Set(warnings));
   }
 
   function resolvedEnvBool(envKey) {
