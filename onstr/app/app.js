@@ -1649,6 +1649,7 @@
     bindDrawers();
     bindThemeControls();
     setComposeType('note');
+    revealBootUi();
 
     document.addEventListener('click', function (event) {
       if (!state.openMenu) {
@@ -1689,7 +1690,7 @@
       await runLibraryList(state.activeLibraryBucket).catch(function () {
         return;
       });
-      await runHomeFetch().catch(function () {
+      runHomeFetch().catch(function () {
         return;
       });
     }
