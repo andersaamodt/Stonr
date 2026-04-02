@@ -61,6 +61,7 @@
     startupServicePendingAction: '',
     autoStartRelayOnOpen: false,
     autoStartRelayChecked: false,
+    suppressDependencyAnimationOnce: false,
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -1213,6 +1214,7 @@
     if (section.custom === 'diagnostics') {
       els.sectionContent.appendChild(renderDiagnosticsSection());
     }
+    state.suppressDependencyAnimationOnce = true;
     syncFieldDependencies();
     if (resetScroll) {
       els.stage.scrollTop = 0;
@@ -3203,7 +3205,7 @@
   }
 
   function syncFieldDependencies() {
-    var suppressCollapseAnimation = !state.initialDependencySyncDone;
+    var suppressCollapseAnimation = !!state.suppressDependencyAnimationOnce || !state.initialDependencySyncDone;
     Object.keys(state.fieldNodes).forEach(function (envKey) {
       var node = state.fieldNodes[envKey];
       var unmetDependency = unmetFieldDependency(node.field);
@@ -3271,6 +3273,7 @@
       }
     });
     if (suppressCollapseAnimation) {
+      state.suppressDependencyAnimationOnce = false;
       state.initialDependencySyncDone = true;
       requestAnimationFrame(function () {
         Object.keys(state.fieldNodes).forEach(function (envKey) {
