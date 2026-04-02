@@ -62,6 +62,7 @@
     autoStartRelayOnOpen: false,
     autoStartRelayChecked: false,
     suppressDependencyAnimationOnce: false,
+    confirmDialogResolve: null,
     relayPresetBusy: {},
     relayPresetPendingAction: {},
     moderationLists: {
@@ -542,6 +543,12 @@
     doctorOutput: document.getElementById('doctor-output'),
     openStoreRoot: document.getElementById('open-store-root'),
     relayToggle: document.getElementById('relay-toggle'),
+    confirmDialog: document.getElementById('confirm-dialog'),
+    confirmDialogTitle: document.getElementById('confirm-dialog-title'),
+    confirmDialogLead: document.getElementById('confirm-dialog-lead'),
+    confirmDialogList: document.getElementById('confirm-dialog-list'),
+    confirmDialogCancel: document.getElementById('confirm-dialog-cancel'),
+    confirmDialogApply: document.getElementById('confirm-dialog-apply'),
     diagnosticsDoctor: null
   };
 
@@ -566,6 +573,23 @@
         els.settingsDrawer.classList.add('hidden');
       }
     });
+    if (els.confirmDialogCancel) {
+      els.confirmDialogCancel.addEventListener('click', function () {
+        closeConfirmDialog(false);
+      });
+    }
+    if (els.confirmDialogApply) {
+      els.confirmDialogApply.addEventListener('click', function () {
+        closeConfirmDialog(true);
+      });
+    }
+    if (els.confirmDialog) {
+      els.confirmDialog.addEventListener('click', function (event) {
+        if (event.target === els.confirmDialog) {
+          closeConfirmDialog(false);
+        }
+      });
+    }
     els.envPath.addEventListener('change', queueEnvPathSave);
     els.envPath.addEventListener('blur', queueEnvPathSave);
     els.relayToggle.addEventListener('click', function () {
@@ -635,6 +659,11 @@
 
   function handleGlobalKeydown(event) {
     if (!event || event.defaultPrevented) {
+      return;
+    }
+    if (event.key === 'Escape' && confirmDialogOpen()) {
+      event.preventDefault();
+      closeConfirmDialog(false);
       return;
     }
     if (event.key !== 'Tab' || !event.ctrlKey || event.metaKey || event.altKey) {
@@ -1558,8 +1587,8 @@
     var wrap = document.createElement('div');
     wrap.className = 'field relay-presets-field';
 
-    var title = document.createElement('p');
-    title.className = 'section-note';
+    var title = document.createElement('div');
+    title.className = 'field-group';
     title.textContent = 'Presets';
     wrap.appendChild(title);
 
@@ -1639,7 +1668,7 @@
     if (!updates.length) {
       return;
     }
-    if (!confirmRelayPresetChange(id, nextEnabled, updates)) {
+    if (!(await confirmRelayPresetChange(id, nextEnabled, updates))) {
       return;
     }
     state.relayPresetBusy[id] = true;
@@ -1662,15 +1691,74 @@
     }
   }
 
-  function confirmRelayPresetChange(id, nextEnabled, updates) {
+  async function confirmRelayPresetChange(id, nextEnabled, updates) {
     var label = relayPresetTitle(id);
-    var heading = (nextEnabled ? 'Enable' : 'Disable') + ' "' + label + '" preset?';
+    var heading = (nextEnabled ? 'Enable' : 'Disable') + ' preset: ' + label;
+    var lead = 'This will update the following relay settings:';
     var lines = updates.map(function (pair) {
       var key = pair[0];
       var next = pair[1];
-      return '• ' + relayPresetSettingLabel(key) + ': ' + formatEnvValueForDialog(key, currentEnvValue(key)) + ' -> ' + formatEnvValueForDialog(key, next);
+      return relayPresetSettingLabel(key) + ': ' + formatEnvValueForDialog(key, currentEnvValue(key)) + ' -> ' + formatEnvValueForDialog(key, next);
     });
-    return window.confirm(heading + '\n\nThis will change:\n' + lines.join('\n'));
+    return showConfirmDialog({
+      title: heading,
+      lead: lead,
+      lines: lines,
+      applyLabel: nextEnabled ? 'Enable preset' : 'Disable preset'
+    });
+  }
+
+  function showConfirmDialog(config) {
+    if (!els.confirmDialog || !els.confirmDialogTitle || !els.confirmDialogLead || !els.confirmDialogList) {
+      return Promise.resolve(window.confirm((config && config.title) || 'Apply changes?'));
+    }
+    if (typeof state.confirmDialogResolve === 'function') {
+      state.confirmDialogResolve(false);
+      state.confirmDialogResolve = null;
+    }
+    var title = String((config && config.title) || 'Apply changes?');
+    var lead = String((config && config.lead) || '');
+    var lines = Array.isArray(config && config.lines) ? config.lines : [];
+    var applyLabel = String((config && config.applyLabel) || 'Apply changes');
+    var cancelLabel = String((config && config.cancelLabel) || 'Cancel');
+
+    els.confirmDialogTitle.textContent = title;
+    els.confirmDialogLead.textContent = lead;
+    els.confirmDialogList.innerHTML = '';
+    lines.forEach(function (line) {
+      var li = document.createElement('li');
+      li.textContent = String(line || '');
+      els.confirmDialogList.appendChild(li);
+    });
+    if (els.confirmDialogApply) {
+      els.confirmDialogApply.textContent = applyLabel;
+    }
+    if (els.confirmDialogCancel) {
+      els.confirmDialogCancel.textContent = cancelLabel;
+    }
+    els.confirmDialog.classList.remove('hidden');
+    if (els.confirmDialogApply) {
+      els.confirmDialogApply.focus();
+    }
+    return new Promise(function (resolve) {
+      state.confirmDialogResolve = resolve;
+    });
+  }
+
+  function closeConfirmDialog(accepted) {
+    if (!els.confirmDialog || els.confirmDialog.classList.contains('hidden')) {
+      return;
+    }
+    els.confirmDialog.classList.add('hidden');
+    var resolver = state.confirmDialogResolve;
+    state.confirmDialogResolve = null;
+    if (typeof resolver === 'function') {
+      resolver(!!accepted);
+    }
+  }
+
+  function confirmDialogOpen() {
+    return !!(els.confirmDialog && !els.confirmDialog.classList.contains('hidden'));
   }
 
   function relayPresetTitle(id) {
