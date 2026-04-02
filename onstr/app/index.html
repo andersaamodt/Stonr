@@ -67,14 +67,19 @@
         </form>
       </section>
 
-      <div class="rail-footer">
-        <button id="open-settings" class="icon-btn" type="button" title="Open settings" aria-label="Open settings">
-          <img src="assets/settings-gear.svg" alt="">
-        </button>
-        <label class="theme-quick" for="theme-quick-select">Theme
-          <select id="theme-quick-select" aria-label="Quick theme picker"></select>
-        </label>
-      </div>
+      <footer class="rail-footer">
+        <div class="footer-bar">
+          <button id="open-settings" class="footer-icon-btn" type="button" title="Open settings" aria-label="Open settings">
+            <img src="assets/settings-gear.svg" alt="">
+          </button>
+          <div class="footer-theme-anchor">
+            <button id="theme-picker-btn" class="footer-theme-btn" type="button" title="Theme" aria-haspopup="menu" aria-expanded="false" aria-controls="theme-picker-menu">Wizard</button>
+            <div id="theme-picker-menu" class="footer-theme-menu hidden" role="menu" aria-label="Theme selector">
+              <div id="theme-picker-list" class="footer-theme-list"></div>
+            </div>
+          </div>
+        </div>
+      </footer>
     </aside>
 
     <main class="stage">
