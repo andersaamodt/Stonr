@@ -5,12 +5,17 @@
     activeTab: 'home',
     activeLibraryBucket: 'all',
     activeLibraryEventId: '',
+    selectedRelayUrl: '',
     activeProfileId: '',
     activeProfileName: '',
     activeProfilePubkey: '',
     selectedProfileId: '',
     relayReady: false,
     homeRelayUrl: '',
+    relayRows: [],
+    libraryRows: [],
+    homeEvents: [],
+    discoverEvents: [],
     themes: [],
     theme: 'wizard',
     openMenu: null,
@@ -66,6 +71,10 @@
 
     tabList: document.getElementById('primary-tabs'),
 
+    railOverviewTitle: document.getElementById('rail-overview-title'),
+    railOverviewSummary: document.getElementById('rail-overview-summary'),
+    railOpenSettings: document.getElementById('rail-open-settings'),
+
     themeLink: document.getElementById('theme-link'),
     themeSelect: document.getElementById('theme-select'),
     themePickerBtn: document.getElementById('theme-picker-btn'),
@@ -95,6 +104,7 @@
     setupOpenSettings: document.getElementById('setup-open-settings'),
     setupProfileStatus: document.getElementById('setup-profile-status'),
     setupRelayStatus: document.getElementById('setup-relay-status'),
+    homeResultsSummary: document.getElementById('home-results-summary'),
     homeFeed: document.getElementById('home-feed'),
     homeLog: document.getElementById('home-log'),
 
@@ -107,6 +117,8 @@
     discoverKinds: document.getElementById('discover-kinds'),
     discoverSince: document.getElementById('discover-since'),
     discoverUntil: document.getElementById('discover-until'),
+    discoverResultsSummary: document.getElementById('discover-results-summary'),
+    discoverFeed: document.getElementById('discover-feed'),
     relayInfoForm: document.getElementById('relay-info-form'),
     relayInfoUrl: document.getElementById('relay-info-url'),
     discoverLog: document.getElementById('discover-log'),
@@ -118,6 +130,7 @@
 
     composeType: document.getElementById('compose-type'),
     composeTypeGroup: document.getElementById('compose-type-group'),
+    composeTypeHint: document.getElementById('compose-type-hint'),
     composeForm: document.getElementById('compose-form'),
     composeNameRow: document.getElementById('compose-name-row'),
     composeName: document.getElementById('compose-name'),
@@ -160,16 +173,20 @@
     libraryFilterBtn: document.getElementById('library-filter-btn'),
     libraryFilterMenu: document.getElementById('library-filter-menu'),
     libraryListbox: document.getElementById('library-listbox'),
-    libraryEventId: document.getElementById('library-event-id'),
+    librarySelectionTitle: document.getElementById('library-selection-title'),
+    librarySelectionMeta: document.getElementById('library-selection-meta'),
+    librarySelectionPreview: document.getElementById('library-selection-preview'),
+    libraryReply: document.getElementById('library-reply'),
     libraryReindex: document.getElementById('library-reindex'),
     libraryStar: document.getElementById('library-star'),
-    libraryUnstar: document.getElementById('library-unstar'),
     librarySave: document.getElementById('library-save'),
-    libraryUnsave: document.getElementById('library-unsave'),
     libraryIngestForm: document.getElementById('library-ingest-form'),
     libraryAuthoredPath: document.getElementById('library-authored-path'),
 
     relayListbox: document.getElementById('relay-listbox'),
+    relaySelectionTitle: document.getElementById('relay-selection-title'),
+    relaySelectionMeta: document.getElementById('relay-selection-meta'),
+    relayManageSelected: document.getElementById('relay-manage-selected'),
 
     profileSummary: document.getElementById('profile-summary'),
     profileListbox: document.getElementById('profile-listbox'),
@@ -301,6 +318,133 @@
     return text.slice(0, 8) + '…' + text.slice(-6);
   }
 
+  function optionDomId(prefix, value) {
+    return (
+      prefix +
+      '-' +
+      String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64)
+    );
+  }
+
+  function setListboxActiveDescendant(listbox, optionId) {
+    if (!listbox) {
+      return;
+    }
+    if (optionId) {
+      listbox.setAttribute('aria-activedescendant', optionId);
+      return;
+    }
+    listbox.removeAttribute('aria-activedescendant');
+  }
+
+  function listboxOptions(listbox) {
+    return Array.prototype.slice.call(listbox.querySelectorAll('.rail-list-option[role="option"]'));
+  }
+
+  function relayDisplayLabel(url) {
+    return String(url || '').replace(/^wss?:\/\//, '') || 'Relay';
+  }
+
+  function relayRoleLabel(meta) {
+    var parts = [];
+    if (meta && meta.home) {
+      parts.push('Home');
+    }
+    if (meta && meta.read) {
+      parts.push('Read');
+    }
+    if (meta && meta.write) {
+      parts.push('Write');
+    }
+    return parts.join(' · ') || 'Configured relay';
+  }
+
+  function formatBucketLabel(name) {
+    return String(name || '')
+      .split(/[\s,_-]+/)
+      .filter(Boolean)
+      .map(function (part) {
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      })
+      .join(' ');
+  }
+
+  function bucketListFromRow(row) {
+    var source = row && row.bucket ? String(row.bucket) : '';
+    return source
+      .split(',')
+      .map(function (value) {
+        return String(value || '').trim();
+      })
+      .filter(Boolean);
+  }
+
+  function hasBucket(row, bucket) {
+    return bucketListFromRow(row).indexOf(bucket) >= 0;
+  }
+
+  function formatTimestamp(unix) {
+    var value = Number(unix || 0);
+    if (!value) {
+      return 'Unknown time';
+    }
+    try {
+      return new Date(value * 1000).toLocaleString([], {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      });
+    } catch (_error) {
+      return String(unix || '');
+    }
+  }
+
+  function eventKindLabel(kind) {
+    var value = Number(kind || 0);
+    var labels = {
+      1: 'Note',
+      3: 'Contacts',
+      6: 'Repost',
+      7: 'Reaction',
+      1063: 'Attachment',
+      30023: 'Long-form'
+    };
+    return labels[value] || ('Kind ' + String(kind || '?'));
+  }
+
+  function feedEmpty(node, message) {
+    node.innerHTML = '';
+    var empty = document.createElement('div');
+    empty.className = 'feed-empty';
+    empty.textContent = message;
+    node.appendChild(empty);
+  }
+
+  function currentLibraryRow() {
+    var id = String(state.activeLibraryEventId || '').trim();
+    return state.libraryRows && state.libraryRows.find(function (row) { return row.id === id; }) || null;
+  }
+
+  function eventFromCaches(eventId) {
+    var id = String(eventId || '').trim();
+    if (!id) {
+      return null;
+    }
+    var pools = [state.homeEvents || [], state.discoverEvents || []];
+    for (var i = 0; i < pools.length; i += 1) {
+      var found = pools[i].find(function (event) {
+        return String(event.id || '').trim() === id;
+      });
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
   function relayConfigured(relays) {
     if (!relays || typeof relays !== 'object') {
       return false;
@@ -331,15 +475,43 @@
     return state.homeRelayUrl ? 'Home relay: ' + state.homeRelayUrl : 'Relay configured.';
   }
 
+  function renderRailOverview() {
+    if (!els.railOverviewTitle || !els.railOverviewSummary) {
+      return;
+    }
+    if (!state.activeProfileId && !state.relayReady) {
+      els.railOverviewTitle.textContent = 'Finish setup';
+      els.railOverviewSummary.textContent = 'Create or import a profile, then add a home relay in Settings.';
+      return;
+    }
+    if (!state.activeProfileId) {
+      els.railOverviewTitle.textContent = 'Add a profile';
+      els.railOverviewSummary.textContent = relayLabel() + ' Create or import a profile before you publish or inspect follows.';
+      return;
+    }
+    if (!state.relayReady) {
+      els.railOverviewTitle.textContent = 'Add a relay';
+      els.railOverviewSummary.textContent = activeProfileLabel() + ' Add a home relay so Home, Discover, and publishing can work.';
+      return;
+    }
+    els.railOverviewTitle.textContent = 'Ready';
+    els.railOverviewSummary.textContent = activeProfileLabel() + ' · ' + relayLabel();
+  }
+
   function renderSetupPanel() {
+    var ready = !!(state.activeProfileId && state.relayReady);
     if (els.setupProfileStatus) {
       els.setupProfileStatus.textContent = activeProfileLabel();
     }
     if (els.setupRelayStatus) {
       els.setupRelayStatus.textContent = relayLabel();
     }
+    renderRailOverview();
     if (!els.setupSummary) {
       return;
+    }
+    if (els.setupPanel) {
+      els.setupPanel.classList.toggle('hidden', ready);
     }
     if (!state.activeProfileId && !state.relayReady) {
       els.setupSummary.textContent = 'Create a profile and add a relay so Home, Discover, and publish flows can do real work.';
@@ -357,7 +529,11 @@
   }
 
   function renderHomeEmptyState(message) {
-    els.homeFeed.textContent = message;
+    state.homeEvents = [];
+    if (els.homeResultsSummary) {
+      els.homeResultsSummary.textContent = message;
+    }
+    feedEmpty(els.homeFeed, message);
   }
 
   function revealBootUi() {
@@ -385,6 +561,64 @@
     }
     state.openMenu.classList.add('hidden');
     state.openMenu = null;
+  }
+
+  function bindListboxKeyboard(listbox, attrName, onSelect, onActivate) {
+    if (!listbox) {
+      return;
+    }
+    listbox.addEventListener('keydown', function (event) {
+      var key = event.key;
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' '].indexOf(key) < 0) {
+        return;
+      }
+      var options = listboxOptions(listbox);
+      if (!options.length) {
+        return;
+      }
+      var current = options.findIndex(function (node) {
+        return node.classList.contains('is-active');
+      });
+      if (current < 0) {
+        current = 0;
+      }
+
+      if (key === 'Enter' || key === ' ') {
+        event.preventDefault();
+        var selected = options[current];
+        var selectedValue = String(selected.getAttribute(attrName) || '').trim();
+        if (!selectedValue) {
+          return;
+        }
+        if (onActivate) {
+          onActivate(selectedValue);
+          return;
+        }
+        onSelect(selectedValue);
+        return;
+      }
+
+      event.preventDefault();
+      var next = current;
+      if (key === 'Home') {
+        next = 0;
+      } else if (key === 'End') {
+        next = options.length - 1;
+      } else {
+        next = current + (key === 'ArrowDown' ? 1 : -1);
+      }
+      if (next < 0) {
+        next = 0;
+      }
+      if (next >= options.length) {
+        next = options.length - 1;
+      }
+      var value = String(options[next].getAttribute(attrName) || '').trim();
+      if (!value) {
+        return;
+      }
+      onSelect(value);
+    });
   }
 
   function setActiveTab(tabId, focusTab) {
@@ -681,6 +915,12 @@
 
   function setComposeTypeUi() {
     var type = String(els.composeType.value || 'note');
+    var hints = {
+      note: 'Write a standard note, save a draft, then sign and publish when you are ready.',
+      reply: 'Reply keeps the target event id attached so you can answer a specific post cleanly.',
+      longform: 'Long-form drafts need a title, identifier, and body before you save them.',
+      'file-metadata': 'Upload a file or fill in the NIP-94 metadata fields, then publish the attachment event.'
+    };
     if (els.composeNameRow) {
       els.composeNameRow.classList.toggle('hidden', type !== 'longform');
     }
@@ -689,6 +929,9 @@
     els.composeLongformFields.classList.toggle('hidden', type !== 'longform');
     els.composeFileFields.classList.toggle('hidden', type !== 'file-metadata');
     els.composeContentRow.classList.toggle('hidden', type === 'file-metadata');
+    if (els.composeTypeHint) {
+      els.composeTypeHint.textContent = hints[type] || hints.note;
+    }
 
     var pills = els.composeTypeGroup.querySelectorAll('.type-pill');
     pills.forEach(function (pill) {
@@ -948,44 +1191,127 @@
     return out;
   }
 
+  function renderLibrarySelectionCard() {
+    if (!els.librarySelectionTitle || !els.librarySelectionMeta) {
+      return;
+    }
+    var id = String(state.activeLibraryEventId || '').trim();
+    var row = currentLibraryRow();
+    var previewEvent = eventFromCaches(id);
+    var starActive = hasBucket(row, 'starred');
+    var saveActive = hasBucket(row, 'saved');
+
+    if (!id) {
+      els.librarySelectionTitle.textContent = 'No event selected';
+      els.librarySelectionMeta.textContent = 'Choose an event from your local library to manage it here.';
+      if (els.librarySelectionPreview) {
+        els.librarySelectionPreview.textContent = '';
+        els.librarySelectionPreview.classList.add('hidden');
+      }
+      if (els.libraryReply) {
+        els.libraryReply.disabled = true;
+      }
+      if (els.libraryStar) {
+        els.libraryStar.textContent = 'Star';
+        els.libraryStar.disabled = true;
+      }
+      if (els.librarySave) {
+        els.librarySave.textContent = 'Save';
+        els.librarySave.disabled = true;
+      }
+      return;
+    }
+
+    els.librarySelectionTitle.textContent = shortId(id);
+    els.librarySelectionTitle.title = id;
+    els.librarySelectionMeta.textContent = row
+      ? bucketListFromRow(row).map(formatBucketLabel).join(' · ')
+      : 'Selected event is not in the current library filter.';
+
+    if (els.librarySelectionPreview) {
+      if (previewEvent && String(previewEvent.content || '').trim()) {
+        els.librarySelectionPreview.textContent = String(previewEvent.content || '').slice(0, 280);
+        els.librarySelectionPreview.classList.remove('hidden');
+      } else {
+        els.librarySelectionPreview.textContent = '';
+        els.librarySelectionPreview.classList.add('hidden');
+      }
+    }
+
+    if (els.libraryReply) {
+      els.libraryReply.disabled = false;
+    }
+    if (els.libraryStar) {
+      els.libraryStar.textContent = starActive ? 'Unstar' : 'Star';
+      els.libraryStar.disabled = false;
+    }
+    if (els.librarySave) {
+      els.librarySave.textContent = saveActive ? 'Unsave' : 'Save';
+      els.librarySave.disabled = false;
+    }
+  }
+
   function setLibraryActiveOption(eventId) {
     state.activeLibraryEventId = eventId || '';
-    els.libraryEventId.value = state.activeLibraryEventId;
-    var options = els.libraryListbox.querySelectorAll('.rail-list-option');
+    var options = listboxOptions(els.libraryListbox);
+    var activeOptionId = '';
     options.forEach(function (node) {
-      node.classList.toggle('is-active', node.getAttribute('data-event-id') === state.activeLibraryEventId);
-      node.setAttribute('aria-selected', node.classList.contains('is-active') ? 'true' : 'false');
+      var active = node.getAttribute('data-event-id') === state.activeLibraryEventId;
+      node.classList.toggle('is-active', active);
+      node.setAttribute('aria-selected', active ? 'true' : 'false');
+      if (active) {
+        activeOptionId = node.id;
+      }
     });
+    setListboxActiveDescendant(els.libraryListbox, activeOptionId);
+    renderLibrarySelectionCard();
   }
 
   function renderLibraryList(payload, bucket) {
     var rows = normalizeLibraryList(payload, bucket || state.activeLibraryBucket);
+    state.libraryRows = rows.slice(0, 300);
     els.libraryListbox.innerHTML = '';
-    if (!rows.length) {
+    if (!state.libraryRows.length) {
       var empty = document.createElement('div');
       empty.className = 'rail-list-option is-empty';
       empty.textContent = 'No events in this bucket.';
       els.libraryListbox.appendChild(empty);
+      setListboxActiveDescendant(els.libraryListbox, '');
       setLibraryActiveOption('');
       return;
     }
 
-    rows.slice(0, 300).forEach(function (row) {
+    state.libraryRows.forEach(function (row) {
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'rail-list-option';
       button.setAttribute('role', 'option');
       button.setAttribute('data-event-id', row.id);
+      button.id = optionDomId('library-option', row.id);
+      button.tabIndex = -1;
 
-      var left = document.createElement('span');
-      left.textContent = shortId(row.id);
-      var right = document.createElement('span');
-      right.textContent = row.bucket;
-      right.style.color = 'var(--text-muted)';
-      right.style.fontSize = '0.72rem';
+      var copy = document.createElement('span');
+      copy.className = 'rail-option-copy';
 
-      button.appendChild(left);
-      button.appendChild(right);
+      var label = document.createElement('span');
+      label.className = 'rail-option-label';
+      label.textContent = shortId(row.id);
+      label.title = row.id;
+
+      var meta = document.createElement('span');
+      meta.className = 'rail-option-meta';
+      meta.textContent = bucketListFromRow(row).map(formatBucketLabel).join(' · ');
+
+      var badge = document.createElement('span');
+      badge.className = 'rail-option-badge';
+      badge.textContent = bucketListFromRow(row).length > 1
+        ? String(bucketListFromRow(row).length) + ' buckets'
+        : formatBucketLabel(bucketListFromRow(row)[0] || 'Event');
+
+      copy.appendChild(label);
+      copy.appendChild(meta);
+      button.appendChild(copy);
+      button.appendChild(badge);
       button.addEventListener('click', function () {
         setLibraryActiveOption(row.id);
       });
@@ -993,11 +1319,11 @@
       els.libraryListbox.appendChild(button);
     });
 
-    if (state.activeLibraryEventId && rows.some(function (row) { return row.id === state.activeLibraryEventId; })) {
+    if (state.activeLibraryEventId && state.libraryRows.some(function (row) { return row.id === state.activeLibraryEventId; })) {
       setLibraryActiveOption(state.activeLibraryEventId);
       return;
     }
-    setLibraryActiveOption(rows[0].id);
+    setLibraryActiveOption(state.libraryRows[0].id);
   }
 
   function setLibraryBucket(bucket) {
@@ -1033,15 +1359,46 @@
     renderLibraryList(parsed, effective);
   }
 
-  async function runLibraryMutation(command, label) {
-    var id = String(els.libraryEventId.value || '').trim();
+  async function runLibraryMutation(command, label, eventId) {
+    var id = String(eventId || state.activeLibraryEventId || '').trim();
     if (!id) {
-      toast('Event id is required.', 'bad');
+      toast('Select an event first.', 'bad');
       return;
     }
     await safeBackend(command, [id], 'Library update failed');
     toast(label + ' complete.', 'good');
     await runLibraryList(state.activeLibraryBucket);
+  }
+
+  async function runLibraryToggle(kind) {
+    var row = currentLibraryRow();
+    var id = String(state.activeLibraryEventId || '').trim();
+    if (!id) {
+      toast('Select an event first.', 'bad');
+      return;
+    }
+    if (kind === 'star') {
+      await runLibraryMutation(hasBucket(row, 'starred') ? 'library-unstar' : 'library-star', hasBucket(row, 'starred') ? 'Unstar' : 'Star', id);
+      return;
+    }
+    if (kind === 'save') {
+      await runLibraryMutation(hasBucket(row, 'saved') ? 'library-unsave' : 'library-save', hasBucket(row, 'saved') ? 'Unsave' : 'Save', id);
+    }
+  }
+
+  function runLibraryReply() {
+    var id = String(state.activeLibraryEventId || '').trim();
+    if (!id) {
+      toast('Select an event first.', 'bad');
+      return;
+    }
+    setComposeType('reply');
+    els.composeReplyEvent.value = id;
+    els.composeContent.value = '';
+    if (!els.composeDraft.value) {
+      els.composeDraft.value = 'reply-' + id.slice(0, 12);
+    }
+    openCompose();
   }
 
   async function runLibraryIngest() {
@@ -1051,7 +1408,7 @@
       return;
     }
     var blob = await safeBackend('library-ingest-authored', [path], 'Failed to ingest authored events');
-    writeLog(els.discoverLog, 'Ingest authored events', blob);
+    writeLog(els.networkLog, 'Ingest authored events', blob);
     await runLibraryList(state.activeLibraryBucket);
   }
 
@@ -1061,10 +1418,54 @@
     await runLibraryList(state.activeLibraryBucket);
   }
 
+  function relayRowByUrl(url) {
+    return state.relayRows.find(function (row) { return row.url === url; }) || null;
+  }
+
+  function renderRelaySelectionCard() {
+    if (!els.relaySelectionTitle || !els.relaySelectionMeta) {
+      return;
+    }
+    var row = relayRowByUrl(state.selectedRelayUrl);
+    if (!row) {
+      els.relaySelectionTitle.textContent = 'No relay selected';
+      els.relaySelectionMeta.textContent = 'Add a relay in Settings to choose where Onstr reads and writes.';
+      if (els.relayManageSelected) {
+        els.relayManageSelected.disabled = true;
+      }
+      return;
+    }
+    els.relaySelectionTitle.textContent = relayDisplayLabel(row.url);
+    els.relaySelectionTitle.title = row.url;
+    els.relaySelectionMeta.textContent = relayRoleLabel(row) + ' · ' + row.url;
+    if (els.relayManageSelected) {
+      els.relayManageSelected.disabled = false;
+    }
+  }
+
+  function setSelectedRelay(url) {
+    state.selectedRelayUrl = String(url || '').trim();
+    if (state.selectedRelayUrl && els.networkRelayUrl) {
+      els.networkRelayUrl.value = state.selectedRelayUrl;
+    }
+    var activeOptionId = '';
+    listboxOptions(els.relayListbox).forEach(function (node) {
+      var active = node.getAttribute('data-relay-url') === state.selectedRelayUrl;
+      node.classList.toggle('is-active', active);
+      node.setAttribute('aria-selected', active ? 'true' : 'false');
+      if (active) {
+        activeOptionId = node.id;
+      }
+    });
+    setListboxActiveDescendant(els.relayListbox, activeOptionId);
+    renderRelaySelectionCard();
+  }
+
   function renderRelayList(payload) {
     var relays = payload && payload.relays ? payload.relays : null;
     state.relayReady = relayConfigured(relays);
     state.homeRelayUrl = relays && relays.home ? String(relays.home || '').trim() : '';
+    state.relayRows = [];
     renderSetupPanel();
     els.relayListbox.innerHTML = '';
     if (!relays || !state.relayReady) {
@@ -1072,6 +1473,8 @@
       empty.className = 'rail-list-option is-empty';
       empty.textContent = 'No relay configured yet.';
       els.relayListbox.appendChild(empty);
+      setListboxActiveDescendant(els.relayListbox, '');
+      setSelectedRelay('');
       return;
     }
 
@@ -1087,41 +1490,60 @@
       };
     });
 
-    Object.keys(all).sort().forEach(function (url) {
+    state.relayRows = Object.keys(all).sort().map(function (url) {
+      return {
+        url: url,
+        home: all[url].home,
+        read: all[url].read,
+        write: all[url].write
+      };
+    });
+
+    state.relayRows.forEach(function (relay) {
       var row = document.createElement('button');
       row.type = 'button';
       row.className = 'rail-list-option';
       row.setAttribute('role', 'option');
+      row.setAttribute('data-relay-url', relay.url);
+      row.id = optionDomId('relay-option', relay.url);
+      row.tabIndex = -1;
 
-      var left = document.createElement('span');
-      left.textContent = shortId(url);
-      left.title = url;
+      var copy = document.createElement('span');
+      copy.className = 'rail-option-copy';
 
-      var tags = [];
-      if (all[url].home) {
-        tags.push('H');
-      }
-      if (all[url].read) {
-        tags.push('R');
-      }
-      if (all[url].write) {
-        tags.push('W');
-      }
+      var label = document.createElement('span');
+      label.className = 'rail-option-label';
+      label.textContent = relayDisplayLabel(relay.url);
+      label.title = relay.url;
 
-      var right = document.createElement('span');
-      right.textContent = tags.join(' ');
-      right.style.color = 'var(--text-muted)';
-      right.style.fontSize = '0.72rem';
+      var meta = document.createElement('span');
+      meta.className = 'rail-option-meta';
+      meta.textContent = relayRoleLabel(relay);
 
-      row.appendChild(left);
-      row.appendChild(right);
+      var badge = document.createElement('span');
+      badge.className = 'rail-option-badge';
+      badge.textContent = relay.home ? 'Home' : relay.read && relay.write ? 'Read/Write' : relay.read ? 'Read' : 'Write';
+
+      copy.appendChild(label);
+      copy.appendChild(meta);
+      row.appendChild(copy);
+      row.appendChild(badge);
       row.addEventListener('click', function () {
-        els.networkRelayUrl.value = url;
+        setSelectedRelay(relay.url);
+      });
+      row.addEventListener('dblclick', function () {
+        els.networkRelayUrl.value = relay.url;
         openSettings(true, row);
       });
 
       els.relayListbox.appendChild(row);
     });
+
+    if (state.selectedRelayUrl && state.relayRows.some(function (row) { return row.url === state.selectedRelayUrl; })) {
+      setSelectedRelay(state.selectedRelayUrl);
+      return;
+    }
+    setSelectedRelay(state.relayRows[0].url);
   }
 
   function deletableByActiveProfile(event) {
@@ -1174,8 +1596,7 @@
     return wrap;
   }
 
-  function renderHomeFeed(parsed) {
-    els.homeFeed.innerHTML = '';
+  function extractEvents(parsed) {
     var events = [];
     if (Array.isArray(parsed)) {
       events = parsed;
@@ -1184,25 +1605,55 @@
     } else if (parsed && Array.isArray(parsed.results)) {
       events = parsed.results;
     }
+    return events;
+  }
+
+  function renderEventFeed(targetNode, summaryNode, parsed, emptyMessage, cacheKey) {
+    targetNode.innerHTML = '';
+    var events = extractEvents(parsed);
+    state[cacheKey] = events.slice(0, 120);
 
     if (!events.length) {
-      els.homeFeed.textContent = 'No events returned.';
+      if (summaryNode) {
+        summaryNode.textContent = emptyMessage;
+      }
+      feedEmpty(targetNode, emptyMessage);
       return;
+    }
+
+    if (summaryNode) {
+      summaryNode.textContent = 'Showing ' + String(Math.min(events.length, 120)) + ' event' + (events.length === 1 ? '' : 's') + '.';
     }
 
     events.slice(0, 120).forEach(function (event) {
       var card = document.createElement('article');
-      card.className = 'feed-item';
+      card.className = 'feed-item' + (String(event.id || '') === String(state.activeLibraryEventId || '') ? ' is-selected-event' : '');
 
       var head = document.createElement('div');
       head.className = 'feed-head';
 
+      var heading = document.createElement('div');
+      heading.className = 'feed-heading';
+
+      var title = document.createElement('div');
+      title.className = 'feed-title';
+      title.textContent = shortId(String(event.pubkey || ''));
+      title.title = String(event.pubkey || '');
+
+      var support = document.createElement('div');
+      support.className = 'feed-support';
+      support.textContent = formatTimestamp(event.created_at);
+
       var meta = document.createElement('div');
       meta.className = 'feed-meta';
       meta.textContent =
-        'kind ' + String(event.kind || '?') +
-        ' · ' + shortId(String(event.pubkey || '')) +
+        eventKindLabel(event.kind) +
         ' · ' + shortId(String(event.id || ''));
+      meta.title = String(event.id || '');
+
+      heading.appendChild(title);
+      heading.appendChild(support);
+      heading.appendChild(meta);
 
       var menuWrap = document.createElement('div');
       menuWrap.className = 'menu-wrap';
@@ -1217,7 +1668,7 @@
       menuWrap.appendChild(menuButton);
       menuWrap.appendChild(makeFeedMenu(event, menuButton));
 
-      head.appendChild(meta);
+      head.appendChild(heading);
       head.appendChild(menuWrap);
 
       var body = document.createElement('p');
@@ -1269,7 +1720,7 @@
       card.appendChild(head);
       card.appendChild(body);
       card.appendChild(actions);
-      els.homeFeed.appendChild(card);
+      targetNode.appendChild(card);
     });
   }
 
@@ -1287,10 +1738,12 @@
     var blob = await safeBackend('timeline-fetch', args, 'Failed to fetch timeline');
     var parsed = writeLog(els.homeLog, 'Timeline fetch', blob);
     if (parsed && parsed.needs_relay) {
+      state.homeEvents = [];
       renderHomeEmptyState('Add a relay in Settings to load your timeline.');
       return;
     }
-    renderHomeFeed(parsed);
+    renderEventFeed(els.homeFeed, els.homeResultsSummary, parsed, 'No events returned.', 'homeEvents');
+    renderLibrarySelectionCard();
   }
 
   async function runDiscoverSearch() {
@@ -1300,13 +1753,32 @@
       return;
     }
     var blob = await safeBackend('discover-search', [term, String(els.discoverLimit.value || '30').trim()], 'Search failed');
-    writeLog(els.discoverLog, 'Discover search', blob);
+    var parsed = writeLog(els.discoverLog, 'Discover search', blob);
+    if (parsed && parsed.needs_relay) {
+      state.discoverEvents = [];
+      feedEmpty(els.discoverFeed, 'Add a relay in Settings to search relay content.');
+      if (els.discoverResultsSummary) {
+        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
+      }
+      return;
+    }
+    renderEventFeed(els.discoverFeed, els.discoverResultsSummary, parsed, 'No discover results returned.', 'discoverEvents');
+    renderLibrarySelectionCard();
   }
 
   async function runDiscoverCount() {
     var term = String(els.discoverTerm.value || '').trim();
     var blob = await safeBackend('discover-count', [term], 'Count failed');
-    writeLog(els.discoverLog, 'Discover count', blob);
+    var parsed = writeLog(els.discoverLog, 'Discover count', blob);
+    if (parsed && parsed.needs_relay) {
+      if (els.discoverResultsSummary) {
+        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
+      }
+      return;
+    }
+    if (els.discoverResultsSummary && parsed && typeof parsed.count !== 'undefined') {
+      els.discoverResultsSummary.textContent = 'Count returned ' + String(parsed.count) + ' matching event' + (Number(parsed.count) === 1 ? '' : 's') + '.';
+    }
   }
 
   async function runDiscoverFilterSearch() {
@@ -1321,7 +1793,17 @@
       ''
     ];
     var blob = await safeBackend('timeline-fetch', args, 'Filtered search failed');
-    writeLog(els.discoverLog, 'Filtered search', blob);
+    var parsed = writeLog(els.discoverLog, 'Filtered search', blob);
+    if (parsed && parsed.needs_relay) {
+      state.discoverEvents = [];
+      feedEmpty(els.discoverFeed, 'Add a relay in Settings to search relay content.');
+      if (els.discoverResultsSummary) {
+        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
+      }
+      return;
+    }
+    renderEventFeed(els.discoverFeed, els.discoverResultsSummary, parsed, 'No discover results returned.', 'discoverEvents');
+    renderLibrarySelectionCard();
   }
 
   async function runRelayInfo() {
@@ -1335,19 +1817,26 @@
   }
 
   function renderPeopleRows(rows, label) {
-    els.peopleResults.innerHTML = '';
     if (!rows.length) {
-      els.peopleResults.textContent = 'No ' + label + ' found.';
+      feedEmpty(els.peopleResults, 'No ' + label + ' found.');
       return;
     }
+    els.peopleResults.innerHTML = '';
     rows.forEach(function (entry) {
       var row = document.createElement('div');
       row.className = 'feed-item';
-      var meta = document.createElement('div');
-      meta.className = 'feed-meta';
-      meta.textContent = shortId(entry);
-      meta.title = entry;
-      row.appendChild(meta);
+      var heading = document.createElement('div');
+      heading.className = 'feed-heading';
+      var title = document.createElement('div');
+      title.className = 'feed-title';
+      title.textContent = shortId(entry);
+      title.title = entry;
+      var support = document.createElement('div');
+      support.className = 'feed-support';
+      support.textContent = entry;
+      heading.appendChild(title);
+      heading.appendChild(support);
+      row.appendChild(heading);
       els.peopleResults.appendChild(row);
     });
   }
@@ -1466,12 +1955,17 @@
     if (!els.profileListbox) {
       return;
     }
-    var options = els.profileListbox.querySelectorAll('.rail-list-option');
+    var activeOptionId = '';
+    var options = listboxOptions(els.profileListbox);
     options.forEach(function (node) {
       var active = node.getAttribute('data-profile-id') === state.selectedProfileId;
       node.classList.toggle('is-active', active);
       node.setAttribute('aria-selected', active ? 'true' : 'false');
+      if (active) {
+        activeOptionId = node.id;
+      }
     });
+    setListboxActiveDescendant(els.profileListbox, activeOptionId);
   }
 
   function renderProfileList(parsed) {
@@ -1486,6 +1980,7 @@
       empty.className = 'rail-list-option is-empty';
       empty.textContent = 'No profiles yet.';
       els.profileListbox.appendChild(empty);
+      setListboxActiveDescendant(els.profileListbox, '');
       setSelectedProfile('');
       return;
     }
@@ -1496,18 +1991,29 @@
       button.className = 'rail-list-option';
       button.setAttribute('role', 'option');
       button.setAttribute('data-profile-id', String(profile.id || ''));
+      button.id = optionDomId('profile-option', String(profile.id || ''));
+      button.tabIndex = -1;
 
-      var left = document.createElement('span');
-      left.textContent = String(profile.name || 'Unnamed profile');
-      left.title = String(profile.pubkey || '');
+      var copy = document.createElement('span');
+      copy.className = 'rail-option-copy';
 
-      var right = document.createElement('span');
-      right.textContent = shortId(String(profile.pubkey || profile.id || ''));
-      right.style.color = 'var(--text-muted)';
-      right.style.fontSize = '0.72rem';
+      var label = document.createElement('span');
+      label.className = 'rail-option-label';
+      label.textContent = String(profile.name || 'Unnamed profile');
+      label.title = String(profile.pubkey || '');
 
-      button.appendChild(left);
-      button.appendChild(right);
+      var meta = document.createElement('span');
+      meta.className = 'rail-option-meta';
+      meta.textContent = shortId(String(profile.pubkey || profile.id || ''));
+
+      var badge = document.createElement('span');
+      badge.className = 'rail-option-badge';
+      badge.textContent = profile.id === state.activeProfileId ? 'Active' : 'Profile';
+
+      copy.appendChild(label);
+      copy.appendChild(meta);
+      button.appendChild(copy);
+      button.appendChild(badge);
       button.addEventListener('click', function () {
         setSelectedProfile(profile.id);
       });
@@ -1633,6 +2139,12 @@
   }
 
   function bindForms() {
+    if (els.railOpenSettings) {
+      els.railOpenSettings.addEventListener('click', function () {
+        openSettings(false, els.railOpenSettings);
+      });
+    }
+
     if (els.setupOpenSettings) {
       els.setupOpenSettings.addEventListener('click', function () {
         openSettings(false, els.setupOpenSettings);
@@ -1783,26 +2295,20 @@
       closeOpenMenu();
     });
 
-    els.libraryStar.addEventListener('click', function () {
-      runLibraryMutation('library-star', 'Star').catch(function () {
-        return;
+    if (els.libraryReply) {
+      els.libraryReply.addEventListener('click', function () {
+        runLibraryReply();
       });
-    });
+    }
 
-    els.libraryUnstar.addEventListener('click', function () {
-      runLibraryMutation('library-unstar', 'Unstar').catch(function () {
+    els.libraryStar.addEventListener('click', function () {
+      runLibraryToggle('star').catch(function () {
         return;
       });
     });
 
     els.librarySave.addEventListener('click', function () {
-      runLibraryMutation('library-save', 'Save').catch(function () {
-        return;
-      });
-    });
-
-    els.libraryUnsave.addEventListener('click', function () {
-      runLibraryMutation('library-unsave', 'Unsave').catch(function () {
+      runLibraryToggle('save').catch(function () {
         return;
       });
     });
@@ -1819,6 +2325,18 @@
         return;
       });
     });
+
+    if (els.relayManageSelected) {
+      els.relayManageSelected.addEventListener('click', function () {
+        var row = relayRowByUrl(state.selectedRelayUrl);
+        if (!row) {
+          toast('Select a relay first.', 'bad');
+          return;
+        }
+        els.networkRelayUrl.value = row.url;
+        openSettings(true, els.relayManageSelected);
+      });
+    }
 
     els.networkRelayAdd.addEventListener('click', function () {
       var url = String(els.networkRelayUrl.value || '').trim();
@@ -1895,6 +2413,27 @@
         return;
       });
     });
+
+    bindListboxKeyboard(els.relayListbox, 'data-relay-url', function (value) {
+      setSelectedRelay(value);
+    }, function (value) {
+      setSelectedRelay(value);
+    });
+
+    bindListboxKeyboard(els.libraryListbox, 'data-event-id', function (value) {
+      setLibraryActiveOption(value);
+    }, function (value) {
+      setLibraryActiveOption(value);
+    });
+
+    bindListboxKeyboard(els.profileListbox, 'data-profile-id', function (value) {
+      setSelectedProfile(value);
+    }, function (value) {
+      setSelectedProfile(value);
+      runProfileUse().catch(function () {
+        return;
+      });
+    });
   }
 
   function bindDrawers() {
@@ -1959,15 +2498,38 @@
     if (state.bridge) {
       return;
     }
-    var interactive = document.querySelectorAll('button, input, select, textarea');
-    interactive.forEach(function (node) {
+
+    function allowLocalUi(node) {
+      if (!node) {
+        return false;
+      }
       if (
         node === els.settingsOpen ||
         node === els.settingsOpenRelays ||
+        node === els.settingsClose ||
+        node === els.railOpenSettings ||
         node === els.setupOpenSettings ||
+        node === els.composeOpen ||
+        node === els.composeClose ||
+        node === els.deleteClose ||
         node === els.themePickerBtn ||
-        node === els.themeSelect
+        node === els.themeSelect ||
+        node === els.libraryFilterBtn
       ) {
+        return true;
+      }
+      if (node.getAttribute && node.getAttribute('role') === 'tab') {
+        return true;
+      }
+      if (node.closest && (node.closest('#theme-picker-menu') || node.closest('#library-filter-menu') || node.closest('#compose-type-group'))) {
+        return true;
+      }
+      return false;
+    }
+
+    var interactive = document.querySelectorAll('button, input, select, textarea');
+    interactive.forEach(function (node) {
+      if (allowLocalUi(node)) {
         return;
       }
       node.disabled = true;
@@ -1976,8 +2538,26 @@
     if (els.settingsOpenRelays) {
       els.settingsOpenRelays.disabled = false;
     }
+    if (els.railOpenSettings) {
+      els.railOpenSettings.disabled = false;
+    }
     if (els.setupOpenSettings) {
       els.setupOpenSettings.disabled = false;
+    }
+    if (els.settingsClose) {
+      els.settingsClose.disabled = false;
+    }
+    if (els.composeOpen) {
+      els.composeOpen.disabled = false;
+    }
+    if (els.composeClose) {
+      els.composeClose.disabled = false;
+    }
+    if (els.deleteClose) {
+      els.deleteClose.disabled = false;
+    }
+    if (els.libraryFilterBtn) {
+      els.libraryFilterBtn.disabled = false;
     }
     if (els.themePickerBtn) {
       els.themePickerBtn.disabled = false;
@@ -2038,9 +2618,11 @@
           return;
         });
       } else {
-        await runDiscoverCount().catch(function () {
-          return;
-        });
+        if (String(els.discoverTerm.value || '').trim()) {
+          await runDiscoverSearch().catch(function () {
+            return;
+          });
+        }
       }
       await runLibraryList(state.activeLibraryBucket).catch(function () {
         return;
@@ -2109,6 +2691,11 @@
     }
     state.activeLibraryBucket = prefBucket;
     renderSetupPanel();
+    renderRelaySelectionCard();
+    renderLibrarySelectionCard();
+    if (els.discoverFeed) {
+      feedEmpty(els.discoverFeed, 'Run a search to inspect relay results.');
+    }
 
     if (state.bridge) {
       await loadProfiles();
@@ -2127,6 +2714,10 @@
       }
     } else {
       renderHomeEmptyState('Open this app in the Wizardry desktop host to load backend data.');
+      if (els.discoverResultsSummary) {
+        els.discoverResultsSummary.textContent = 'Open this app in the Wizardry desktop host to run relay searches.';
+      }
+      feedEmpty(els.discoverFeed, 'Open this app in the Wizardry desktop host to run relay searches.');
     }
 
     setLibraryBucket(state.activeLibraryBucket);

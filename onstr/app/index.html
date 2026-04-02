@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Onstr</title>
   <link id="theme-link" rel="stylesheet" href="themes/wizard.css">
-  <link rel="stylesheet" href="style.css?v=onstr-20260329b">
+  <link rel="stylesheet" href="style.css?v=onstr-20260402a">
 </head>
 <body class="onstr-booting">
   <div class="boot-splash" aria-hidden="true">
@@ -19,21 +19,47 @@
     <aside class="rail" aria-label="Onstr rail">
       <div class="rail-head">
         <h1>Onstr</h1>
+        <p class="rail-head-copy">Local-first Nostr reading, discovery, and publishing.</p>
       </div>
+
+      <section class="rail-section rail-overview">
+        <div class="rail-overview-card">
+          <div class="rail-overview-copy">
+            <span class="rail-overview-label">Current Session</span>
+            <strong id="rail-overview-title">Finish setup</strong>
+            <p id="rail-overview-summary" class="support-copy">Create or import a profile, then add a relay in Settings.</p>
+          </div>
+          <button id="rail-open-settings" class="action" type="button">Open Settings</button>
+        </div>
+      </section>
 
       <section class="rail-section">
         <div class="rail-section-head">
-          <h2>Relays</h2>
+          <div>
+            <h2>Relays</h2>
+            <p class="section-support">Your read and write destinations.</p>
+          </div>
           <button id="open-settings-relays" class="icon-btn" type="button" title="Manage relays" aria-label="Manage relays">
             <img src="assets/settings-gear.svg" alt="">
           </button>
         </div>
-        <div id="relay-listbox" class="rail-listbox" role="listbox" aria-label="Relay list"></div>
+        <div id="relay-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Relay list"></div>
+        <div id="relay-selection-card" class="rail-selection-card">
+          <span class="selection-eyebrow">Selected relay</span>
+          <strong id="relay-selection-title">No relay selected</strong>
+          <p id="relay-selection-meta" class="support-copy">Add a relay in Settings to choose where Onstr reads and writes.</p>
+          <div class="flow-row compact">
+            <button id="relay-manage-selected" class="action" type="button">Manage Relay</button>
+          </div>
+        </div>
       </section>
 
       <section class="rail-section rail-library">
         <div class="rail-section-head">
-          <h2>Library</h2>
+          <div>
+            <h2>Library</h2>
+            <p class="section-support">Your local saved and reacted events.</p>
+          </div>
           <div class="filter-anchor">
             <button id="library-filter-btn" class="filter-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="library-filter-menu">
               Filter: All
@@ -63,28 +89,19 @@
           </div>
         </div>
 
-        <div id="library-listbox" class="rail-listbox" role="listbox" aria-label="Library events"></div>
+        <div id="library-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Library events"></div>
 
-        <div class="flow-row compact">
-          <label class="compact-label">Event ID
-            <input id="library-event-id" type="text" placeholder="hex event id">
-          </label>
-          <button id="library-reindex" class="action" type="button">Reindex</button>
+        <div id="library-selection-card" class="rail-selection-card">
+          <span class="selection-eyebrow">Selected event</span>
+          <strong id="library-selection-title">No event selected</strong>
+          <p id="library-selection-meta" class="support-copy">Choose an event from your local library to manage it here.</p>
+          <p id="library-selection-preview" class="selection-preview hidden"></p>
+          <div class="flow-row compact">
+            <button id="library-reply" class="action" type="button">Reply</button>
+            <button id="library-star" class="action" type="button">Star</button>
+            <button id="library-save" class="action" type="button">Save</button>
+          </div>
         </div>
-
-        <div class="flow-row compact">
-          <button id="library-star" class="action" type="button">Star</button>
-          <button id="library-unstar" class="action" type="button">Unstar</button>
-          <button id="library-save" class="action" type="button">Save</button>
-          <button id="library-unsave" class="action" type="button">Unsave</button>
-        </div>
-
-        <form id="library-ingest-form" class="flow-row compact" autocomplete="off">
-          <label class="compact-label">Authored JSONL
-            <input id="library-authored-path" type="text" placeholder="/path/to/authored.jsonl">
-          </label>
-          <button class="action" type="submit">Ingest</button>
-        </form>
       </section>
 
       <footer class="rail-footer">
@@ -133,15 +150,15 @@
         </section>
 
         <section class="stage-section">
+          <header class="inline-head">
+            <div>
+              <h3>Timeline</h3>
+              <p id="home-results-summary" class="support-copy">Load recent events from your configured relays.</p>
+            </div>
+          </header>
           <form id="home-form" class="form-row" autocomplete="off">
-            <label>Authors
-              <input id="home-authors" type="text" placeholder="pubkey1,pubkey2">
-            </label>
-            <label>Kinds
-              <input id="home-kinds" type="text" placeholder="1,7,30023">
-            </label>
             <label>Search
-              <input id="home-search" type="text" placeholder="nostr">
+              <input id="home-search" type="text" placeholder="Optional text filter">
             </label>
             <label>Limit
               <input id="home-limit" class="narrow" type="number" min="1" max="200" value="50">
@@ -150,172 +167,246 @@
               <input id="home-include-remotes" type="checkbox" checked>
               Include remotes
             </label>
-            <button class="action" type="submit">Load timeline</button>
+            <button class="action primary" type="submit">Load Timeline</button>
           </form>
+          <details class="inline-details">
+            <summary>Advanced timeline filters</summary>
+            <div class="details-body">
+              <div class="form-row">
+                <label>Authors
+                  <input id="home-authors" type="text" placeholder="Optional pubkeys">
+                </label>
+                <label>Kinds
+                  <input id="home-kinds" type="text" placeholder="Optional kinds like 1,7,30023">
+                </label>
+              </div>
+            </div>
+          </details>
         </section>
 
         <section class="stage-section">
           <div id="home-feed" class="feed" aria-live="polite"></div>
         </section>
 
-        <pre id="home-log" class="log">Waiting for timeline.</pre>
+        <details class="stage-section inline-details">
+          <summary>Timeline command log</summary>
+          <div class="details-body">
+            <pre id="home-log" class="log">Waiting for timeline.</pre>
+          </div>
+        </details>
       </section>
 
       <section id="tab-discover" class="tab-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-discover">
         <section class="stage-section">
+          <header class="inline-head">
+            <div>
+              <h3>Discover</h3>
+              <p id="discover-results-summary" class="support-copy">Search across your configured relays and inspect the results here.</p>
+            </div>
+          </header>
           <form id="discover-form" class="form-row" autocomplete="off">
             <label>Term
-              <input id="discover-term" type="text" placeholder="search relay text">
+              <input id="discover-term" type="text" placeholder="Search relay text">
             </label>
             <label>Limit
               <input id="discover-limit" class="narrow" type="number" min="1" max="200" value="30">
             </label>
-            <button class="action" type="submit">Search</button>
+            <button class="action primary" type="submit">Search</button>
             <button id="discover-count" class="action" type="button">Count</button>
           </form>
-
-          <form id="discover-filter-form" class="form-row" autocomplete="off">
-            <label>Authors
-              <input id="discover-authors" type="text" placeholder="pubkey1,pubkey2">
-            </label>
-            <label>Kinds
-              <input id="discover-kinds" type="text" placeholder="1,6,7">
-            </label>
-            <label>Since
-              <input id="discover-since" class="narrow" type="number" min="0" placeholder="unix">
-            </label>
-            <label>Until
-              <input id="discover-until" class="narrow" type="number" min="0" placeholder="unix">
-            </label>
-            <button id="discover-filter-search" class="action" type="button">Filter search</button>
-          </form>
+          <details class="inline-details">
+            <summary>Advanced relay filters</summary>
+            <div class="details-body">
+              <form id="discover-filter-form" class="form-row" autocomplete="off">
+                <label>Authors
+                  <input id="discover-authors" type="text" placeholder="Optional pubkeys">
+                </label>
+                <label>Kinds
+                  <input id="discover-kinds" type="text" placeholder="Optional kinds like 1,6,7">
+                </label>
+                <label>Since
+                  <input id="discover-since" class="narrow" type="number" min="0" placeholder="unix">
+                </label>
+                <label>Until
+                  <input id="discover-until" class="narrow" type="number" min="0" placeholder="unix">
+                </label>
+                <button id="discover-filter-search" class="action" type="button">Search With Filters</button>
+              </form>
+            </div>
+          </details>
         </section>
 
         <section class="stage-section">
-          <header class="inline-head">
-            <h3>People</h3>
-          </header>
-          <form id="people-following-form" class="form-row" autocomplete="off">
-            <button id="people-load-following" class="action" type="button">Load Following</button>
-            <label>Pubkey
-              <input id="people-pubkey" type="text" placeholder="target pubkey (hex)">
-            </label>
-            <button id="people-load-followers" class="action" type="button">Load Followers</button>
-          </form>
-          <div id="people-results" class="feed"></div>
+          <div id="discover-feed" class="feed" aria-live="polite"></div>
         </section>
 
         <section class="stage-section">
-          <form id="relay-info-form" class="form-row" autocomplete="off">
-            <label>Relay URL
-              <input id="relay-info-url" type="text" placeholder="wss://relay.example.com">
-            </label>
-            <button class="action" type="submit">NIP-11</button>
-          </form>
-          <pre id="discover-log" class="log">No discover actions yet.</pre>
+          <div class="utility-grid">
+            <section class="utility-card">
+              <header class="inline-head">
+                <div>
+                  <h3>People</h3>
+                  <p class="support-copy">Inspect follows and followers with your active profile or any target pubkey.</p>
+                </div>
+              </header>
+              <form id="people-following-form" class="form-row" autocomplete="off">
+                <button id="people-load-following" class="action" type="button">Load Following</button>
+                <label>Pubkey
+                  <input id="people-pubkey" type="text" placeholder="Target pubkey (hex)">
+                </label>
+                <button id="people-load-followers" class="action" type="button">Load Followers</button>
+              </form>
+              <div id="people-results" class="feed compact-feed"></div>
+            </section>
+
+            <section class="utility-card">
+              <header class="inline-head">
+                <div>
+                  <h3>Relay Info</h3>
+                  <p class="support-copy">Probe a relay's NIP-11 description without leaving Discover.</p>
+                </div>
+              </header>
+              <form id="relay-info-form" class="form-row" autocomplete="off">
+                <label>Relay URL
+                  <input id="relay-info-url" type="text" placeholder="wss://relay.example.com">
+                </label>
+                <button class="action" type="submit">NIP-11</button>
+              </form>
+            </section>
+          </div>
         </section>
+
+        <details class="stage-section inline-details">
+          <summary>Discover command log</summary>
+          <div class="details-body">
+            <pre id="discover-log" class="log">No discover actions yet.</pre>
+          </div>
+        </details>
       </section>
     </main>
   </div>
 
   <div id="compose-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
-    <aside id="compose-drawer" class="drawer" aria-label="Compose">
+    <aside id="compose-drawer" class="drawer compose-drawer" aria-label="Compose">
       <header class="drawer-head">
         <h3>Compose</h3>
         <button id="close-compose" class="action" type="button">Close</button>
       </header>
 
       <section class="drawer-body">
-        <form id="compose-form" class="compose-form" autocomplete="off">
-          <label>Draft Name
-            <input id="compose-draft" type="text" placeholder="draft-name">
-          </label>
-
-          <label id="compose-name-row" class="hidden">Title
-            <input id="compose-name" type="text" placeholder="Long-form title">
-          </label>
-
-          <div id="compose-type-group" class="type-pills" role="tablist" aria-label="Compose type">
-            <input id="compose-type" type="hidden" value="note">
-            <button class="type-pill is-active" type="button" role="tab" aria-selected="true" data-type="note">Note</button>
-            <button class="type-pill" type="button" role="tab" aria-selected="false" data-type="reply">Reply</button>
-            <button class="type-pill" type="button" role="tab" aria-selected="false" data-type="longform">Long-form</button>
-            <button class="type-pill" type="button" role="tab" aria-selected="false" data-type="file-metadata">Attachment</button>
-          </div>
-
-          <label id="compose-content-row">Body
-            <textarea id="compose-content" class="wide" placeholder="Write your event"></textarea>
-          </label>
-
-          <div id="compose-note-fields" class="flow-row">
-            <label>Tags
-              <input id="compose-tags" type="text" placeholder="e:eventid,p:pubkey,t:topic">
-            </label>
-          </div>
-
-          <div id="compose-reply-fields" class="flow-row hidden">
-            <label>Reply Event ID
-              <input id="compose-reply-event" type="text" placeholder="hex event id">
-            </label>
-          </div>
-
-          <div id="compose-longform-fields" class="flow-row hidden">
-            <label>Identifier
-              <input id="compose-identifier" type="text" placeholder="slug-or-key">
-            </label>
-            <label>Summary
-              <input id="compose-summary" type="text" placeholder="Optional summary">
-            </label>
-          </div>
-
-          <div id="compose-file-fields" class="flow-stack hidden">
-            <div class="flow-row">
-              <label>Upload Relay
-                <input id="compose-upload-relay" type="text" placeholder="wss://relay.example.com">
-              </label>
-              <label>File Path
-                <input id="compose-upload-file" type="text" placeholder="/path/to/file.png">
-              </label>
-              <button id="compose-upload-action" class="action" type="button">Upload</button>
-            </div>
-            <div class="flow-row">
-              <label>File URL
-                <input id="compose-file-url" type="text" placeholder="https://example/file.png">
-              </label>
-              <label>SHA-256
-                <input id="compose-file-hash" type="text" placeholder="hex sha256">
-              </label>
-              <label>MIME
-                <input id="compose-file-mime" type="text" placeholder="image/png">
-              </label>
-              <label>Size
-                <input id="compose-file-size" class="narrow" type="number" min="1" placeholder="bytes">
-              </label>
+        <section class="drawer-section">
+          <div class="section-head-row">
+            <div>
+              <h4>Draft Builder</h4>
+              <p id="compose-type-hint" class="support-copy">Write a standard note, save a draft, then sign and publish when you're ready.</p>
             </div>
           </div>
+          <form id="compose-form" class="compose-form" autocomplete="off">
+            <div class="form-row">
+              <label>Draft Name
+                <input id="compose-draft" type="text" placeholder="draft-name">
+              </label>
+              <label id="compose-name-row" class="hidden">Title
+                <input id="compose-name" type="text" placeholder="Long-form title">
+              </label>
+            </div>
 
-          <div class="flow-row">
-            <button class="action" type="submit">Create Draft</button>
-            <button id="compose-preview" class="action" type="button">Preview</button>
-            <button id="compose-list" class="action" type="button">List Drafts</button>
-          </div>
+            <div id="compose-type-group" class="type-pills" role="tablist" aria-label="Compose type">
+              <input id="compose-type" type="hidden" value="note">
+              <button class="type-pill is-active" type="button" role="tab" aria-selected="true" data-type="note">Note</button>
+              <button class="type-pill" type="button" role="tab" aria-selected="false" data-type="reply">Reply</button>
+              <button class="type-pill" type="button" role="tab" aria-selected="false" data-type="longform">Long-form</button>
+              <button class="type-pill" type="button" role="tab" aria-selected="false" data-type="file-metadata">Attachment</button>
+            </div>
 
-          <div class="flow-row">
-            <label>Password
-              <input id="compose-password" type="password" placeholder="unlock password">
+            <label id="compose-content-row" class="wide-label">Body
+              <textarea id="compose-content" class="wide" placeholder="Write your event"></textarea>
             </label>
-            <label>Profile ID
-              <input id="compose-profile-id" type="text" placeholder="optional profile id">
-            </label>
-            <label>Relays CSV
-              <input id="compose-relays" type="text" placeholder="wss://relay-a,wss://relay-b">
-            </label>
-            <button id="compose-sign" class="action" type="button">Sign</button>
-            <button id="compose-publish" class="action" type="button">Publish</button>
-          </div>
-        </form>
 
-        <pre id="compose-output" class="log">No compose actions yet.</pre>
+            <div class="form-cluster">
+              <div class="cluster-header">
+                <h5>Type-specific fields</h5>
+              </div>
+
+              <div id="compose-note-fields" class="flow-row">
+                <label>Tags
+                  <input id="compose-tags" type="text" placeholder="e:eventid,p:pubkey,t:topic">
+                </label>
+              </div>
+
+              <div id="compose-reply-fields" class="flow-row hidden">
+                <label>Reply Event ID
+                  <input id="compose-reply-event" type="text" placeholder="hex event id">
+                </label>
+              </div>
+
+              <div id="compose-longform-fields" class="flow-row hidden">
+                <label>Identifier
+                  <input id="compose-identifier" type="text" placeholder="slug-or-key">
+                </label>
+                <label>Summary
+                  <input id="compose-summary" type="text" placeholder="Optional summary">
+                </label>
+              </div>
+
+              <div id="compose-file-fields" class="flow-stack hidden">
+                <div class="flow-row">
+                  <label>Upload Relay
+                    <input id="compose-upload-relay" type="text" placeholder="wss://relay.example.com">
+                  </label>
+                  <label>File Path
+                    <input id="compose-upload-file" type="text" placeholder="/path/to/file.png">
+                  </label>
+                  <button id="compose-upload-action" class="action" type="button">Upload</button>
+                </div>
+                <div class="flow-row">
+                  <label>File URL
+                    <input id="compose-file-url" type="text" placeholder="https://example/file.png">
+                  </label>
+                  <label>SHA-256
+                    <input id="compose-file-hash" type="text" placeholder="hex sha256">
+                  </label>
+                  <label>MIME
+                    <input id="compose-file-mime" type="text" placeholder="image/png">
+                  </label>
+                  <label>Size
+                    <input id="compose-file-size" class="narrow" type="number" min="1" placeholder="bytes">
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="flow-row">
+              <button class="action primary" type="submit">Create Draft</button>
+              <button id="compose-preview" class="action" type="button">Preview</button>
+              <button id="compose-list" class="action" type="button">List Drafts</button>
+            </div>
+
+            <div class="form-cluster">
+              <div class="cluster-header">
+                <h5>Sign and publish</h5>
+                <p class="support-copy">Leave Profile ID empty to use the active profile.</p>
+              </div>
+              <div class="flow-row">
+                <label>Password
+                  <input id="compose-password" type="password" placeholder="unlock password">
+                </label>
+                <label>Profile ID
+                  <input id="compose-profile-id" type="text" placeholder="Defaults to active profile">
+                </label>
+                <label>Relays CSV
+                  <input id="compose-relays" type="text" placeholder="Optional relay override">
+                </label>
+              </div>
+              <div class="flow-row">
+                <button id="compose-sign" class="action" type="button">Sign</button>
+                <button id="compose-publish" class="action" type="button">Publish</button>
+              </div>
+            </div>
+          </form>
+
+          <pre id="compose-output" class="log">No compose actions yet.</pre>
+        </section>
       </section>
     </aside>
   </div>
@@ -357,7 +448,7 @@
   </div>
 
   <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
-    <aside id="settings-drawer" class="drawer" aria-label="Onstr settings">
+    <aside id="settings-drawer" class="drawer settings-drawer" aria-label="Onstr settings">
       <header class="drawer-head">
         <h3>Onstr Settings</h3>
         <button id="close-settings" class="action" type="button">Close</button>
@@ -372,7 +463,7 @@
             </div>
             <button id="profile-use" class="action" type="button">Use Selected</button>
           </div>
-          <div id="profile-listbox" class="rail-listbox settings-listbox" role="listbox" aria-label="Profiles"></div>
+          <div id="profile-listbox" class="rail-listbox settings-listbox" role="listbox" tabindex="0" aria-label="Profiles"></div>
           <form id="profile-create-form" class="form-row" autocomplete="off">
             <label>Profile Name
               <input id="profile-create-name" type="text" placeholder="Codex Test">
@@ -433,6 +524,22 @@
         </section>
 
         <section class="drawer-section">
+          <div class="section-head-row">
+            <div>
+              <h4>Library Maintenance</h4>
+              <p class="support-copy">Rebuild local indexes or import authored JSONL exports.</p>
+            </div>
+            <button id="library-reindex" class="action" type="button">Reindex Library</button>
+          </div>
+          <form id="library-ingest-form" class="form-row" autocomplete="off">
+            <label class="wide-label">Authored JSONL
+              <input id="library-authored-path" type="text" placeholder="/path/to/authored.jsonl">
+            </label>
+            <button class="action" type="submit">Ingest Authored Events</button>
+          </form>
+        </section>
+
+        <section class="drawer-section">
           <h4>Backend Health</h4>
           <pre id="doctor-output" class="log">No doctor run yet.</pre>
           <div class="flow-row">
@@ -454,6 +561,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=onstr-20260329b"></script>
+  <script src="app.js?v=onstr-20260402a"></script>
 </body>
 </html>

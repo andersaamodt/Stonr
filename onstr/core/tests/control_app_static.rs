@@ -29,6 +29,29 @@ fn home_surface_has_first_run_setup_panel() {
 }
 
 #[test]
+fn rail_listboxes_stay_focusable_with_selection_cards() {
+    let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
+    let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
+
+    assert!(index_html.contains("id=\"relay-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
+    assert!(index_html.contains("id=\"library-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
+    assert!(index_html.contains("id=\"relay-selection-card\""));
+    assert!(index_html.contains("id=\"library-selection-card\""));
+    assert!(app_js.contains("bindListboxKeyboard(els.relayListbox"));
+    assert!(app_js.contains("bindListboxKeyboard(els.libraryListbox"));
+}
+
+#[test]
+fn library_maintenance_lives_in_settings_not_the_rail() {
+    let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
+
+    assert!(index_html.contains("Library Maintenance"));
+    assert!(index_html.contains("id=\"library-reindex\""));
+    assert!(index_html.contains("id=\"library-ingest-form\""));
+    assert!(!index_html.contains("id=\"library-event-id\""));
+}
+
+#[test]
 fn note_compose_does_not_inject_title_shorthand_tags() {
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
