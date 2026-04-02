@@ -807,23 +807,6 @@ h4 {
   line-height: 1.35;
 }
 
-.relay-presets-field {
-  gap: 0.46rem;
-}
-
-.relay-presets-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  flex-wrap: wrap;
-}
-
-.relay-presets-select {
-  width: auto;
-  min-width: 19rem;
-  max-width: min(100%, 31rem);
-}
-
 .retention-apply-field {
   margin-top: -0.15rem;
 }
@@ -1427,81 +1410,6 @@ h4 {
 
 .drawer.hidden {
   display: none;
-}
-
-.confirm-dialog {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  justify-content: center;
-  align-content: center;
-  padding: 0.85rem;
-  background: rgba(15, 14, 13, 0.28);
-  z-index: 40;
-}
-
-.confirm-dialog.hidden {
-  display: none;
-}
-
-.confirm-dialog-panel {
-  width: min(34rem, calc(100vw - 2rem));
-  display: grid;
-  gap: 0.72rem;
-  background: linear-gradient(180deg, var(--panel), var(--panel-strong));
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 0.9rem;
-}
-
-.confirm-dialog-head {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.confirm-dialog-head h3 {
-  margin: 0;
-}
-
-.confirm-dialog-head .sub {
-  margin: 0;
-}
-
-.confirm-dialog-body {
-  display: grid;
-  gap: 0.6rem;
-}
-
-.confirm-dialog-section {
-  display: grid;
-  gap: 0.34rem;
-}
-
-.confirm-dialog-section h4 {
-  margin: 0;
-  font-size: 0.78rem;
-}
-
-.confirm-dialog-section.warn h4 {
-  color: var(--warn);
-}
-
-.confirm-dialog-list {
-  margin: 0;
-  padding: 0 0 0 1rem;
-  display: grid;
-  gap: 0.34rem;
-  font-size: 0.78rem;
-  color: var(--muted);
-  line-height: 1.35;
-}
-
-.confirm-dialog-actions {
-  display: inline-flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .drawer-panel {

@@ -62,9 +62,6 @@
     autoStartRelayOnOpen: false,
     autoStartRelayChecked: false,
     suppressDependencyAnimationOnce: false,
-    confirmDialogResolve: null,
-    relayPresetSelection: '',
-    relayPresetBusy: {},
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -105,7 +102,6 @@
         groupField('Identity'),
         textField('RELAY_NAME', 'policy.relay_name', 'Relay name', '', null, null, 'Name shown to clients when they browse or save this relay.'),
         textField('RELAY_DESCRIPTION', 'policy.relay_description', 'Relay description', '', null, null, 'Short summary shown beside the relay name in client UIs.'),
-        relayPresetsField(),
         groupField('Core Behavior'),
         boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', 'Clients can read stored events.', null, 'Allow clients to read stored events with REQ filters.'),
         boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', 'Clients can publish events.', null, 'Allow clients to publish new events to this relay.'),
@@ -543,12 +539,6 @@
     doctorOutput: document.getElementById('doctor-output'),
     openStoreRoot: document.getElementById('open-store-root'),
     relayToggle: document.getElementById('relay-toggle'),
-    confirmDialog: document.getElementById('confirm-dialog'),
-    confirmDialogTitle: document.getElementById('confirm-dialog-title'),
-    confirmDialogLead: document.getElementById('confirm-dialog-lead'),
-    confirmDialogBody: document.getElementById('confirm-dialog-body'),
-    confirmDialogCancel: document.getElementById('confirm-dialog-cancel'),
-    confirmDialogApply: document.getElementById('confirm-dialog-apply'),
     diagnosticsDoctor: null
   };
 
@@ -573,23 +563,6 @@
         els.settingsDrawer.classList.add('hidden');
       }
     });
-    if (els.confirmDialogCancel) {
-      els.confirmDialogCancel.addEventListener('click', function () {
-        closeConfirmDialog(false);
-      });
-    }
-    if (els.confirmDialogApply) {
-      els.confirmDialogApply.addEventListener('click', function () {
-        closeConfirmDialog(true);
-      });
-    }
-    if (els.confirmDialog) {
-      els.confirmDialog.addEventListener('click', function (event) {
-        if (event.target === els.confirmDialog) {
-          closeConfirmDialog(false);
-        }
-      });
-    }
     els.envPath.addEventListener('change', queueEnvPathSave);
     els.envPath.addEventListener('blur', queueEnvPathSave);
     els.relayToggle.addEventListener('click', function () {
@@ -659,11 +632,6 @@
 
   function handleGlobalKeydown(event) {
     if (!event || event.defaultPrevented) {
-      return;
-    }
-    if (event.key === 'Escape' && confirmDialogOpen()) {
-      event.preventDefault();
-      closeConfirmDialog(false);
       return;
     }
     if (event.key !== 'Tab' || !event.ctrlKey || event.metaKey || event.altKey) {
@@ -1274,9 +1242,6 @@
     if (field.type === 'group') {
       return renderGroupField(field);
     }
-    if (field.type === 'relay-presets') {
-      return renderRelayPresetsField();
-    }
     if (field.type === 'note') {
       return renderNoteField(field);
     }
@@ -1581,393 +1546,6 @@
     note.className = 'section-note';
     note.textContent = field.text;
     return note;
-  }
-
-  function renderRelayPresetsField() {
-    var wrap = document.createElement('div');
-    wrap.className = 'field relay-presets-field';
-
-    var title = document.createElement('div');
-    title.className = 'field-group';
-    title.textContent = 'Presets';
-    wrap.appendChild(title);
-
-    var controls = document.createElement('div');
-    controls.className = 'relay-presets-controls';
-
-    var select = document.createElement('select');
-    select.className = 'relay-presets-select';
-    select.disabled = !state.bridge;
-    select.title = 'Choose a preset action, then apply it.';
-    var placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'Choose preset action...';
-    select.appendChild(placeholder);
-    relayPresetActionOptions().forEach(function (option) {
-      var entry = document.createElement('option');
-      entry.value = option.value;
-      entry.textContent = option.label;
-      select.appendChild(entry);
-    });
-    select.value = state.relayPresetSelection || '';
-    select.addEventListener('change', function () {
-      state.relayPresetSelection = select.value;
-      renderActiveSection(false);
-    });
-    controls.appendChild(select);
-
-    var apply = document.createElement('button');
-    apply.type = 'button';
-    apply.className = 'action mini';
-    apply.textContent = relayPresetAnyBusy() ? 'Applying...' : 'Apply preset';
-    apply.disabled = !state.bridge || !state.relayPresetSelection || relayPresetAnyBusy();
-    apply.addEventListener('click', function () {
-      var parsed = parseRelayPresetSelection(state.relayPresetSelection);
-      if (!parsed) {
-        return;
-      }
-      setRelayPresetEnabled(parsed.id, parsed.enabled).catch(function (error) {
-        console.error(error);
-        toast(summarizeBackendError(error, 'Failed to apply preset'), 'bad');
-      });
-    });
-    controls.appendChild(apply);
-    wrap.appendChild(controls);
-    return wrap;
-  }
-
-  function relayPresetAnyBusy() {
-    return Object.keys(state.relayPresetBusy || {}).some(function (id) {
-      return !!state.relayPresetBusy[id];
-    });
-  }
-
-  function relayPresetActionOptions() {
-    return [
-      { value: 'accept_publishes:1', label: '1. Accept published content' },
-      { value: 'host_others:1', label: '2. Import and host others\' content' },
-      { value: 'file_sharing:1', label: '3. Enable file sharing' },
-      { value: 'owner_only_scope:1', label: '4. Use owner-author site scope only' },
-      { value: 'accept_publishes:0', label: '5. Block published content' },
-      { value: 'host_others:0', label: '6. Stop importing others\' content' },
-      { value: 'file_sharing:0', label: '7. Disable file sharing' },
-      { value: 'owner_only_scope:0', label: '8. Use general author scope' }
-    ];
-  }
-
-  function parseRelayPresetSelection(value) {
-    var text = String(value || '').trim();
-    if (!text || text.indexOf(':') < 0) {
-      return null;
-    }
-    var parts = text.split(':');
-    return {
-      id: parts[0],
-      enabled: parts[1] === '1'
-    };
-  }
-
-  function relayPresetEnabled(id) {
-    switch (id) {
-      case 'file_sharing':
-        return !!(
-          resolvedEnvBool('ENABLE_FILE_METADATA') &&
-          resolvedEnvBool('ENABLE_FILE_API') &&
-          resolvedEnvBool('ENABLE_BLOSSOM')
-        );
-      case 'host_others':
-        return resolvedEnvBool('ENABLE_MIRRORING');
-      case 'accept_publishes':
-        return resolvedEnvBool('ENABLE_PUBLISH');
-      case 'owner_only_scope':
-        return String(resolvedEnvString('MIRROR_MODE') || 'broad').toLowerCase() === 'site';
-      default:
-        return false;
-    }
-  }
-
-  async function setRelayPresetEnabled(id, nextEnabled) {
-    if (!state.bridge) {
-      return;
-    }
-    var updates = relayPresetUpdates(id, nextEnabled).filter(function (pair) {
-      return normalizeEnvValueForCompare(pair[0], pair[1]) !== normalizeEnvValueForCompare(pair[0], currentEnvValue(pair[0]));
-    });
-    if (!updates.length) {
-      return;
-    }
-    if (!(await confirmRelayPresetChange(id, nextEnabled, updates))) {
-      return;
-    }
-    state.relayPresetSelection = '';
-    state.relayPresetBusy[id] = true;
-    renderActiveSection(false);
-    try {
-      for (var index = 0; index < updates.length; index += 1) {
-        var pair = updates[index];
-        await backend('save-env', [state.envPath, pair[0], pair[1]]);
-        if (!state.envValues || typeof state.envValues !== 'object') {
-          state.envValues = {};
-        }
-        state.envValues[pair[0]] = pair[1];
-      }
-      await loadConfigForBootFrame(state.configEditSeq);
-      syncFieldDependencies();
-    } finally {
-      delete state.relayPresetBusy[id];
-    }
-  }
-
-  async function confirmRelayPresetChange(id, nextEnabled, updates) {
-    var label = relayPresetTitle(id);
-    var heading = 'Apply preset action: ' + (nextEnabled ? label : relayPresetDisableTitle(id));
-    var lead = 'Review the setting changes before applying.';
-    var lines = updates.map(function (pair) {
-      var key = pair[0];
-      var next = pair[1];
-      return relayPresetSettingLabel(key) + ': ' + formatEnvValueForDialog(key, currentEnvValue(key)) + ' -> ' + formatEnvValueForDialog(key, next);
-    });
-    var overrides = relayPresetOverrideLines(id, updates);
-    var sections = [
-      { title: 'Changes', lines: lines }
-    ];
-    if (overrides.length) {
-      sections.push({
-        title: 'Also overrides values tied to other presets',
-        lines: overrides,
-        kind: 'warn'
-      });
-    }
-    return showConfirmDialog({
-      title: heading,
-      lead: lead,
-      sections: sections,
-      applyLabel: 'Apply preset'
-    });
-  }
-
-  function showConfirmDialog(config) {
-    if (!els.confirmDialog || !els.confirmDialogTitle || !els.confirmDialogLead || !els.confirmDialogBody) {
-      return Promise.resolve(window.confirm((config && config.title) || 'Apply changes?'));
-    }
-    if (typeof state.confirmDialogResolve === 'function') {
-      state.confirmDialogResolve(false);
-      state.confirmDialogResolve = null;
-    }
-    var title = String((config && config.title) || 'Apply changes?');
-    var lead = String((config && config.lead) || '');
-    var sections = Array.isArray(config && config.sections) ? config.sections : [];
-    var applyLabel = String((config && config.applyLabel) || 'Apply changes');
-    var cancelLabel = String((config && config.cancelLabel) || 'Cancel');
-
-    els.confirmDialogTitle.textContent = title;
-    els.confirmDialogLead.textContent = lead;
-    els.confirmDialogBody.innerHTML = '';
-    sections.forEach(function (section) {
-      var block = document.createElement('section');
-      block.className = 'confirm-dialog-section' + (section && section.kind ? (' ' + String(section.kind)) : '');
-      var heading = document.createElement('h4');
-      heading.textContent = String((section && section.title) || 'Changes');
-      block.appendChild(heading);
-      var list = document.createElement('ul');
-      list.className = 'confirm-dialog-list';
-      (Array.isArray(section && section.lines) ? section.lines : []).forEach(function (line) {
-        var li = document.createElement('li');
-        li.textContent = String(line || '');
-        list.appendChild(li);
-      });
-      block.appendChild(list);
-      els.confirmDialogBody.appendChild(block);
-    });
-    if (els.confirmDialogApply) {
-      els.confirmDialogApply.textContent = applyLabel;
-    }
-    if (els.confirmDialogCancel) {
-      els.confirmDialogCancel.textContent = cancelLabel;
-    }
-    els.confirmDialog.classList.remove('hidden');
-    if (els.confirmDialogApply) {
-      els.confirmDialogApply.focus();
-    }
-    return new Promise(function (resolve) {
-      state.confirmDialogResolve = resolve;
-    });
-  }
-
-  function closeConfirmDialog(accepted) {
-    if (!els.confirmDialog || els.confirmDialog.classList.contains('hidden')) {
-      return;
-    }
-    els.confirmDialog.classList.add('hidden');
-    var resolver = state.confirmDialogResolve;
-    state.confirmDialogResolve = null;
-    if (typeof resolver === 'function') {
-      resolver(!!accepted);
-    }
-  }
-
-  function confirmDialogOpen() {
-    return !!(els.confirmDialog && !els.confirmDialog.classList.contains('hidden'));
-  }
-
-  function relayPresetTitle(id) {
-    switch (id) {
-      case 'file_sharing':
-        return 'Enable file sharing';
-      case 'host_others':
-        return 'Import and host others\' content';
-      case 'accept_publishes':
-        return 'Accept published content';
-      case 'owner_only_scope':
-        return 'Store only owner-author site content';
-      default:
-        return 'Relay preset';
-    }
-  }
-
-  function relayPresetDisableTitle(id) {
-    switch (id) {
-      case 'file_sharing':
-        return 'Disable file sharing';
-      case 'host_others':
-        return 'Stop importing others\' content';
-      case 'accept_publishes':
-        return 'Block published content';
-      case 'owner_only_scope':
-        return 'Use general author scope';
-      default:
-        return 'Preset action';
-    }
-  }
-
-  function relayPresetSettingLabel(envKey) {
-    switch (envKey) {
-      case 'ENABLE_FILE_METADATA':
-        return 'Store file metadata records';
-      case 'ENABLE_FILE_API':
-        return 'Compatibility file API';
-      case 'ENABLE_BLOSSOM':
-        return 'Blossom API';
-      case 'ENABLE_BLOSSOM_LIST':
-        return 'Blossom owner blob listing';
-      case 'ENABLE_MIRRORING':
-        return 'Import from relays';
-      case 'ENABLE_PUBLISH':
-        return 'Accept published events';
-      case 'MIRROR_MODE':
-        return 'Pinned author scope mode';
-      default:
-        return envKey;
-    }
-  }
-
-  function currentEnvValue(envKey) {
-    var raw = rawEnvValueByKey(envKey);
-    if (typeof raw !== 'undefined') {
-      return String(raw);
-    }
-    var field = fieldByEnvKey(envKey);
-    if (!field) {
-      return '';
-    }
-    var value = resolvedFieldValue(field);
-    if (value === null || typeof value === 'undefined') {
-      return '';
-    }
-    if (typeof value === 'boolean') {
-      return value ? '1' : '0';
-    }
-    return String(value);
-  }
-
-  function normalizeEnvValueForCompare(envKey, value) {
-    var text = String(value || '').trim().toLowerCase();
-    if (envKey === 'MIRROR_MODE') {
-      return text || 'broad';
-    }
-    if (text === '1' || text === 'true' || text === 'yes' || text === 'on') {
-      return '1';
-    }
-    if (text === '0' || text === 'false' || text === 'no' || text === 'off' || text === '') {
-      return '0';
-    }
-    return text;
-  }
-
-  function formatEnvValueForDialog(envKey, value) {
-    var normalized = normalizeEnvValueForCompare(envKey, value);
-    if (envKey === 'MIRROR_MODE') {
-      return normalized === 'site' ? 'owner-only scope' : 'general scope';
-    }
-    return normalized === '1' ? 'on' : 'off';
-  }
-
-  function relayPresetUpdates(id, enabled) {
-    switch (id) {
-      case 'file_sharing':
-        return [
-          ['ENABLE_FILE_METADATA', enabled ? '1' : '0'],
-          ['ENABLE_FILE_API', enabled ? '1' : '0'],
-          ['ENABLE_BLOSSOM', enabled ? '1' : '0'],
-          ['ENABLE_BLOSSOM_LIST', enabled ? '1' : '0']
-        ];
-      case 'host_others':
-        return enabled
-          ? [
-            ['ENABLE_MIRRORING', '1'],
-            ['MIRROR_MODE', 'broad']
-          ]
-          : [['ENABLE_MIRRORING', '0']];
-      case 'accept_publishes':
-        return [['ENABLE_PUBLISH', enabled ? '1' : '0']];
-      case 'owner_only_scope':
-        return enabled
-          ? [
-            ['MIRROR_MODE', 'site'],
-            ['ENABLE_MIRRORING', '1']
-          ]
-          : [['MIRROR_MODE', 'broad']];
-      default:
-        return [];
-    }
-  }
-
-  function relayPresetIds() {
-    return ['accept_publishes', 'host_others', 'file_sharing', 'owner_only_scope'];
-  }
-
-  function relayPresetExpectedValue(id, enabled, envKey) {
-    var match = relayPresetUpdates(id, enabled).find(function (pair) {
-      return pair[0] === envKey;
-    });
-    if (!match) {
-      return null;
-    }
-    return match[1];
-  }
-
-  function relayPresetOverrideLines(activePresetId, updates) {
-    var warnings = [];
-    updates.forEach(function (pair) {
-      var envKey = pair[0];
-      var nextValue = pair[1];
-      relayPresetIds().forEach(function (otherId) {
-        if (otherId === activePresetId) {
-          return;
-        }
-        var expectedWhenOn = relayPresetExpectedValue(otherId, true, envKey);
-        if (expectedWhenOn === null) {
-          return;
-        }
-        var current = currentEnvValue(envKey);
-        var currentMatchesOther = normalizeEnvValueForCompare(envKey, current) === normalizeEnvValueForCompare(envKey, expectedWhenOn);
-        var nextDiffers = normalizeEnvValueForCompare(envKey, nextValue) !== normalizeEnvValueForCompare(envKey, expectedWhenOn);
-        if (relayPresetEnabled(otherId) && currentMatchesOther && nextDiffers) {
-          warnings.push(relayPresetSettingLabel(envKey) + ' currently matches "' + relayPresetTitle(otherId) + '" and will be changed.');
-        }
-      });
-    });
-    return Array.from(new Set(warnings));
   }
 
   function resolvedEnvBool(envKey) {
@@ -3494,10 +3072,6 @@
 
   function retentionApplyField() {
     return { type: 'retention-apply' };
-  }
-
-  function relayPresetsField() {
-    return { type: 'relay-presets' };
   }
 
   function withFieldUi(field, options) {
