@@ -1055,17 +1055,59 @@
   function renderSectionList() {
     els.sectionList.innerHTML = '';
     sections.forEach(function (section) {
+      if (section.id === 'general') {
+        var divider = document.createElement('div');
+        divider.className = 'section-gap-divider';
+        divider.setAttribute('aria-hidden', 'true');
+        els.sectionList.appendChild(divider);
+      }
       var button = document.createElement('button');
       button.type = 'button';
-      button.className = 'section-tab' + (section.id === 'events' ? ' events-tab' : '') + (state.activeSection === section.id ? ' active' : '');
+      button.className = 'section-tab' + (state.activeSection === section.id ? ' active' : '');
       button.setAttribute('role', 'option');
       button.setAttribute('aria-selected', state.activeSection === section.id ? 'true' : 'false');
-      button.textContent = section.label;
+      button.setAttribute('aria-label', section.label);
+      var icon = document.createElement('span');
+      icon.className = 'section-tab-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = sectionIconSvg(section.id);
+      var label = document.createElement('span');
+      label.className = 'section-tab-label';
+      label.textContent = section.label;
+      button.appendChild(icon);
+      button.appendChild(label);
       button.addEventListener('click', function () {
         setActiveSection(section.id, true);
       });
       els.sectionList.appendChild(button);
     });
+  }
+
+  function sectionIconSvg(sectionId) {
+    switch (sectionId) {
+      case 'events':
+        return '<svg viewBox="0 0 16 16" fill="none"><path d="M2.5 8h11M8 2.5v11M4.1 4.1l7.8 7.8M11.9 4.1l-7.8 7.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+      case 'general':
+        return '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.2"/><path d="M8 2.2v1.5M8 12.3v1.5M2.2 8h1.5M12.3 8h1.5M3.8 3.8l1.1 1.1M11.1 11.1l1.1 1.1M12.2 3.8l-1.1 1.1M4.9 11.1l-1.1 1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+      case 'relay':
+        return '<svg viewBox="0 0 16 16" fill="none"><path d="M8 2.8v10.4M4.2 5.1l3.8-2.3 3.8 2.3v5.8L8 13.2l-3.8-2.3V5.1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+      case 'policies':
+        return '<svg viewBox="0 0 16 16" fill="none"><path d="M4 2.8h6l2 2v8.4H4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 2.8v2h2M6 8h4M6 10.5h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+      case 'network':
+        return '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.2"/><path d="M8 2.5c2.3 0 4.2 1.9 4.2 4.2M8 13.5c-2.3 0-4.2-1.9-4.2-4.2M2.5 8c0-2.3 1.9-4.2 4.2-4.2M13.5 8c0 2.3-1.9 4.2-4.2 4.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+      case 'auth':
+        return '<svg viewBox="0 0 16 16" fill="none"><rect x="3.2" y="7" width="9.6" height="6.3" rx="1.2" stroke="currentColor" stroke-width="1.2"/><path d="M5.3 7V5.7A2.7 2.7 0 0 1 8 3a2.7 2.7 0 0 1 2.7 2.7V7" stroke="currentColor" stroke-width="1.2"/></svg>';
+      case 'files':
+        return '<svg viewBox="0 0 16 16" fill="none"><path d="M2.8 4.5h3l1.2 1.4h6.2v6.8H2.8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2.8 5.9V3.5h3.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+      case 'limits':
+        return '<svg viewBox="0 0 16 16" fill="none"><path d="M8 2.8v10.4M3.6 8h8.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="2.2" stroke="currentColor" stroke-width="1.2"/></svg>';
+      case 'moderation':
+        return '<svg viewBox="0 0 16 16" fill="none"><path d="M8 2.7l4.4 1.6v3.4c0 2.5-1.5 4.1-4.4 5.6-2.9-1.5-4.4-3.1-4.4-5.6V4.3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6.4 8l1.1 1.1L10 6.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      case 'diagnostics':
+        return '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.2"/><path d="M8 5.2v3.4M8 10.7h.01" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+      default:
+        return '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="4.8" stroke="currentColor" stroke-width="1.2"/></svg>';
+    }
   }
 
   function parseRailWidth(value) {
