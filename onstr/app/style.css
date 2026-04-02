@@ -132,11 +132,16 @@ button:focus-visible {
 .rail {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 0.7rem;
+  gap: 0.82rem;
   min-height: 0;
   padding: 0.8rem;
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 84%, transparent);
+}
+
+.rail-head {
+  padding-top: max(0.68rem, env(safe-area-inset-top));
+  padding-left: 0.08rem;
 }
 
 .rail-head h1,
@@ -148,12 +153,13 @@ h4 {
 }
 
 .rail-head h1 {
-  font-size: 1.22rem;
+  font-size: 1.28rem;
+  font-weight: 680;
 }
 
 .rail-section {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.5rem;
   min-height: 0;
 }
 
@@ -177,24 +183,25 @@ h4 {
 }
 
 .rail-listbox {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-soft) 54%, transparent);
-  padding: 0.2rem;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 68%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--surface-soft));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface-soft) 56%, transparent);
+  padding: 0.22rem;
   min-height: 4.2rem;
   max-height: 12rem;
   overflow: auto;
   display: grid;
-  gap: 0.2rem;
+  gap: 0.16rem;
 }
 
 .rail-list-option {
-  border: 0;
-  border-radius: 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-main);
   text-align: left;
-  padding: 0.3rem 0.44rem;
+  padding: 0.3rem 0.42rem;
   font-size: 0.82rem;
   min-height: 1.65rem;
   display: flex;
@@ -205,39 +212,108 @@ h4 {
 
 .rail-list-option:hover,
 .rail-list-option:focus-visible {
+  border-color: color-mix(in srgb, var(--line-strong) 68%, var(--line));
   background: color-mix(in srgb, var(--surface) 80%, transparent);
 }
 
 .rail-list-option.is-active {
-  background: color-mix(in srgb, var(--accent-main) 28%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent-main) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent-main) 24%, var(--surface));
 }
 
-.bucket-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
+.rail-list-option > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bucket-btn {
+.rail-list-option.is-empty {
+  color: var(--text-muted);
+  border: 1px dashed var(--line);
+  justify-content: flex-start;
+  min-height: 2rem;
+  padding: 0.42rem 0.48rem;
+}
+
+.rail-list-option.is-empty:hover,
+.rail-list-option.is-empty:focus-visible {
+  border-color: var(--line);
+  background: transparent;
+}
+
+.filter-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.filter-btn {
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  min-height: 1.65rem;
+  background: color-mix(in srgb, var(--surface-soft) 84%, transparent);
+  color: var(--text-main);
+  min-height: 1.78rem;
   padding: 0.2rem 0.62rem;
-  font-size: 0.76rem;
+  font-size: 0.78rem;
+  line-height: 1;
 }
 
-.bucket-btn:hover,
-.bucket-btn:focus-visible {
-  color: var(--text-main);
-  border-color: var(--line-strong);
-}
-
-.bucket-btn.is-active {
-  color: var(--text-main);
+.filter-btn:hover,
+.filter-btn:focus-visible,
+.filter-btn.active {
   border-color: color-mix(in srgb, var(--accent-main) 52%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent-main) 14%, transparent);
+}
+
+.filter-menu {
+  position: absolute;
+  top: calc(100% + 0.28rem);
+  right: 0;
+  min-width: 10.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.26);
+  padding: 0.25rem;
+  display: grid;
+  gap: 0.1rem;
+  z-index: 18;
+}
+
+.filter-menu.hidden {
+  display: none;
+}
+
+.library-filter-item {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-main);
+  text-align: left;
+  min-height: 1.7rem;
+  padding: 0.26rem 0.42rem;
+  font-size: 0.77rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.library-filter-item:hover,
+.library-filter-item:focus-visible {
+  background: color-mix(in srgb, var(--surface-soft) 84%, transparent);
+}
+
+.library-filter-item.active {
   background: color-mix(in srgb, var(--accent-main) 16%, transparent);
+}
+
+.filter-check {
+  opacity: 0;
+}
+
+.library-filter-item.active .filter-check {
+  opacity: 1;
 }
 
 .rail-footer {
@@ -375,7 +451,7 @@ h4 {
 .stage {
   min-height: 0;
   overflow: auto;
-  padding: 0.82rem 1rem 1.08rem;
+  padding: 0.92rem 1rem 1.08rem;
   background: color-mix(in srgb, var(--stage) 90%, transparent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -482,6 +558,25 @@ h4 {
 .flow-stack {
   display: grid;
   gap: 0.5rem;
+}
+
+.rail-library .flow-row.compact {
+  gap: 0.38rem;
+}
+
+.rail-library .flow-row.compact .action {
+  min-height: 1.68rem;
+  padding: 0.14rem 0.62rem;
+  font-size: 0.8rem;
+}
+
+.rail-library .compact-label {
+  min-width: 0;
+  flex: 1 1 11rem;
+}
+
+.rail-library .compact-label input {
+  width: 100%;
 }
 
 .compose-form {

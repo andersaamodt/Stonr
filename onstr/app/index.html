@@ -34,22 +34,42 @@
       <section class="rail-section rail-library">
         <div class="rail-section-head">
           <h2>Library</h2>
-        </div>
-        <div id="library-bucket-nav" class="bucket-row" role="tablist" aria-label="Library buckets">
-          <button id="bucket-all" class="bucket-btn is-active" type="button" role="tab" aria-selected="true" data-bucket="all">All</button>
-          <button id="bucket-liked" class="bucket-btn" type="button" role="tab" aria-selected="false" data-bucket="liked">Liked</button>
-          <button id="bucket-commented" class="bucket-btn" type="button" role="tab" aria-selected="false" data-bucket="commented">Commented</button>
-          <button id="bucket-starred" class="bucket-btn" type="button" role="tab" aria-selected="false" data-bucket="starred">Starred</button>
-          <button id="bucket-saved" class="bucket-btn" type="button" role="tab" aria-selected="false" data-bucket="saved">Saved</button>
+          <div class="filter-anchor">
+            <button id="library-filter-btn" class="filter-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="library-filter-menu">
+              Filter: All
+            </button>
+            <div id="library-filter-menu" class="filter-menu hidden" role="menu" aria-label="Library filters">
+              <button class="library-filter-item active" type="button" role="menuitemradio" aria-checked="true" data-bucket="all">
+                <span>All</span>
+                <span class="filter-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="library-filter-item" type="button" role="menuitemradio" aria-checked="false" data-bucket="liked">
+                <span>Liked</span>
+                <span class="filter-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="library-filter-item" type="button" role="menuitemradio" aria-checked="false" data-bucket="commented">
+                <span>Commented</span>
+                <span class="filter-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="library-filter-item" type="button" role="menuitemradio" aria-checked="false" data-bucket="starred">
+                <span>Starred</span>
+                <span class="filter-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="library-filter-item" type="button" role="menuitemradio" aria-checked="false" data-bucket="saved">
+                <span>Saved</span>
+                <span class="filter-check" aria-hidden="true">✓</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <div id="library-listbox" class="rail-listbox" role="listbox" aria-label="Library events"></div>
 
         <div class="flow-row compact">
-          <button id="library-reindex" class="action" type="button">Reindex</button>
           <label class="compact-label">Event ID
             <input id="library-event-id" type="text" placeholder="hex event id">
           </label>
+          <button id="library-reindex" class="action" type="button">Reindex</button>
         </div>
 
         <div class="flow-row compact">

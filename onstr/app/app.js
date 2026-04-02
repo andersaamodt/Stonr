@@ -142,7 +142,8 @@
     deleteRelays: document.getElementById('delete-relays'),
     deleteLog: document.getElementById('delete-log'),
 
-    libraryBucketNav: document.getElementById('library-bucket-nav'),
+    libraryFilterBtn: document.getElementById('library-filter-btn'),
+    libraryFilterMenu: document.getElementById('library-filter-menu'),
     libraryListbox: document.getElementById('library-listbox'),
     libraryEventId: document.getElementById('library-event-id'),
     libraryReindex: document.getElementById('library-reindex'),
@@ -289,6 +290,10 @@
   function closeOpenMenu() {
     if (!state.openMenu) {
       return;
+    }
+    if (state.openMenu === els.libraryFilterMenu && els.libraryFilterBtn) {
+      els.libraryFilterBtn.classList.remove('active');
+      els.libraryFilterBtn.setAttribute('aria-expanded', 'false');
     }
     state.openMenu.classList.add('hidden');
     state.openMenu = null;
@@ -872,7 +877,7 @@
     els.libraryListbox.innerHTML = '';
     if (!rows.length) {
       var empty = document.createElement('div');
-      empty.className = 'rail-list-option';
+      empty.className = 'rail-list-option is-empty';
       empty.textContent = 'No events in this bucket.';
       els.libraryListbox.appendChild(empty);
       setLibraryActiveOption('');
@@ -914,13 +919,17 @@
       bucket = 'all';
     }
     state.activeLibraryBucket = bucket;
-
-    var buttons = els.libraryBucketNav.querySelectorAll('.bucket-btn');
-    buttons.forEach(function (button) {
-      var active = button.getAttribute('data-bucket') === bucket;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
+    if (els.libraryFilterBtn) {
+      els.libraryFilterBtn.textContent = 'Filter: ' + bucket.charAt(0).toUpperCase() + bucket.slice(1);
+    }
+    if (els.libraryFilterMenu) {
+      var filters = els.libraryFilterMenu.querySelectorAll('button.library-filter-item');
+      filters.forEach(function (button) {
+        var active = button.getAttribute('data-bucket') === bucket;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
+    }
 
     saveUiPref('library_bucket', bucket).catch(function () {
       return;
@@ -970,7 +979,7 @@
     els.relayListbox.innerHTML = '';
     if (!payload || !payload.relays) {
       var empty = document.createElement('div');
-      empty.className = 'rail-list-option';
+      empty.className = 'rail-list-option is-empty';
       empty.textContent = 'No relay config yet.';
       els.relayListbox.appendChild(empty);
       return;
@@ -1484,13 +1493,27 @@
       });
     });
 
-    els.libraryBucketNav.addEventListener('click', function (event) {
-      var button = event.target.closest('button.bucket-btn');
+    els.libraryFilterBtn.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (state.openMenu === els.libraryFilterMenu) {
+        closeOpenMenu();
+        return;
+      }
+      closeOpenMenu();
+      els.libraryFilterMenu.classList.remove('hidden');
+      els.libraryFilterBtn.classList.add('active');
+      els.libraryFilterBtn.setAttribute('aria-expanded', 'true');
+      state.openMenu = els.libraryFilterMenu;
+    });
+
+    els.libraryFilterMenu.addEventListener('click', function (event) {
+      var button = event.target.closest('button.library-filter-item');
       if (!button) {
         return;
       }
-      var bucket = button.getAttribute('data-bucket');
-      setLibraryBucket(bucket);
+      event.preventDefault();
+      setLibraryBucket(button.getAttribute('data-bucket'));
+      closeOpenMenu();
     });
 
     els.libraryStar.addEventListener('click', function () {
@@ -1777,7 +1800,7 @@
       if (!state.openMenu) {
         return;
       }
-      if (event.target.closest('.menu-wrap')) {
+      if (event.target.closest('.menu-wrap') || event.target.closest('.filter-anchor')) {
         return;
       }
       closeOpenMenu();
