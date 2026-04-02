@@ -249,7 +249,7 @@
       label: 'Pinned',
       eyebrow: 'Pinned',
       title: 'Pinned Content',
-      detail: 'Pin owner/followed content and choose whether to store only pinned-author site traffic.',
+      detail: 'Pin owner/followed content and control import scope/filter behavior.',
       fields: [
         groupField('Pinned Author Scope'),
         radioField('MIRROR_MODE', 'mirror_mode', 'Pinned author ingest scope', [
@@ -261,7 +261,13 @@
         textareaField('OWNER_PUBKEYS', 'owner_pubkeys', 'Owner authors (used by strict site mode, privileged + always kept)', 'One pubkey per line', formatLineList, null, 'Owner pubkeys define strict site-author scope, bypass write auth/rate limits, and are always retained.'),
         textareaField('FOLLOW_PUBKEYS', 'follow_pubkeys', 'Follow authors (mirror + always kept)', 'One pubkey per line', formatLineList, null, 'These pubkeys are added to mirror author filters and retained from eviction.'),
         textareaField('PIN_EVENT_IDS', 'pin_event_ids', 'Pin specific event IDs', 'One event ID per line', formatLineList, null, 'Exact events that should never be removed by retention.'),
-        boolField('PIN_PROTECT_FROM_DELETES', 'pin_protect_from_deletes', 'Ignore delete events against pinned content', '', null, 'Keep owner/follow/pinned content visible even when NIP-09 delete events target it.')
+        boolField('PIN_PROTECT_FROM_DELETES', 'pin_protect_from_deletes', 'Ignore delete events against pinned content', '', null, 'Keep owner/follow/pinned content visible even when NIP-09 delete events target it.'),
+        groupField('Import Filters'),
+        textField('FILTER_AUTHORS', 'filter_authors', 'Authors to import', 'Comma-separated pubkeys', formatList, null, 'If set, only import events from these author pubkeys.'),
+        textField('FILTER_KINDS', 'filter_kinds', 'Kinds to import', 'Comma-separated kind numbers, for example: 1,7,30023', formatNumberList, null, 'If set, only import these event kinds.'),
+        textField('FILTER_TAG_A', 'filter_tag_a', 'Addresses to import', 'Comma-separated `kind:pubkey:d` addresses', formatList, null, 'If set, only import events whose `#a` tags match these addresses.'),
+        textField('FILTER_TAG_T', 'filter_tag_t', 'Topics to import', 'Comma-separated topic tags', formatList, null, 'If set, only import events whose `#t` tags match these topics.'),
+        textField('FILTER_SINCE_MODE', 'filter_since_mode', 'Import start point', 'Use `cursor` or `fixed:<unix time>`', formatSinceMode, null, 'Use `cursor` to resume where the importer left off, or `fixed:<unix time>` to start from a fixed timestamp.')
       ]
     },
     {
@@ -269,7 +275,7 @@
       label: 'Network',
       eyebrow: 'Network',
       title: 'Network And Import',
-      detail: 'Bind addresses, upstream feeds, and import filter state.',
+      detail: 'Bind addresses and upstream relay endpoints.',
       fields: [
         groupField('Local Paths And Ports'),
         browseTextField('STORE_ROOT', 'store_root', 'Data folder', '', null, null, 'Root folder for events, blobs, indexes, logs, and runtime files.'),
@@ -279,12 +285,6 @@
         groupField('Upstream Relays'),
         textareaField('RELAYS_UPSTREAM', 'relays_upstream', 'Source relays', 'One relay URL per line', formatLineList, null, 'Relay URLs to import events from, one per line.'),
         textField('TOR_SOCKS', 'tor_socks', 'SOCKS proxy', 'Optional. Example: 127.0.0.1:9050', null, null, 'Optional SOCKS proxy for outbound relay traffic, including Tor.'),
-        groupField('Mirror Filters'),
-        textField('FILTER_AUTHORS', 'filter_authors', 'Authors to import', 'Comma-separated pubkeys', formatList, null, 'If set, only import events from these author pubkeys.'),
-        textField('FILTER_KINDS', 'filter_kinds', 'Kinds to import', 'Comma-separated kind numbers, for example: 1,7,30023', formatNumberList, null, 'If set, only import these event kinds.'),
-        textField('FILTER_TAG_A', 'filter_tag_a', 'Addresses to import', 'Comma-separated `kind:pubkey:d` addresses', formatList, null, 'If set, only import events whose `#a` tags match these addresses.'),
-        textField('FILTER_TAG_T', 'filter_tag_t', 'Topics to import', 'Comma-separated topic tags', formatList, null, 'If set, only import events whose `#t` tags match these topics.'),
-        textField('FILTER_SINCE_MODE', 'filter_since_mode', 'Import start point', 'Use `cursor` or `fixed:<unix time>`', formatSinceMode, null, 'Use `cursor` to resume where the importer left off, or `fixed:<unix time>` to start from a fixed timestamp.'),
         groupField('Kind Policy'),
         textField('ALLOW_KINDS', 'policy.allowed_kinds', 'Allowed kinds', 'Comma-separated kind numbers', formatNumberList, null, 'If set, only these event kinds are accepted.'),
         textField('DENY_KINDS', 'policy.blocked_kinds', 'Blocked kinds', 'Comma-separated kind numbers', formatNumberList, null, 'These event kinds are always rejected.')
