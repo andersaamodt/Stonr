@@ -64,6 +64,9 @@
     autoStartRelayOnOpen: false,
     autoStartRelayChecked: false,
     suppressDependencyAnimationOnce: false,
+    activeTheme: 'adept',
+    themes: [],
+    themeMenuOpen: false,
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -72,6 +75,13 @@
   };
   var DOCTOR_REFRESH_INTERVAL_MS = 30000;
   var LIVE_REFRESH_INTERVAL_MS = 4000;
+  var FALLBACK_THEMES = [
+    'adept', 'alchemist', 'archmage', 'athenian', 'chronomancer', 'conjurer',
+    'druid', 'empath', 'enchanter', 'geomancer', 'hermeticist', 'hierophant',
+    'illusionist', 'lapidarist', 'lich', 'necromancer', 'pyromancer', 'seer',
+    'shaman', 'sorcerer', 'sorceress', 'technomancer', 'thaumaturge', 'thelemite',
+    'theurgist', 'wadjet', 'warlock', 'wizard'
+  ];
 
   var relayLoginDependsOn = ['ENABLE_NIP42'];
 
@@ -541,6 +551,10 @@
     doctorOutput: document.getElementById('doctor-output'),
     openStoreRoot: document.getElementById('open-store-root'),
     relayToggle: document.getElementById('relay-toggle'),
+    themeStylesheet: document.getElementById('stonr-theme-stylesheet'),
+    themePickerBtn: document.getElementById('theme-picker-btn'),
+    themePickerMenu: document.getElementById('theme-picker-menu'),
+    themePickerList: document.getElementById('theme-picker-list'),
     diagnosticsDoctor: null
   };
 
@@ -555,16 +569,32 @@
       button.disabled = !state.bridge;
     });
     els.openSettings.addEventListener('click', function () {
-      els.settingsDrawer.classList.remove('hidden');
+      setSettingsDrawerOpen(els.settingsDrawer.classList.contains('hidden'));
     });
     els.closeSettings.addEventListener('click', function () {
-      els.settingsDrawer.classList.add('hidden');
+      setSettingsDrawerOpen(false);
     });
     els.settingsDrawer.addEventListener('click', function (event) {
       if (event.target === els.settingsDrawer) {
-        els.settingsDrawer.classList.add('hidden');
+        setSettingsDrawerOpen(false);
       }
     });
+    if (els.themePickerBtn) {
+      els.themePickerBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        toggleThemeMenu();
+      });
+    }
+    if (els.themePickerList) {
+      els.themePickerList.addEventListener('click', function (event) {
+        var button = event.target.closest('button[data-theme-name]');
+        if (!button) {
+          return;
+        }
+        applyTheme(button.getAttribute('data-theme-name'));
+        closeThemeMenu(true);
+      });
+    }
     els.envPath.addEventListener('change', queueEnvPathSave);
     els.envPath.addEventListener('blur', queueEnvPathSave);
     els.relayToggle.addEventListener('click', function () {
@@ -615,6 +645,8 @@
       }
     });
     document.addEventListener('keydown', handleGlobalKeydown, true);
+    document.addEventListener('mousedown', handleGlobalPointerDown, true);
+    document.addEventListener('touchstart', handleGlobalPointerDown, true);
     renderSectionList();
     startRefreshLoop();
     loadAll();
@@ -656,6 +688,18 @@
     if (!event || event.defaultPrevented) {
       return;
     }
+    if (event.key === 'Escape') {
+      if (themeMenuOpen()) {
+        event.preventDefault();
+        closeThemeMenu(true);
+        return;
+      }
+      if (!els.settingsDrawer.classList.contains('hidden')) {
+        event.preventDefault();
+        setSettingsDrawerOpen(false);
+        return;
+      }
+    }
     if (event.key !== 'Tab' || !event.ctrlKey || event.metaKey || event.altKey) {
       return;
     }
@@ -677,6 +721,20 @@
     var delta = direction < 0 ? -1 : 1;
     var nextIndex = (currentIndex + delta + total) % total;
     setActiveSection(sections[nextIndex].id, true);
+  }
+
+  function handleGlobalPointerDown(event) {
+    if (!event || !themeMenuOpen()) {
+      return;
+    }
+    if (
+      event.target &&
+      event.target.closest &&
+      (event.target.closest('#theme-picker-menu') || event.target.closest('#theme-picker-btn'))
+    ) {
+      return;
+    }
+    closeThemeMenu(false);
   }
 
   function inferAppDir() {
@@ -990,6 +1048,8 @@
     state.backgroundMode = matchesBool(prefs.background_mode || '');
     state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
     state.autoStartRelayOnOpen = matchesBool(prefs.auto_start_relay_on_open || '');
+    state.themes = FALLBACK_THEMES.slice();
+    applyTheme((prefs.theme || readLocalTheme() || 'adept'), { persist: false, allowUnlisted: true });
     state.hostStatusItemRelayRunning = null;
     state.refreshInFlight = false;
     state.refreshQueued = false;
@@ -1034,7 +1094,7 @@
       } else {
         state.envPath = state.doctorKv.env_path || state.envPath;
       }
-      els.envPath.value = state.envPath || '';
+    els.envPath.value = state.envPath || '';
       els.doctorOutput.textContent = state.doctor.trim() || 'No backend output.';
       state.envValues = parseKv(await backend('load-env', [state.envPath]));
       state.status = parseKv(await backend('relay-status', [state.envPath]));
@@ -1056,6 +1116,142 @@
       renderRuntimeFallback();
       renderActiveSection();
       revealBootUi();
+    }
+  }
+
+  function readLocalTheme() {
+    try {
+      return String(window.localStorage.getItem('stonr.theme') || '').trim().toLowerCase();
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function saveLocalTheme(theme) {
+    try {
+      window.localStorage.setItem('stonr.theme', String(theme || ''));
+    } catch (_error) {
+      return;
+    }
+  }
+
+  function normalizeTheme(theme, allowUnlisted) {
+    var normalized = String(theme || '').trim().toLowerCase();
+    if (!normalized) {
+      normalized = 'adept';
+    }
+    if (!/^[a-z0-9_-]+$/.test(normalized)) {
+      normalized = 'adept';
+    }
+    if (!allowUnlisted && state.themes.indexOf(normalized) < 0) {
+      normalized = state.themes[0] || 'adept';
+    }
+    return normalized;
+  }
+
+  function themeLabel(name) {
+    return String(name || '')
+      .split(/[-_]+/)
+      .filter(Boolean)
+      .map(function (part) {
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      })
+      .join(' ') || 'Adept';
+  }
+
+  function buildThemeStylesheetHref(themeName) {
+    return 'themes/' + themeName + '.css?v=stonr-control-20260322i';
+  }
+
+  function setThemeStylesheet(themeName) {
+    if (!els.themeStylesheet) {
+      return;
+    }
+    var next = els.themeStylesheet.cloneNode(false);
+    next.href = buildThemeStylesheetHref(themeName);
+    next.id = 'stonr-theme-stylesheet';
+    next.setAttribute('data-theme-name', themeName);
+    if (els.themeStylesheet.parentNode) {
+      els.themeStylesheet.parentNode.replaceChild(next, els.themeStylesheet);
+    }
+    els.themeStylesheet = next;
+  }
+
+  function renderThemeMenuList() {
+    if (!els.themePickerList) {
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < state.themes.length; i += 1) {
+      var theme = state.themes[i];
+      var active = theme === state.activeTheme ? ' active' : '';
+      html += '<button type="button" class="footer-theme-item' + active + '" data-theme-name="' + escapeHtml(theme) + '" aria-pressed="' + (theme === state.activeTheme ? 'true' : 'false') + '">' +
+        '<span>' + escapeHtml(themeLabel(theme)) + '</span><span class="footer-theme-check" aria-hidden="true">✓</span></button>';
+    }
+    els.themePickerList.innerHTML = html;
+  }
+
+  function applyTheme(themeName, options) {
+    var opts = options || {};
+    var normalized = normalizeTheme(themeName, !!opts.allowUnlisted);
+    state.activeTheme = normalized;
+    setThemeStylesheet(normalized);
+    renderThemeMenuList();
+    if (els.themePickerBtn) {
+      els.themePickerBtn.textContent = themeLabel(normalized);
+    }
+    if (opts.persist !== false) {
+      saveLocalTheme(normalized);
+      saveUiPref('theme', normalized).catch(function () {
+        return;
+      });
+    }
+  }
+
+  function themeMenuOpen() {
+    return !!(els.themePickerMenu && !els.themePickerMenu.classList.contains('hidden'));
+  }
+
+  function openThemeMenu() {
+    if (!els.themePickerMenu || !els.themePickerBtn) {
+      return;
+    }
+    renderThemeMenuList();
+    els.themePickerMenu.classList.remove('hidden');
+    els.themePickerBtn.classList.add('active');
+    els.themePickerBtn.setAttribute('aria-expanded', 'true');
+    state.themeMenuOpen = true;
+  }
+
+  function closeThemeMenu(restoreFocus) {
+    if (!els.themePickerMenu || !els.themePickerBtn) {
+      return;
+    }
+    els.themePickerMenu.classList.add('hidden');
+    els.themePickerBtn.classList.remove('active');
+    els.themePickerBtn.setAttribute('aria-expanded', 'false');
+    state.themeMenuOpen = false;
+    if (restoreFocus && typeof els.themePickerBtn.focus === 'function') {
+      els.themePickerBtn.focus();
+    }
+  }
+
+  function toggleThemeMenu() {
+    if (themeMenuOpen()) {
+      closeThemeMenu(true);
+      return;
+    }
+    openThemeMenu();
+  }
+
+  function setSettingsDrawerOpen(open) {
+    var next = !!open;
+    els.settingsDrawer.classList.toggle('hidden', !next);
+    if (els.openSettings) {
+      els.openSettings.classList.toggle('active', next);
+    }
+    if (next) {
+      closeThemeMenu(false);
     }
   }
 

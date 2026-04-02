@@ -165,7 +165,7 @@ textarea {
 
 .rail {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 2.2rem;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 0;
   min-height: 0;
   border-right: 1px solid var(--line-strong);
@@ -474,14 +474,27 @@ h4 {
   color: color-mix(in srgb, var(--accent) 66%, var(--text) 34%);
 }
 
-.rail-settings {
-  justify-self: start;
-  align-self: center;
-  margin-left: 0.35rem;
+.rail-footer {
+  display: grid;
+  align-items: center;
+  padding: 0.2rem 0.24rem;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.footer-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.26rem;
+}
+
+.footer-theme-anchor {
+  position: relative;
+  display: inline-flex;
 }
 
 .rail-settings img {
-  transform: translate(1px, 1px);
+  transform: translate(0.8px, 0.8px);
 }
 
 .footer-btn,
@@ -495,6 +508,110 @@ h4 {
   border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.76);
   transition: transform var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.footer-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.72rem;
+  min-height: 1.72rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0;
+  transition: transform var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.footer-icon-btn:hover,
+.footer-icon-btn:focus-visible,
+.footer-icon-btn.active {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: color-mix(in srgb, var(--accent) 15%, white);
+}
+
+.footer-icon-btn img {
+  width: 0.88rem;
+  height: 0.88rem;
+  display: block;
+  filter: brightness(0) saturate(100%) opacity(0.8);
+}
+
+.footer-theme-btn {
+  width: auto;
+  min-height: 1.72rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0 0.62rem;
+  font-size: 0.74rem;
+  color: var(--text);
+}
+
+.footer-theme-btn:hover,
+.footer-theme-btn:focus-visible,
+.footer-theme-btn.active {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: color-mix(in srgb, var(--accent) 15%, white);
+}
+
+.footer-theme-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.26rem);
+  width: min(11.5rem, calc(var(--rail-width) - 0.6rem));
+  max-height: min(16rem, calc(100vh - 1.4rem));
+  overflow: auto;
+  padding: 0.28rem;
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  z-index: 34;
+}
+
+.footer-theme-list {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.footer-theme-item {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: 8px;
+  padding: 0.34rem 0.42rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.38rem;
+  font-size: 0.76rem;
+  color: var(--text);
+}
+
+.footer-theme-item:hover,
+.footer-theme-item:focus-visible {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: none;
+}
+
+.footer-theme-item.active {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.footer-theme-check {
+  opacity: 0;
+  color: color-mix(in srgb, var(--text) 74%, transparent);
+}
+
+.footer-theme-item.active .footer-theme-check {
+  opacity: 1;
+}
+
+.hidden {
+  display: none !important;
 }
 
 .footer-btn:hover,
