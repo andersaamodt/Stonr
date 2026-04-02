@@ -6,6 +6,7 @@
     refreshTimer: null,
     refreshInFlight: false,
     refreshQueued: false,
+    hostModeSyncAt: 0,
     envPathTimer: null,
     envPath: '',
     envValues: {},
@@ -582,10 +583,18 @@
           console.error(error);
         });
       } else if (document.visibilityState === 'visible') {
+        reconcileHostModeIfVisible('visibility').catch(function (error) {
+          console.error(error);
+        });
         refreshLiveState().catch(function (error) {
           console.error(error);
         });
       }
+    });
+    window.addEventListener('focus', function () {
+      reconcileHostModeIfVisible('focus').catch(function (error) {
+        console.error(error);
+      });
     });
     window.addEventListener('pagehide', function () {
       flushPendingFieldSaves().catch(function (error) {
@@ -3903,6 +3912,7 @@
     state.refreshInFlight = true;
     try {
       await refreshStatus();
+      await reconcileHostModeIfVisible('refresh');
       if (shouldRefreshDoctor()) {
         await refreshDoctor();
       }
@@ -3940,6 +3950,22 @@
         });
       }
     }, LIVE_REFRESH_INTERVAL_MS);
+  }
+
+  async function reconcileHostModeIfVisible(reason) {
+    if (!state.bridge || document.visibilityState !== 'visible') {
+      return;
+    }
+    var now = Date.now();
+    if (reason !== 'visibility' && reason !== 'focus' && now - state.hostModeSyncAt < 2000) {
+      return;
+    }
+    state.hostModeSyncAt = now;
+    try {
+      await setHostBackgroundModeWithRelayState(relayRunningNow());
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   function toBase64(value) {
