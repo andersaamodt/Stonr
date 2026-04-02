@@ -7,6 +7,7 @@
     refreshInFlight: false,
     refreshQueued: false,
     hostModeSyncAt: 0,
+    appClosing: false,
     envPathTimer: null,
     envPath: '',
     envValues: {},
@@ -597,9 +598,21 @@
       });
     });
     window.addEventListener('pagehide', function () {
+      state.appClosing = true;
+      if (state.refreshTimer) {
+        clearInterval(state.refreshTimer);
+        state.refreshTimer = null;
+      }
       flushPendingFieldSaves().catch(function (error) {
         console.error(error);
       });
+    });
+    window.addEventListener('beforeunload', function () {
+      state.appClosing = true;
+      if (state.refreshTimer) {
+        clearInterval(state.refreshTimer);
+        state.refreshTimer = null;
+      }
     });
     document.addEventListener('keydown', handleGlobalKeydown, true);
     renderSectionList();
@@ -3912,7 +3925,6 @@
     state.refreshInFlight = true;
     try {
       await refreshStatus();
-      await reconcileHostModeIfVisible('refresh');
       if (shouldRefreshDoctor()) {
         await refreshDoctor();
       }
@@ -3953,7 +3965,7 @@
   }
 
   async function reconcileHostModeIfVisible(reason) {
-    if (!state.bridge || document.visibilityState !== 'visible') {
+    if (!state.bridge || state.appClosing || document.visibilityState !== 'visible') {
       return;
     }
     var now = Date.now();
