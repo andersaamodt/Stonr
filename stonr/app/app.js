@@ -1633,21 +1633,6 @@
     });
     controls.appendChild(apply);
     wrap.appendChild(controls);
-
-    var hint = document.createElement('p');
-    hint.className = 'section-note';
-    hint.textContent = 'Presets can overlap. Applying one may override values currently set by another preset.';
-    wrap.appendChild(hint);
-
-    var status = document.createElement('div');
-    status.className = 'relay-presets-status';
-    relayPresetSummaryRows().forEach(function (row) {
-      var item = document.createElement('p');
-      item.className = 'relay-presets-status-item';
-      item.textContent = row;
-      status.appendChild(item);
-    });
-    wrap.appendChild(status);
     return wrap;
   }
 
@@ -1680,15 +1665,6 @@
       id: parts[0],
       enabled: parts[1] === '1'
     };
-  }
-
-  function relayPresetSummaryRows() {
-    return [
-      'Publishes: ' + (relayPresetEnabled('accept_publishes') ? 'allowed' : 'blocked'),
-      'Importing: ' + (relayPresetEnabled('host_others') ? 'enabled' : 'disabled'),
-      'File sharing: ' + (relayPresetEnabled('file_sharing') ? 'enabled' : 'disabled'),
-      'Author scope: ' + (relayPresetEnabled('owner_only_scope') ? 'owner-only' : 'general')
-    ];
   }
 
   function relayPresetEnabled(id) {

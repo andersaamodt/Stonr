@@ -824,18 +824,6 @@ h4 {
   max-width: min(100%, 31rem);
 }
 
-.relay-presets-status {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.relay-presets-status-item {
-  margin: 0;
-  font-size: 0.76rem;
-  color: var(--muted);
-  line-height: 1.35;
-}
-
 .retention-apply-field {
   margin-top: -0.15rem;
 }
