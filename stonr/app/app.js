@@ -62,6 +62,8 @@
     autoStartRelayOnOpen: false,
     autoStartRelayChecked: false,
     suppressDependencyAnimationOnce: false,
+    relayPresetBusy: {},
+    relayPresetPendingAction: {},
     moderationLists: {
       'pubkeys-allow': '',
       'pubkeys-deny': '',
@@ -102,6 +104,7 @@
         groupField('Identity'),
         textField('RELAY_NAME', 'policy.relay_name', 'Relay name', '', null, null, 'Name shown to clients when they browse or save this relay.'),
         textField('RELAY_DESCRIPTION', 'policy.relay_description', 'Relay description', '', null, null, 'Short summary shown beside the relay name in client UIs.'),
+        relayPresetsField(),
         groupField('Core Behavior'),
         boolField('ENABLE_QUERY', 'policy.enable_query', 'Read access (recommended)', 'Clients can read stored events.', null, 'Allow clients to read stored events with REQ filters.'),
         boolField('ENABLE_PUBLISH', 'policy.enable_publish', 'Write access (recommended)', 'Clients can publish events.', null, 'Allow clients to publish new events to this relay.'),
@@ -1242,6 +1245,9 @@
     if (field.type === 'group') {
       return renderGroupField(field);
     }
+    if (field.type === 'relay-presets') {
+      return renderRelayPresetsField();
+    }
     if (field.type === 'note') {
       return renderNoteField(field);
     }
@@ -1546,6 +1552,242 @@
     note.className = 'section-note';
     note.textContent = field.text;
     return note;
+  }
+
+  function renderRelayPresetsField() {
+    var wrap = document.createElement('div');
+    wrap.className = 'field relay-presets-field';
+
+    var title = document.createElement('p');
+    title.className = 'section-note';
+    title.textContent = 'Presets';
+    wrap.appendChild(title);
+
+    var toggles = document.createElement('div');
+    toggles.className = 'relay-presets-grid';
+    toggles.appendChild(renderRelayPresetToggle(
+      'file_sharing',
+      'Enable file sharing',
+      'Turns file metadata + file APIs on or off.',
+      relayPresetEnabled('file_sharing')
+    ));
+    toggles.appendChild(renderRelayPresetToggle(
+      'host_others',
+      'Import and host others\' content',
+      'Turns relay mirroring from upstream relays on or off.',
+      relayPresetEnabled('host_others')
+    ));
+    toggles.appendChild(renderRelayPresetToggle(
+      'accept_publishes',
+      'Accept published content',
+      'Allows or blocks client EVENT publish writes.',
+      relayPresetEnabled('accept_publishes')
+    ));
+    toggles.appendChild(renderRelayPresetToggle(
+      'owner_only_scope',
+      'Store only owner-author site content',
+      'Switches between strict owner-only scope and general scope.',
+      relayPresetEnabled('owner_only_scope')
+    ));
+    wrap.appendChild(toggles);
+    return wrap;
+  }
+
+  function renderRelayPresetToggle(id, label, helpText, checked) {
+    var pending = state.relayPresetPendingAction[id] || '';
+    return renderDesktopToggleField(
+      label,
+      checked,
+      function () {
+        return;
+      },
+      helpText,
+      !!state.relayPresetBusy[id],
+      function (nextChecked) {
+        return setRelayPresetEnabled(id, nextChecked);
+      },
+      state.relayPresetBusy[id] ? (pending === 'disable' ? 'Disabling...' : 'Enabling...') : ''
+    );
+  }
+
+  function relayPresetEnabled(id) {
+    switch (id) {
+      case 'file_sharing':
+        return !!(
+          resolvedEnvBool('ENABLE_FILE_METADATA') &&
+          resolvedEnvBool('ENABLE_FILE_API') &&
+          resolvedEnvBool('ENABLE_BLOSSOM')
+        );
+      case 'host_others':
+        return resolvedEnvBool('ENABLE_MIRRORING');
+      case 'accept_publishes':
+        return resolvedEnvBool('ENABLE_PUBLISH');
+      case 'owner_only_scope':
+        return String(resolvedEnvString('MIRROR_MODE') || 'broad').toLowerCase() === 'site';
+      default:
+        return false;
+    }
+  }
+
+  async function setRelayPresetEnabled(id, nextEnabled) {
+    if (!state.bridge) {
+      return;
+    }
+    var updates = relayPresetUpdates(id, nextEnabled).filter(function (pair) {
+      return normalizeEnvValueForCompare(pair[0], pair[1]) !== normalizeEnvValueForCompare(pair[0], currentEnvValue(pair[0]));
+    });
+    if (!updates.length) {
+      return;
+    }
+    if (!confirmRelayPresetChange(id, nextEnabled, updates)) {
+      return;
+    }
+    state.relayPresetBusy[id] = true;
+    state.relayPresetPendingAction[id] = nextEnabled ? 'enable' : 'disable';
+    renderActiveSection(false);
+    try {
+      for (var index = 0; index < updates.length; index += 1) {
+        var pair = updates[index];
+        await backend('save-env', [state.envPath, pair[0], pair[1]]);
+        if (!state.envValues || typeof state.envValues !== 'object') {
+          state.envValues = {};
+        }
+        state.envValues[pair[0]] = pair[1];
+      }
+      await loadConfigForBootFrame(state.configEditSeq);
+      syncFieldDependencies();
+    } finally {
+      delete state.relayPresetBusy[id];
+      delete state.relayPresetPendingAction[id];
+    }
+  }
+
+  function confirmRelayPresetChange(id, nextEnabled, updates) {
+    var label = relayPresetTitle(id);
+    var heading = (nextEnabled ? 'Enable' : 'Disable') + ' "' + label + '" preset?';
+    var lines = updates.map(function (pair) {
+      var key = pair[0];
+      var next = pair[1];
+      return '• ' + relayPresetSettingLabel(key) + ': ' + formatEnvValueForDialog(key, currentEnvValue(key)) + ' -> ' + formatEnvValueForDialog(key, next);
+    });
+    return window.confirm(heading + '\n\nThis will change:\n' + lines.join('\n'));
+  }
+
+  function relayPresetTitle(id) {
+    switch (id) {
+      case 'file_sharing':
+        return 'Enable file sharing';
+      case 'host_others':
+        return 'Import and host others\' content';
+      case 'accept_publishes':
+        return 'Accept published content';
+      case 'owner_only_scope':
+        return 'Store only owner-author site content';
+      default:
+        return 'Relay preset';
+    }
+  }
+
+  function relayPresetSettingLabel(envKey) {
+    switch (envKey) {
+      case 'ENABLE_FILE_METADATA':
+        return 'Store file metadata records';
+      case 'ENABLE_FILE_API':
+        return 'Compatibility file API';
+      case 'ENABLE_BLOSSOM':
+        return 'Blossom API';
+      case 'ENABLE_BLOSSOM_LIST':
+        return 'Blossom owner blob listing';
+      case 'ENABLE_MIRRORING':
+        return 'Import from relays';
+      case 'ENABLE_PUBLISH':
+        return 'Accept published events';
+      case 'MIRROR_MODE':
+        return 'Pinned author scope mode';
+      default:
+        return envKey;
+    }
+  }
+
+  function currentEnvValue(envKey) {
+    var raw = rawEnvValueByKey(envKey);
+    if (typeof raw !== 'undefined') {
+      return String(raw);
+    }
+    var field = fieldByEnvKey(envKey);
+    if (!field) {
+      return '';
+    }
+    var value = resolvedFieldValue(field);
+    if (value === null || typeof value === 'undefined') {
+      return '';
+    }
+    if (typeof value === 'boolean') {
+      return value ? '1' : '0';
+    }
+    return String(value);
+  }
+
+  function normalizeEnvValueForCompare(envKey, value) {
+    var text = String(value || '').trim().toLowerCase();
+    if (envKey === 'MIRROR_MODE') {
+      return text || 'broad';
+    }
+    if (text === '1' || text === 'true' || text === 'yes' || text === 'on') {
+      return '1';
+    }
+    if (text === '0' || text === 'false' || text === 'no' || text === 'off' || text === '') {
+      return '0';
+    }
+    return text;
+  }
+
+  function formatEnvValueForDialog(envKey, value) {
+    var normalized = normalizeEnvValueForCompare(envKey, value);
+    if (envKey === 'MIRROR_MODE') {
+      return normalized === 'site' ? 'owner-only scope' : 'general scope';
+    }
+    return normalized === '1' ? 'on' : 'off';
+  }
+
+  function relayPresetUpdates(id, enabled) {
+    switch (id) {
+      case 'file_sharing':
+        return [
+          ['ENABLE_FILE_METADATA', enabled ? '1' : '0'],
+          ['ENABLE_FILE_API', enabled ? '1' : '0'],
+          ['ENABLE_BLOSSOM', enabled ? '1' : '0'],
+          ['ENABLE_BLOSSOM_LIST', enabled ? '1' : '0']
+        ];
+      case 'host_others':
+        return [['ENABLE_MIRRORING', enabled ? '1' : '0']];
+      case 'accept_publishes':
+        return [['ENABLE_PUBLISH', enabled ? '1' : '0']];
+      case 'owner_only_scope':
+        return [['MIRROR_MODE', enabled ? 'site' : 'broad']];
+      default:
+        return [];
+    }
+  }
+
+  function resolvedEnvBool(envKey) {
+    var field = fieldByEnvKey(envKey);
+    if (!field) {
+      return false;
+    }
+    return !!resolvedFieldValue(field);
+  }
+
+  function resolvedEnvString(envKey) {
+    var field = fieldByEnvKey(envKey);
+    if (!field) {
+      return '';
+    }
+    var value = resolvedFieldValue(field);
+    if (value === null || typeof value === 'undefined') {
+      return '';
+    }
+    return String(value);
   }
 
   function renderRetentionApplyField() {
@@ -3041,6 +3283,10 @@
 
   function retentionApplyField() {
     return { type: 'retention-apply' };
+  }
+
+  function relayPresetsField() {
+    return { type: 'relay-presets' };
   }
 
   function withFieldUi(field, options) {
