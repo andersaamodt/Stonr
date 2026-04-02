@@ -392,7 +392,7 @@ h4 {
 }
 
 .section-gap-divider {
-  height: 2.15rem;
+  height: 1px;
   position: relative;
   pointer-events: none;
 }
@@ -400,11 +400,10 @@ h4 {
 .section-gap-divider::after {
   content: "";
   position: absolute;
-  left: 0.8rem;
-  right: 0.8rem;
-  top: 50%;
+  left: 0;
+  right: 0;
+  top: 0;
   height: 1px;
-  transform: translateY(-0.5px);
   background: var(--line-strong);
 }
 
