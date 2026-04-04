@@ -13,6 +13,7 @@ use sha1::{Digest, Sha1};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::broadcast,
+    time::{Duration, Instant, MissedTickBehavior},
 };
 use tokio_socks::tcp::Socks5Stream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -28,6 +29,14 @@ use crate::{
 
 const CURSOR_FALLBACK_WINDOW_SECS: u64 = 15 * 60;
 const MIRROR_SINCE_SKEW_SECS: u64 = 300;
+#[cfg(not(test))]
+const MIRROR_PING_INTERVAL_SECS: u64 = 60;
+#[cfg(test)]
+const MIRROR_PING_INTERVAL_SECS: u64 = 1;
+#[cfg(not(test))]
+const MIRROR_IDLE_TIMEOUT_SECS: u64 = 600;
+#[cfg(test)]
+const MIRROR_IDLE_TIMEOUT_SECS: u64 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MirrorCursorValue {
@@ -555,44 +564,110 @@ where
         ws.send(Message::Text(req.to_string())).await?;
     }
     let mut latest = options.since;
-    while let Some(msg) = ws.next().await {
-        match msg {
-            Err(_) => break,
-            Ok(msg) => match msg {
-                Message::Text(txt) => {
-                    if let Ok(val) = serde_json::from_str::<Value>(&txt) {
-                        if let Some(arr) = val.as_array() {
-                            match arr.first().and_then(|v| v.as_str()) {
-                                Some("EVENT") if arr.len() >= 3 => {
-                                    if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone())
-                                    {
-                                        // Keep cursor monotonic but never ahead of wall-clock time.
-                                        // Some upstream events arrive with future timestamps; if we
-                                        // advance the cursor to those values, mirror ingest can stall.
-                                        let cursor_created_at =
-                                            ev.created_at.min(current_unix_ts());
-                                        latest = latest.max(cursor_created_at);
-                                        // Upstreams may occasionally ignore `since` and send deep history.
-                                        // Skip anything clearly older than the requested window.
-                                        if options.since > 0
-                                            && ev.created_at.saturating_add(MIRROR_SINCE_SKEW_SECS)
-                                                < options.since
+    let mut last_peer_activity = Instant::now();
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(MIRROR_PING_INTERVAL_SECS));
+    ping_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    ping_interval.tick().await;
+    loop {
+        tokio::select! {
+            _ = ping_interval.tick() => {
+                if last_peer_activity.elapsed() >= Duration::from_secs(MIRROR_IDLE_TIMEOUT_SECS) {
+                    return Err(anyhow!(
+                        "mirror upstream went silent for {} seconds",
+                        MIRROR_IDLE_TIMEOUT_SECS
+                    ));
+                }
+                if ws.send(Message::Ping(Vec::new())).await.is_err() {
+                    break;
+                }
+            }
+            msg = ws.next() => {
+                let Some(msg) = msg else {
+                    break;
+                };
+                let msg = match msg {
+                    Ok(msg) => msg,
+                    Err(_) => break,
+                };
+                last_peer_activity = Instant::now();
+                match msg {
+                    Message::Text(txt) => {
+                        if let Ok(val) = serde_json::from_str::<Value>(&txt) {
+                            if let Some(arr) = val.as_array() {
+                                match arr.first().and_then(|v| v.as_str()) {
+                                    Some("EVENT") if arr.len() >= 3 => {
+                                        if let Ok(ev) = serde_json::from_value::<Event>(arr[2].clone())
                                         {
-                                            let _ = write_cursor(
-                                                options.store_root,
-                                                options.cursor_key,
-                                                latest,
-                                            );
-                                            continue;
-                                        }
-                                        if validate_event_with_files(
-                                            options.settings,
-                                            &store.files(),
-                                            &ev,
-                                            current_unix_ts(),
-                                        )
-                                        .is_err()
-                                        {
+                                            // Keep cursor monotonic but never ahead of wall-clock time.
+                                            // Some upstream events arrive with future timestamps; if we
+                                            // advance the cursor to those values, mirror ingest can stall.
+                                            let cursor_created_at =
+                                                ev.created_at.min(current_unix_ts());
+                                            latest = latest.max(cursor_created_at);
+                                            // Upstreams may occasionally ignore `since` and send deep history.
+                                            // Skip anything clearly older than the requested window.
+                                            if options.since > 0
+                                                && ev.created_at.saturating_add(MIRROR_SINCE_SKEW_SECS)
+                                                    < options.since
+                                            {
+                                                let _ = write_cursor(
+                                                    options.store_root,
+                                                    options.cursor_key,
+                                                    latest,
+                                                );
+                                                continue;
+                                            }
+                                            if validate_event_with_files(
+                                                options.settings,
+                                                &store.files(),
+                                                &ev,
+                                                current_unix_ts(),
+                                            )
+                                            .is_err()
+                                            {
+                                                let _ = write_mirror_success(
+                                                    options.store_root,
+                                                    options.cursor_key,
+                                                    options.relay,
+                                                    options.scope,
+                                                    Some(ev.created_at),
+                                                    false,
+                                                );
+                                                let _ = write_cursor(
+                                                    options.store_root,
+                                                    options.cursor_key,
+                                                    latest,
+                                                );
+                                                continue;
+                                            }
+                                            if let Err(e) = store.ingest_with_policy(
+                                                &ev,
+                                                options.delete_enabled,
+                                                options.expiration_enabled,
+                                            ) {
+                                                crate::log::warn(
+                                                    "mirror",
+                                                    "failed to ingest mirrored event",
+                                                    serde_json::json!({
+                                                        "relay": options.relay,
+                                                        "scope": options.scope,
+                                                        "event_id": ev.id,
+                                                        "error": e.to_string(),
+                                                    }),
+                                                );
+                                            } else {
+                                                let _ = store.files().add_event_references(&ev);
+                                            }
+                                            if store
+                                                .event_visible_with_policy(
+                                                    &ev,
+                                                    options.delete_enabled,
+                                                    options.expiration_enabled,
+                                                )
+                                                .unwrap_or(false)
+                                            {
+                                                let _ = events_tx.send(ev.clone());
+                                            }
                                             let _ = write_mirror_success(
                                                 options.store_root,
                                                 options.cursor_key,
@@ -606,72 +681,35 @@ where
                                                 options.cursor_key,
                                                 latest,
                                             );
-                                            continue;
                                         }
-                                        if let Err(e) = store.ingest_with_policy(
-                                            &ev,
-                                            options.delete_enabled,
-                                            options.expiration_enabled,
-                                        ) {
-                                            crate::log::warn(
-                                                "mirror",
-                                                "failed to ingest mirrored event",
-                                                serde_json::json!({
-                                                    "relay": options.relay,
-                                                    "scope": options.scope,
-                                                    "event_id": ev.id,
-                                                    "error": e.to_string(),
-                                                }),
-                                            );
-                                        } else {
-                                            let _ = store.files().add_event_references(&ev);
-                                        }
-                                        if store
-                                            .event_visible_with_policy(
-                                                &ev,
-                                                options.delete_enabled,
-                                                options.expiration_enabled,
-                                            )
-                                            .unwrap_or(false)
-                                        {
-                                            let _ = events_tx.send(ev.clone());
-                                        }
+                                    }
+                                    Some("EOSE") => {
                                         let _ = write_mirror_success(
                                             options.store_root,
                                             options.cursor_key,
                                             options.relay,
                                             options.scope,
-                                            Some(ev.created_at),
-                                            false,
+                                            None,
+                                            !options.keep_running_after_eose,
                                         );
-                                        let _ = write_cursor(
-                                            options.store_root,
-                                            options.cursor_key,
-                                            latest,
-                                        );
+                                        if !options.keep_running_after_eose {
+                                            break;
+                                        }
                                     }
+                                    _ => {}
                                 }
-                                Some("EOSE") => {
-                                    let _ = write_mirror_success(
-                                        options.store_root,
-                                        options.cursor_key,
-                                        options.relay,
-                                        options.scope,
-                                        None,
-                                        !options.keep_running_after_eose,
-                                    );
-                                    if !options.keep_running_after_eose {
-                                        break;
-                                    }
-                                }
-                                _ => {}
                             }
                         }
                     }
+                    Message::Ping(payload) => {
+                        if ws.send(Message::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
                 }
-                Message::Close(_) => break,
-                _ => {}
-            },
+            }
         }
     }
     Ok(latest)
@@ -1515,6 +1553,41 @@ mod tests {
         mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
         server.abort();
         assert!(dir.path().join("events/aa/11/aa11.json").exists());
+    }
+
+    #[tokio::test]
+    async fn mirror_times_out_silent_upstream_session() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await;
+            ws.send(TMsg::Text(json!(["EOSE", "mirror"]).to_string()))
+                .await
+                .unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        });
+
+        let relay_url = format!("ws://{}", addr);
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        cfg.filter_since_mode = SinceMode::Cursor;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            mirror_relay(relay_url, cfg, store.clone()),
+        )
+        .await
+        .expect("mirror task should not hang on a silent upstream");
+
+        let error = result.expect_err("silent upstream should force reconnect");
+        assert!(error.to_string().contains("silent"));
+        server.abort();
     }
 
     #[tokio::test]
