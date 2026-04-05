@@ -603,13 +603,14 @@ where
                                             // advance the cursor to those values, mirror ingest can stall.
                                             let cursor_created_at =
                                                 ev.created_at.min(current_unix_ts());
-                                            latest = latest.max(cursor_created_at);
+                                            let next_latest = latest.max(cursor_created_at);
                                             // Upstreams may occasionally ignore `since` and send deep history.
                                             // Skip anything clearly older than the requested window.
                                             if options.since > 0
                                                 && ev.created_at.saturating_add(MIRROR_SINCE_SKEW_SECS)
                                                     < options.since
                                             {
+                                                latest = next_latest;
                                                 let _ = write_cursor(
                                                     options.store_root,
                                                     options.cursor_key,
@@ -625,6 +626,7 @@ where
                                             )
                                             .is_err()
                                             {
+                                                latest = next_latest;
                                                 let _ = write_mirror_success(
                                                     options.store_root,
                                                     options.cursor_key,
@@ -640,33 +642,39 @@ where
                                                 );
                                                 continue;
                                             }
-                                            if let Err(e) = store.ingest_with_policy(
+                                            let stored = match store.ingest_with_policy(
                                                 &ev,
                                                 options.delete_enabled,
                                                 options.expiration_enabled,
                                             ) {
-                                                crate::log::warn(
-                                                    "mirror",
-                                                    "failed to ingest mirrored event",
-                                                    serde_json::json!({
-                                                        "relay": options.relay,
-                                                        "scope": options.scope,
-                                                        "event_id": ev.id,
-                                                        "error": e.to_string(),
-                                                    }),
-                                                );
-                                            } else {
+                                                Ok(stored) => stored,
+                                                Err(e) => {
+                                                    crate::log::warn(
+                                                        "mirror",
+                                                        "failed to ingest mirrored event",
+                                                        serde_json::json!({
+                                                            "relay": options.relay,
+                                                            "scope": options.scope,
+                                                            "event_id": ev.id,
+                                                            "error": e.to_string(),
+                                                        }),
+                                                    );
+                                                    return Err(e);
+                                                }
+                                            };
+                                            latest = next_latest;
+                                            if stored {
                                                 let _ = store.files().add_event_references(&ev);
-                                            }
-                                            if store
-                                                .event_visible_with_policy(
-                                                    &ev,
-                                                    options.delete_enabled,
-                                                    options.expiration_enabled,
-                                                )
-                                                .unwrap_or(false)
-                                            {
-                                                let _ = events_tx.send(ev.clone());
+                                                if store
+                                                    .event_visible_with_policy(
+                                                        &ev,
+                                                        options.delete_enabled,
+                                                        options.expiration_enabled,
+                                                    )
+                                                    .unwrap_or(false)
+                                                {
+                                                    let _ = events_tx.send(ev.clone());
+                                                }
                                             }
                                             let _ = write_mirror_success(
                                                 options.store_root,
@@ -1591,6 +1599,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mirror_does_not_rebroadcast_duplicate_events() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let ev = Event {
+            id: "aa11".into(),
+            pubkey: "p".into(),
+            kind: 1,
+            created_at: 1,
+            tags: vec![],
+            content: "hello".into(),
+            sig: String::new(),
+        };
+        store.ingest(&ev).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await;
+            ws.send(TMsg::Text(json!(["EVENT", "mirror", ev]).to_string()))
+                .await
+                .unwrap();
+            ws.send(TMsg::Text(json!(["EOSE", "mirror"]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let relay_url = format!("ws://{}", addr);
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        let (events_tx, mut events_rx) = broadcast::channel(16);
+        mirror_relay_once(relay_url, cfg, store.clone(), events_tx)
+            .await
+            .unwrap();
+        server.abort();
+
+        assert!(events_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn mirror_does_not_advance_cursor_when_ingest_fails() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let _ = std::fs::remove_dir_all(dir.path().join("events/aa"));
+        std::fs::write(dir.path().join("events/aa"), b"blocked").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let relay_url = format!("ws://{}", addr);
+        super::write_cursor(dir.path(), &relay_url, 5).unwrap();
+        let event = Event {
+            id: "aa11".into(),
+            pubkey: "p".into(),
+            kind: 1,
+            created_at: 10,
+            tags: vec![],
+            content: "hello".into(),
+            sig: String::new(),
+        };
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await;
+            ws.send(TMsg::Text(json!(["EVENT", "mirror", event]).to_string()))
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = base_settings(dir.path());
+        cfg.relays_upstream = vec![relay_url.clone()];
+        let err = mirror_relay_once(relay_url.clone(), cfg, store.clone(), test_events_tx())
+            .await
+            .expect_err("ingest failure should abort the mirror cycle");
+        server.abort();
+
+        assert!(
+            err.to_string().contains("Not a directory")
+                || err.to_string().contains("not a directory")
+        );
+        assert_eq!(super::read_cursor(dir.path(), &relay_url), Some(5));
+    }
+
+    #[tokio::test]
     async fn site_post_mirror_matches_nostr_blog_author_scope() {
         let dir = TempDir::new().unwrap();
         let store = Store::new(dir.path().to_path_buf(), false);
@@ -1846,8 +1940,11 @@ mod tests {
         let mut cfg = base_settings(dir.path());
         cfg.verify_sig = true;
         cfg.relays_upstream = vec![relay_url.clone()];
-        mirror_relay(relay_url, cfg, store.clone()).await.unwrap();
+        let error = mirror_relay(relay_url, cfg, store.clone())
+            .await
+            .expect_err("invalid mirrored events should abort the cycle");
         server.abort();
+        assert!(error.to_string().contains("id mismatch"));
         assert!(!dir.path().join("events/ba/d0/bad.json").exists());
     }
 
