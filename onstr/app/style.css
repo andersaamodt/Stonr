@@ -217,7 +217,9 @@ h5 {
   display: flex;
   align-items: start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.7rem;
+  min-width: 0;
 }
 
 .rail-section-head h2 {
@@ -774,6 +776,13 @@ label {
   font-size: 0.8rem;
 }
 
+label input,
+label select,
+label textarea {
+  width: min(100%, 18rem);
+  max-width: 100%;
+}
+
 .wide-label {
   width: min(100%, 46rem);
   min-width: min(100%, 46rem);
@@ -781,6 +790,7 @@ label {
 
 .narrow {
   width: 6.4rem;
+  max-width: 100%;
 }
 
 .toggle-row {
@@ -789,6 +799,7 @@ label {
   align-items: center;
   min-width: 0;
   max-width: 100%;
+  flex: 0 1 auto;
 }
 
 .toggle-row input {
@@ -806,6 +817,22 @@ label {
 .inline-head > *,
 .setup-head > * {
   min-width: 0;
+}
+
+.form-row > label,
+.form-row > .toggle-row {
+  flex: 0 1 auto;
+}
+
+.form-row > .action,
+.form-row > button {
+  flex: 0 0 auto;
+}
+
+.setup-status-card,
+.setup-status-card p {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .type-pills {
