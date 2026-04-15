@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Onstr</title>
   <link id="theme-link" rel="stylesheet" href="themes/wizard.css">
-  <link rel="stylesheet" href="style.css?v=onstr-20260414a">
+  <link rel="stylesheet" href="style.css?v=onstr-20260414c">
 </head>
 <body class="onstr-booting">
   <div class="boot-splash" aria-hidden="true">
@@ -27,7 +27,7 @@
           <div class="rail-overview-copy">
             <span class="rail-overview-label">Current Session</span>
             <strong id="rail-overview-title">Finish setup</strong>
-            <p id="rail-overview-summary" class="support-copy">Create or import a profile, then add a relay in Settings.</p>
+            <p id="rail-overview-summary" class="support-copy">Create or import a profile, then add a relay in the sidebar.</p>
           </div>
           <button id="rail-open-settings" class="action" type="button">Open Settings</button>
         </div>
@@ -37,28 +37,61 @@
         <div class="rail-section-head">
           <div>
             <h2>Relays</h2>
-            <p class="section-support">Your read and write destinations.</p>
+            <p class="section-support">Your read and write destinations. Manage the relays Onstr reads from and writes to.</p>
           </div>
-          <button id="open-settings-relays" class="icon-btn" type="button" title="Manage relays" aria-label="Manage relays">
-            <img src="assets/settings-gear.svg" alt="">
-          </button>
+        </div>
+        <div class="rail-helper-card">
+          <div class="section-head-row">
+            <div>
+              <h3>Recommended Defaults</h3>
+              <p class="support-copy">Verified public relays Onstr can add for a sane first-run network setup.</p>
+            </div>
+            <button id="rail-add-recommended-relays" class="action" type="button">Add Recommended</button>
+          </div>
+          <ul id="rail-recommended-relays-list" class="relay-chip-list"></ul>
         </div>
         <div id="relay-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Relay list"></div>
         <div id="relay-selection-card" class="rail-selection-card">
           <span class="selection-eyebrow">Selected relay</span>
           <strong id="relay-selection-title">No relay selected</strong>
-          <p id="relay-selection-meta" class="support-copy">Add a relay in Settings to choose where Onstr reads and writes.</p>
+          <p id="relay-selection-meta" class="support-copy">Add a relay in the sidebar to choose where Onstr reads and writes.</p>
           <div class="flow-row compact">
             <button id="relay-manage-selected" class="action" type="button">Manage Relay</button>
           </div>
         </div>
+        <section class="rail-section rail-relay-tools">
+          <div class="section-head-row">
+            <div>
+              <h3>Relay Tools</h3>
+              <p class="support-copy">Add, remove, set home, and probe the relays Onstr uses.</p>
+            </div>
+          </div>
+          <form id="network-relay-form" class="form-row" autocomplete="off">
+            <label>Relay URL
+              <input id="network-relay-url" type="text" placeholder="wss://relay.example.com">
+            </label>
+            <label>Mode
+              <select id="network-relay-mode">
+                <option value="both">Read + write</option>
+                <option value="read">Read only</option>
+                <option value="write">Write only</option>
+              </select>
+            </label>
+            <button id="network-relay-add" class="action" type="button">Add</button>
+            <button id="network-relay-remove" class="action" type="button">Remove</button>
+            <button id="network-relay-home" class="action" type="button">Set Home</button>
+            <button id="network-relay-probe" class="action" type="button">Probe</button>
+            <button id="network-relay-list" class="action" type="button">List</button>
+          </form>
+          <pre id="network-log" class="log">No relay actions yet.</pre>
+        </section>
       </section>
 
       <section class="rail-section rail-library">
         <div class="rail-section-head">
           <div>
             <h2>Library</h2>
-            <p class="section-support">Your local saved and reacted events.</p>
+            <p class="section-support">Your saved, liked, starred, and replied-to events. Use this to keep track of people and posts.</p>
           </div>
           <div class="filter-anchor">
             <button id="library-filter-btn" class="filter-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="library-filter-menu">
@@ -142,7 +175,7 @@
         <ul id="recommended-relays-list" class="relay-chip-list"></ul>
         <div class="flow-row compact">
           <button id="recommended-relays-add" class="action primary" type="button">Add Recommended Relays</button>
-          <button id="recommended-relays-open-settings" class="action" type="button">Review In Settings</button>
+          <button id="recommended-relays-open-settings" class="action" type="button">Open Settings</button>
         </div>
       </aside>
 
@@ -466,9 +499,9 @@
   </div>
 
   <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
-    <aside id="settings-drawer" class="drawer settings-drawer" aria-label="Onstr settings">
+    <aside id="settings-drawer" class="drawer settings-drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="drawer-head">
-        <h3>Onstr Settings</h3>
+        <h3 id="settings-title">Onstr Settings</h3>
         <button id="close-settings" class="action" type="button">Close</button>
       </header>
 
@@ -517,38 +550,6 @@
           <h4>Theme</h4>
           <label for="theme-select">Theme</label>
           <select id="theme-select" aria-label="Theme picker"></select>
-        </section>
-
-        <section class="drawer-section">
-          <h4>Relays</h4>
-          <div class="drawer-helper-card">
-            <div class="section-head-row">
-              <div>
-                <h5>Recommended Defaults</h5>
-                <p class="support-copy">Verified public relays Onstr can add for a sane first-run network setup.</p>
-              </div>
-              <button id="settings-add-recommended-relays" class="action" type="button">Add Recommended</button>
-            </div>
-            <ul id="settings-recommended-relays-list" class="relay-chip-list"></ul>
-          </div>
-          <form id="network-relay-form" class="form-row" autocomplete="off">
-            <label>Relay URL
-              <input id="network-relay-url" type="text" placeholder="wss://relay.example.com">
-            </label>
-            <label>Mode
-              <select id="network-relay-mode">
-                <option value="both">Read + write</option>
-                <option value="read">Read only</option>
-                <option value="write">Write only</option>
-              </select>
-            </label>
-            <button id="network-relay-add" class="action" type="button">Add</button>
-            <button id="network-relay-remove" class="action" type="button">Remove</button>
-            <button id="network-relay-home" class="action" type="button">Set Home</button>
-            <button id="network-relay-probe" class="action" type="button">Probe</button>
-            <button id="network-relay-list" class="action" type="button">List</button>
-          </form>
-          <pre id="network-log" class="log">No relay actions yet.</pre>
         </section>
 
         <section class="drawer-section">

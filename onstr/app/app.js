@@ -85,13 +85,13 @@
     railOverviewSummary: document.getElementById('rail-overview-summary'),
     railOpenSettings: document.getElementById('rail-open-settings'),
     railResizer: document.getElementById('rail-resizer'),
+    railRecommendedRelaysList: document.getElementById('rail-recommended-relays-list'),
+    railAddRecommendedRelays: document.getElementById('rail-add-recommended-relays'),
     recommendedRelaysNotice: document.getElementById('recommended-relays-notice'),
     recommendedRelaysDismiss: document.getElementById('recommended-relays-dismiss'),
     recommendedRelaysAdd: document.getElementById('recommended-relays-add'),
     recommendedRelaysOpenSettings: document.getElementById('recommended-relays-open-settings'),
     recommendedRelaysList: document.getElementById('recommended-relays-list'),
-    settingsRecommendedRelaysList: document.getElementById('settings-recommended-relays-list'),
-    settingsAddRecommendedRelays: document.getElementById('settings-add-recommended-relays'),
 
     themeLink: document.getElementById('theme-link'),
     themeSelect: document.getElementById('theme-select'),
@@ -100,7 +100,6 @@
     themePickerList: document.getElementById('theme-picker-list'),
 
     settingsOpen: document.getElementById('open-settings'),
-    settingsOpenRelays: document.getElementById('open-settings-relays'),
     settingsClose: document.getElementById('close-settings'),
     settingsBackdrop: document.getElementById('drawer-backdrop'),
 
@@ -494,7 +493,7 @@
   }
 
   function renderRecommendedRelayLists() {
-    [els.recommendedRelaysList, els.settingsRecommendedRelaysList].forEach(function (node) {
+    [els.recommendedRelaysList, els.railRecommendedRelaysList].forEach(function (node) {
       if (!node) {
         return;
       }
@@ -506,6 +505,17 @@
         node.appendChild(item);
       });
     });
+  }
+
+  function prepareRelayControls(relayUrl) {
+    if (els.networkRelayUrl) {
+      els.networkRelayUrl.value = String(relayUrl || '').trim();
+      els.networkRelayUrl.focus();
+      els.networkRelayUrl.select();
+    }
+    if (els.networkRelayMode) {
+      els.networkRelayMode.value = 'both';
+    }
   }
 
   async function saveRecommendedRelaysNotice(value) {
@@ -571,7 +581,7 @@
     }
     if (!state.activeProfileId && !state.relayReady) {
       els.railOverviewTitle.textContent = 'Finish setup';
-      els.railOverviewSummary.textContent = 'Create or import a profile, then add a home relay in Settings.';
+      els.railOverviewSummary.textContent = 'Create or import a profile, then add a home relay in the sidebar.';
       return;
     }
     if (!state.activeProfileId) {
@@ -605,7 +615,7 @@
       els.setupPanel.classList.toggle('hidden', ready);
     }
     if (!state.activeProfileId && !state.relayReady) {
-      els.setupSummary.textContent = 'Create a profile and add a relay so Home, Discover, and publish flows can do real work.';
+      els.setupSummary.textContent = 'Create a profile and add a relay in the sidebar so Home, Discover, and publish flows can do real work.';
       return;
     }
     if (!state.activeProfileId) {
@@ -613,7 +623,7 @@
       return;
     }
     if (!state.relayReady) {
-      els.setupSummary.textContent = 'Profile is ready. Add a home relay before you fetch timelines or publish drafts.';
+      els.setupSummary.textContent = 'Profile is ready. Add a home relay in the sidebar before you fetch timelines or publish drafts.';
       return;
     }
     els.setupSummary.textContent = 'Profile and relay are ready. Home and Discover now use your configured network state.';
@@ -770,15 +780,13 @@
     });
   }
 
-  function openSettings(focusRelays, trigger) {
+  function openSettings(trigger) {
     closeThemeMenu(false);
-    state.settingsReturnFocus = trigger || (focusRelays ? els.settingsOpenRelays : els.settingsOpen);
+    state.settingsReturnFocus = trigger || els.settingsOpen;
     els.settingsBackdrop.classList.remove('hidden');
     els.settingsBackdrop.setAttribute('aria-hidden', 'false');
     els.settingsOpen.classList.add('active');
-    if (focusRelays) {
-      els.networkRelayUrl.focus();
-    } else if (!state.activeProfileId && els.profileCreateName) {
+    if (!state.activeProfileId && els.profileCreateName) {
       els.profileCreateName.focus();
     } else {
       els.themeSelect.focus();
@@ -1617,7 +1625,7 @@
     var row = relayRowByUrl(state.selectedRelayUrl);
     if (!row) {
       els.relaySelectionTitle.textContent = 'No relay selected';
-      els.relaySelectionMeta.textContent = 'Add a relay in Settings to choose where Onstr reads and writes.';
+      els.relaySelectionMeta.textContent = 'Add a relay in the sidebar to choose where Onstr reads and writes.';
       if (els.relayManageSelected) {
         els.relayManageSelected.disabled = true;
       }
@@ -1720,8 +1728,8 @@
         setSelectedRelay(relay.url);
       });
       row.addEventListener('dblclick', function () {
-        els.networkRelayUrl.value = relay.url;
-        openSettings(true, row);
+        setSelectedRelay(relay.url);
+        prepareRelayControls(relay.url);
       });
 
       els.relayListbox.appendChild(row);
@@ -1927,7 +1935,7 @@
     var parsed = writeLog(els.homeLog, 'Timeline fetch', blob);
     if (parsed && parsed.needs_relay) {
       state.homeEvents = [];
-      renderHomeEmptyState('Add a relay in Settings to load your timeline.');
+      renderHomeEmptyState('Add a relay in the sidebar to load your timeline.');
       return;
     }
     renderEventFeed(els.homeFeed, els.homeResultsSummary, parsed, 'No events returned.', 'homeEvents');
@@ -1944,9 +1952,9 @@
     var parsed = writeLog(els.discoverLog, 'Discover search', blob);
     if (parsed && parsed.needs_relay) {
       state.discoverEvents = [];
-      feedEmpty(els.discoverFeed, 'Add a relay in Settings to search relay content.');
+      feedEmpty(els.discoverFeed, 'Add a relay in the sidebar to search relay content.');
       if (els.discoverResultsSummary) {
-        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
+        els.discoverResultsSummary.textContent = 'Add a relay in the sidebar to search relay content.';
       }
       return;
     }
@@ -1960,7 +1968,7 @@
     var parsed = writeLog(els.discoverLog, 'Discover count', blob);
     if (parsed && parsed.needs_relay) {
       if (els.discoverResultsSummary) {
-        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
+        els.discoverResultsSummary.textContent = 'Add a relay in the sidebar to search relay content.';
       }
       return;
     }
@@ -1984,9 +1992,9 @@
     var parsed = writeLog(els.discoverLog, 'Filtered search', blob);
     if (parsed && parsed.needs_relay) {
       state.discoverEvents = [];
-      feedEmpty(els.discoverFeed, 'Add a relay in Settings to search relay content.');
+      feedEmpty(els.discoverFeed, 'Add a relay in the sidebar to search relay content.');
       if (els.discoverResultsSummary) {
-        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
+        els.discoverResultsSummary.textContent = 'Add a relay in the sidebar to search relay content.';
       }
       return;
     }
@@ -2345,12 +2353,12 @@
 
     if (els.recommendedRelaysOpenSettings) {
       els.recommendedRelaysOpenSettings.addEventListener('click', function () {
-        openSettings(true, els.recommendedRelaysOpenSettings);
+        openSettings(els.recommendedRelaysOpenSettings);
       });
     }
 
-    if (els.settingsAddRecommendedRelays) {
-      els.settingsAddRecommendedRelays.addEventListener('click', function () {
+    if (els.railAddRecommendedRelays) {
+      els.railAddRecommendedRelays.addEventListener('click', function () {
         addRecommendedRelays().catch(function () {
           return;
         });
@@ -2359,13 +2367,13 @@
 
     if (els.railOpenSettings) {
       els.railOpenSettings.addEventListener('click', function () {
-        openSettings(false, els.railOpenSettings);
+        openSettings(els.railOpenSettings);
       });
     }
 
     if (els.setupOpenSettings) {
       els.setupOpenSettings.addEventListener('click', function () {
-        openSettings(false, els.setupOpenSettings);
+        openSettings(els.setupOpenSettings);
       });
     }
 
@@ -2551,8 +2559,7 @@
           toast('Select a relay first.', 'bad');
           return;
         }
-        els.networkRelayUrl.value = row.url;
-        openSettings(true, els.relayManageSelected);
+        prepareRelayControls(row.url);
       });
     }
 
@@ -2657,13 +2664,10 @@
   function bindDrawers() {
     els.settingsOpen.addEventListener('click', function () {
       if (els.settingsBackdrop.classList.contains('hidden')) {
-        openSettings(false, els.settingsOpen);
+        openSettings(els.settingsOpen);
       } else {
         closeSettings();
       }
-    });
-    els.settingsOpenRelays.addEventListener('click', function () {
-      openSettings(true, els.settingsOpenRelays);
     });
     els.settingsClose.addEventListener('click', closeSettings);
 
@@ -2723,7 +2727,6 @@
       }
       if (
         node === els.settingsOpen ||
-        node === els.settingsOpenRelays ||
         node === els.settingsClose ||
         node === els.railOpenSettings ||
         node === els.setupOpenSettings ||
@@ -2753,9 +2756,6 @@
       node.disabled = true;
     });
     els.settingsOpen.disabled = false;
-    if (els.settingsOpenRelays) {
-      els.settingsOpenRelays.disabled = false;
-    }
     if (els.railOpenSettings) {
       els.railOpenSettings.disabled = false;
     }
@@ -2932,7 +2932,7 @@
           return;
         });
       } else {
-        renderHomeEmptyState('Add a relay in Settings to load your timeline.');
+        renderHomeEmptyState('Add a relay in the sidebar to load your timeline.');
       }
     } else {
       renderHomeEmptyState('Open this app in the Wizardry desktop host to load backend data.');

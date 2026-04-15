@@ -363,6 +363,25 @@ h5 {
   gap: 0.42rem;
 }
 
+.rail-helper-card {
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-soft) 32%, transparent);
+  padding: 0.68rem 0.74rem;
+  display: grid;
+  gap: 0.52rem;
+}
+
+.rail-helper-card h3 {
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rail-relay-tools {
+  gap: 0.52rem;
+}
+
 .selection-preview {
   margin: 0;
   color: var(--text-main);
@@ -1072,7 +1091,8 @@ label {
   inset: 0;
   background: rgba(9, 11, 16, 0.42);
   display: grid;
-  justify-items: end;
+  place-items: center;
+  padding: 1rem;
   z-index: 1300;
 }
 
@@ -1081,20 +1101,23 @@ label {
 }
 
 .drawer {
-  height: 100%;
-  width: min(36rem, 98vw);
-  border-left: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 24px 50px color-mix(in srgb, black 30%, transparent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .compose-drawer {
-  width: min(40rem, 98vw);
+  width: min(40rem, calc(100vw - 2rem));
 }
 
 .delete-drawer {
-  width: min(27rem, 96vw);
+  width: min(27rem, calc(100vw - 2rem));
 }
 
 .drawer-head {
@@ -1144,6 +1167,10 @@ label {
   max-height: 12rem;
 }
 
+.settings-drawer {
+  width: min(44rem, calc(100vw - 2rem));
+}
+
 .hidden {
   display: none !important;
 }
@@ -1185,5 +1212,17 @@ label {
   .utility-grid,
   .setup-status-list {
     grid-template-columns: 1fr;
+  }
+
+  .drawer-backdrop {
+    padding: 0.5rem;
+  }
+
+  .drawer,
+  .settings-drawer,
+  .compose-drawer,
+  .delete-drawer {
+    width: min(100%, calc(100vw - 1rem));
+    max-height: calc(100vh - 1rem);
   }
 }

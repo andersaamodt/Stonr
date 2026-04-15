@@ -60,7 +60,9 @@ fn first_run_surface_offers_recommended_relays_notice() {
 
     assert!(index_html.contains("id=\"recommended-relays-notice\""));
     assert!(index_html.contains("id=\"recommended-relays-add\""));
-    assert!(index_html.contains("id=\"settings-add-recommended-relays\""));
+    assert!(index_html.contains("id=\"rail-add-recommended-relays\""));
+    assert!(index_html.contains("id=\"rail-recommended-relays-list\""));
+    assert!(!index_html.contains("id=\"settings-add-recommended-relays\""));
     assert!(app_js.contains("RECOMMENDED_RELAYS = Object.freeze"));
     assert!(app_js.contains("function addRecommendedRelays()"));
 }
