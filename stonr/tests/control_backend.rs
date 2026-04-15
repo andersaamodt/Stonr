@@ -28,17 +28,32 @@ fn write_env(dir: &TempDir) -> String {
 }
 
 fn run_backend(args: &[&str]) -> String {
-    let output = Command::new("sh")
-        .arg(backend_script())
-        .args(args)
-        .output()
-        .unwrap();
+    run_backend_with_env(args, &[])
+}
+
+fn run_backend_with_env(args: &[&str], envs: &[(&str, &str)]) -> String {
+    let mut command = Command::new("sh");
+    command.arg(backend_script()).args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    let output = command.output().unwrap();
     assert!(
         output.status.success(),
         "backend failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap()
+}
+
+fn run_backend_status_with_env(args: &[&str], envs: &[(&str, &str)]) -> std::process::Output {
+    let output = Command::new("sh")
+        .arg(backend_script())
+        .args(args)
+        .envs(envs.iter().copied())
+        .output()
+        .unwrap();
+    output
 }
 
 #[test]
@@ -313,4 +328,75 @@ fn apply_preset_nostr_blog_sets_site_mirror_defaults() {
     assert!(env_text.contains("FILTER_TAG_A=\n"));
     assert!(env_text.contains("FILTER_TAG_T=\n"));
     assert!(env_text.contains("RELAYS_UPSTREAM=wss://relay.damus.io,wss://nos.lol"));
+}
+
+#[test]
+fn relay_stop_boots_out_launchd_service_before_pid_check() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let home_dir = dir.path().join("home");
+    let launch_agents = home_dir.join("Library/LaunchAgents");
+    fs::create_dir_all(&launch_agents).unwrap();
+    fs::write(launch_agents.join("dev.stonr.relay.plist"), "<plist/>").unwrap();
+
+    let stub_dir = dir.path().join("bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+    let launchd_state = dir.path().join("launchd-state");
+    fs::write(&launchd_state, "loaded=1\n").unwrap();
+    let ps_log = dir.path().join("ps.log");
+    let bootout_log = dir.path().join("bootout.log");
+
+    fs::write(stub_dir.join("uname"), "#!/bin/sh\nprintf 'Darwin\\n'\n").unwrap();
+    fs::write(
+        stub_dir.join("launchctl"),
+        format!(
+            "#!/bin/sh\nset -eu\nstate='{}'\nbootout_log='{}'\ncmd=${{1-}}\nshift || :\ncase \"$cmd\" in\n  print-disabled)\n    printf '{{}}\\n'\n    ;;\n  print)\n    if grep -q '^loaded=1$' \"$state\"; then\n      printf 'loaded\\n'\n      exit 0\n    fi\n    exit 1\n    ;;\n  bootout)\n    printf 'bootout %s\\n' \"$*\" >> \"$bootout_log\"\n    printf 'loaded=0\\n' > \"$state\"\n    ;;\n  bootstrap)\n    printf 'loaded=1\\n' > \"$state\"\n    ;;\n  kickstart)\n    printf 'loaded=1\\n' > \"$state\"\n    ;;\n  enable|disable)\n    exit 0\n    ;;\n  *)\n    exit 0\n    ;;\nesac\n",
+            launchd_state.display(),
+            bootout_log.display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        stub_dir.join("ps"),
+        format!(
+            "#!/bin/sh\nset -eu\nif grep -q '^loaded=1$' '{}'; then\n  printf ' 999 stonr --env {} serve\\n'\nfi\nprintf 'checked\\n' >> '{}'\n",
+            launchd_state.display(),
+            env_path,
+            ps_log.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["uname", "launchctl", "ps"] {
+            let path = stub_dir.join(name);
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    let path_env = format!(
+        "{}:{}",
+        stub_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = run_backend_status_with_env(
+        &["relay-stop", &env_path],
+        &[
+            ("HOME", home_dir.to_str().unwrap()),
+            ("PATH", path_env.as_str()),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "backend failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body = String::from_utf8(output.stdout).unwrap();
+    assert!(body.contains("status=stopped"));
+    let bootout = fs::read_to_string(&bootout_log).unwrap();
+    assert!(bootout.contains("bootout"));
 }

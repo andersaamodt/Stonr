@@ -571,6 +571,62 @@ service_autostart_disable() {
   service_autostart_status "$env_path"
 }
 
+service_runtime_stop() {
+  env_path=${1-}
+  manager=$(detect_service_manager)
+  label=$(service_label)
+  case "$manager" in
+    launchd)
+      plist_path=$(launchd_plist_path)
+      if [ -f "$plist_path" ] && ! launchd_label_disabled "$label"; then
+        launchctl bootout "$(launchd_domain)" "$plist_path" >/dev/null 2>&1 || :
+        launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1 || :
+        return 0
+      fi
+      ;;
+    systemd)
+      unit_name=$(systemd_unit_name)
+      unit_path=$(systemd_unit_path)
+      if [ -f "$unit_path" ] && systemctl --user is-enabled "$unit_name" >/dev/null 2>&1; then
+        systemctl --user stop "$unit_name" >/dev/null 2>&1 || :
+        return 0
+      fi
+      ;;
+    *)
+      ;;
+  esac
+  return 1
+}
+
+service_runtime_start() {
+  env_path=${1-}
+  manager=$(detect_service_manager)
+  label=$(service_label)
+  case "$manager" in
+    launchd)
+      plist_path=$(launchd_plist_path)
+      if [ -f "$plist_path" ] && ! launchd_label_disabled "$label"; then
+        if ! launchctl print "$(launchd_domain)/$label" >/dev/null 2>&1; then
+          launchctl bootstrap "$(launchd_domain)" "$plist_path" >/dev/null 2>&1 || :
+        fi
+        launchctl kickstart -k "$(launchd_domain)/$label" >/dev/null 2>&1 || return 1
+        return 0
+      fi
+      ;;
+    systemd)
+      unit_name=$(systemd_unit_name)
+      unit_path=$(systemd_unit_path)
+      if [ -f "$unit_path" ] && systemctl --user is-enabled "$unit_name" >/dev/null 2>&1; then
+        systemctl --user start "$unit_name" >/dev/null 2>&1 || return 1
+        return 0
+      fi
+      ;;
+    *)
+      ;;
+  esac
+  return 1
+}
+
 relay_pid() {
   env_path=${1-}
   file=$(pid_path "$env_path")
@@ -1210,13 +1266,15 @@ case "$cmd" in
       status_kv "$env_path"
       exit 0
     fi
-    bin=$(ensure_stonr_bin)
-    log_file=$(log_path "$env_path")
     pid_file=$(pid_path "$env_path")
-    mkdir -p "$(dirname "$log_file")"
-    nohup "$bin" --env "$env_path" serve >>"$log_file" 2>&1 &
-    pid=$!
-    printf '%s\n' "$pid" > "$pid_file"
+    if ! service_runtime_start "$env_path"; then
+      bin=$(ensure_stonr_bin)
+      log_file=$(log_path "$env_path")
+      mkdir -p "$(dirname "$log_file")"
+      nohup "$bin" --env "$env_path" serve >>"$log_file" 2>&1 &
+      pid=$!
+      printf '%s\n' "$pid" > "$pid_file"
+    fi
     started=0
     attempt=0
     while [ "$attempt" -lt 20 ]; do
@@ -1245,6 +1303,7 @@ case "$cmd" in
   relay-stop)
     env_path=$(resolve_env_path "${1-}")
     normalize_env_file "$env_path"
+    service_runtime_stop "$env_path" >/dev/null 2>&1 || :
     if relay_running "$env_path"; then
       pid=$(relay_pid "$env_path")
       kill "$pid" 2>/dev/null || true
