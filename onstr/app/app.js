@@ -1359,6 +1359,7 @@
       return;
     }
 
+    var workspace = document.querySelector('.workspace');
     var dragging = false;
     var dragPointerId = null;
 
@@ -1369,12 +1370,27 @@
       document.documentElement.style.userSelect = active ? 'none' : '';
     }
 
+    function workspaceRect() {
+      return workspace ? workspace.getBoundingClientRect() : null;
+    }
+
+    function dividerX() {
+      var rect = workspaceRect();
+      if (!rect) {
+        return 0;
+      }
+      return rect.left + state.railWidth;
+    }
+
+    function nearDivider(clientX) {
+      return Math.abs(Number(clientX || 0) - dividerX()) <= 8;
+    }
+
     function updateWidth(clientX) {
-      var workspace = document.querySelector('.workspace');
-      if (!workspace) {
+      var rect = workspaceRect();
+      if (!rect) {
         return;
       }
-      var rect = workspace.getBoundingClientRect();
       var minWidth = 272;
       var maxWidth = Math.max(minWidth, Math.floor(rect.width - 320));
       var next = Math.round(clientX - rect.left);
@@ -1382,19 +1398,9 @@
       applyRailWidth(next);
     }
 
-  function endDrag(event) {
-      if (!dragging || event.pointerId !== dragPointerId) {
-        return;
-      }
-      dragging = false;
-      dragPointerId = null;
-      setDragCursor(false);
-      persistRailWidth(state.railWidth);
-    }
-
-    els.railResizer.addEventListener('pointerdown', function (event) {
+    function startDrag(event) {
       if (event.button !== 0) {
-        return;
+        return false;
       }
       dragging = true;
       dragPointerId = event.pointerId;
@@ -1404,6 +1410,49 @@
       }
       setDragCursor(true);
       updateWidth(event.clientX);
+      return true;
+    }
+
+    function endDrag(event) {
+      if (!dragging || (event.pointerId && event.pointerId !== dragPointerId)) {
+        return;
+      }
+      dragging = false;
+      dragPointerId = null;
+      setDragCursor(false);
+      persistRailWidth(state.railWidth);
+    }
+
+    if (workspace) {
+      workspace.addEventListener('pointermove', function (event) {
+        if (dragging && event.pointerId === dragPointerId) {
+          event.preventDefault();
+          updateWidth(event.clientX);
+          return;
+        }
+        if (nearDivider(event.clientX)) {
+          workspace.style.cursor = 'col-resize';
+          return;
+        }
+        workspace.style.cursor = '';
+      });
+
+      workspace.addEventListener('pointerleave', function () {
+        if (!dragging) {
+          workspace.style.cursor = '';
+        }
+      });
+
+      workspace.addEventListener('pointerdown', function (event) {
+        if (!nearDivider(event.clientX)) {
+          return;
+        }
+        startDrag(event);
+      });
+    }
+
+    els.railResizer.addEventListener('pointerdown', function (event) {
+      startDrag(event);
     });
 
     els.railResizer.addEventListener('pointermove', function (event) {
@@ -1423,6 +1472,9 @@
       dragging = false;
       dragPointerId = null;
       setDragCursor(false);
+      if (workspace) {
+        workspace.style.cursor = '';
+      }
       persistRailWidth(state.railWidth);
     });
   }
