@@ -28,6 +28,12 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(style_css.contains(".rail-resizer"));
     assert!(style_css.contains(".setup-panel"));
     assert!(style_css.contains(".setup-status-list"));
+    assert!(style_css.contains(".stage {"));
+    assert!(style_css.contains(".stage-head {"));
+    assert!(style_css.contains(".tab-panel {"));
+    assert!(style_css.contains(".stage-section {"));
+    assert!(style_css.contains("min-width: min(9.8rem, 100%);"));
+    assert!(style_css.contains(".form-row > *,"));
 }
 
 #[test]

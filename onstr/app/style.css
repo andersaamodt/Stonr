@@ -541,6 +541,7 @@ h5 {
 
 .stage {
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   padding: 0.9rem 1.14rem 1.18rem;
   background: color-mix(in srgb, var(--stage) 90%, transparent);
@@ -611,7 +612,9 @@ h5 {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.8rem;
+  min-width: 0;
 }
 
 .action {
@@ -646,6 +649,7 @@ h5 {
 
 .tab-panel {
   min-height: 0;
+  min-width: 0;
   display: grid;
   align-content: start;
   gap: 0.86rem;
@@ -660,6 +664,7 @@ h5 {
   gap: 0.64rem;
   padding-bottom: 0.86rem;
   border-bottom: 1px solid var(--line);
+  min-width: 0;
 }
 
 .stage-section:last-child {
@@ -679,6 +684,7 @@ h5 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.62rem;
+  min-width: 0;
 }
 
 .setup-status-card {
@@ -705,6 +711,12 @@ h5 {
   flex-wrap: wrap;
   gap: 0.56rem;
   align-items: end;
+  min-width: 0;
+}
+
+.form-row > *,
+.flow-row > * {
+  max-width: 100%;
 }
 
 .flow-row.compact {
@@ -726,7 +738,8 @@ label {
   display: grid;
   gap: 0.24rem;
   width: fit-content;
-  min-width: 9.8rem;
+  min-width: min(9.8rem, 100%);
+  max-width: 100%;
   color: var(--text-muted);
   font-size: 0.8rem;
 }
@@ -744,7 +757,8 @@ label {
   display: flex;
   gap: 0.4rem;
   align-items: center;
-  min-width: fit-content;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .toggle-row input {
@@ -756,6 +770,12 @@ label {
 
 .wide {
   width: min(46rem, 100%);
+}
+
+.inline-head,
+.inline-head > *,
+.setup-head > * {
+  min-width: 0;
 }
 
 .type-pills {
