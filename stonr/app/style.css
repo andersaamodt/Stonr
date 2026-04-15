@@ -488,7 +488,7 @@ h4 {
 }
 
 .rail-settings img {
-  transform: translate(1px, 1px);
+  transform: translate(-1px, -1px);
 }
 
 .footer-btn,
