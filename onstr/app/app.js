@@ -21,6 +21,7 @@
     recommendedRelaysNotice: '',
     relayReady: false,
     homeRelayUrl: '',
+    railWidth: 352,
     relayRows: [],
     libraryRows: [],
     homeEvents: [],
@@ -83,6 +84,7 @@
     railOverviewTitle: document.getElementById('rail-overview-title'),
     railOverviewSummary: document.getElementById('rail-overview-summary'),
     railOpenSettings: document.getElementById('rail-open-settings'),
+    railResizer: document.getElementById('rail-resizer'),
     recommendedRelaysNotice: document.getElementById('recommended-relays-notice'),
     recommendedRelaysDismiss: document.getElementById('recommended-relays-dismiss'),
     recommendedRelaysAdd: document.getElementById('recommended-relays-add'),
@@ -957,6 +959,30 @@
     await backend('set-ui-pref', [key, String(value || '')]);
   }
 
+  function normalizeRailWidth(value) {
+    var width = Number(value);
+    if (!Number.isFinite(width) || width <= 0) {
+      width = 352;
+    }
+    return Math.round(Math.min(560, Math.max(272, width)));
+  }
+
+  function applyRailWidth(width) {
+    var next = normalizeRailWidth(width);
+    state.railWidth = next;
+    if (document.documentElement) {
+      document.documentElement.style.setProperty('--rail-width', next + 'px');
+    }
+    return next;
+  }
+
+  function persistRailWidth(width) {
+    applyRailWidth(width);
+    saveUiPref('rail_width', String(state.railWidth)).catch(function () {
+      return;
+    });
+  }
+
   function bindThemeControls() {
     function onThemeSelect(next) {
       if (!next) {
@@ -1000,6 +1026,79 @@
         closeThemeMenu(true);
       });
     }
+  }
+
+  function bindRailResizer() {
+    if (!els.railResizer) {
+      return;
+    }
+
+    var dragging = false;
+    var dragPointerId = null;
+
+    function setDragCursor(active) {
+      document.body.style.cursor = active ? 'col-resize' : '';
+      document.body.style.userSelect = active ? 'none' : '';
+      document.documentElement.style.cursor = active ? 'col-resize' : '';
+      document.documentElement.style.userSelect = active ? 'none' : '';
+    }
+
+    function updateWidth(clientX) {
+      var workspace = document.querySelector('.workspace');
+      if (!workspace) {
+        return;
+      }
+      var rect = workspace.getBoundingClientRect();
+      var minWidth = 272;
+      var maxWidth = Math.max(minWidth, Math.floor(rect.width - 320));
+      var next = Math.round(clientX - rect.left);
+      next = Math.min(maxWidth, Math.max(minWidth, next));
+      applyRailWidth(next);
+    }
+
+  function endDrag(event) {
+      if (!dragging || event.pointerId !== dragPointerId) {
+        return;
+      }
+      dragging = false;
+      dragPointerId = null;
+      setDragCursor(false);
+      persistRailWidth(state.railWidth);
+    }
+
+    els.railResizer.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0) {
+        return;
+      }
+      dragging = true;
+      dragPointerId = event.pointerId;
+      event.preventDefault();
+      if (els.railResizer.setPointerCapture) {
+        els.railResizer.setPointerCapture(event.pointerId);
+      }
+      setDragCursor(true);
+      updateWidth(event.clientX);
+    });
+
+    els.railResizer.addEventListener('pointermove', function (event) {
+      if (!dragging || event.pointerId !== dragPointerId) {
+        return;
+      }
+      event.preventDefault();
+      updateWidth(event.clientX);
+    });
+
+    els.railResizer.addEventListener('pointerup', endDrag);
+    els.railResizer.addEventListener('pointercancel', endDrag);
+    els.railResizer.addEventListener('lostpointercapture', function () {
+      if (!dragging) {
+        return;
+      }
+      dragging = false;
+      dragPointerId = null;
+      setDragCursor(false);
+      persistRailWidth(state.railWidth);
+    });
   }
 
   function setComposeTypeUi() {
@@ -2775,6 +2874,7 @@
     bindForms();
     bindDrawers();
     bindThemeControls();
+    bindRailResizer();
     setComposeType('note');
     renderRecommendedRelayLists();
     revealBootUi();
@@ -2809,6 +2909,7 @@
     if (BUCKETS.indexOf(prefBucket) < 0) {
       prefBucket = 'all';
     }
+    applyRailWidth(prefs.rail_width || 352);
     state.recommendedRelaysNotice = String(prefs.recommended_relays_notice || '').trim();
     state.activeLibraryBucket = prefBucket;
     renderSetupPanel();

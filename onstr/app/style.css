@@ -129,8 +129,9 @@ summary:focus-visible {
   max-width: 132rem;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 22rem minmax(0, 1fr);
+  grid-template-columns: var(--rail-width, 22rem) minmax(0, 1fr);
   min-width: 64rem;
+  position: relative;
 }
 
 .rail {
@@ -141,6 +142,18 @@ summary:focus-visible {
   padding: 0.9rem;
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.rail-resizer {
+  position: absolute;
+  top: 0;
+  left: var(--rail-width, 22rem);
+  width: 12px;
+  height: 100%;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 25;
 }
 
 .rail-head {
@@ -1164,7 +1177,7 @@ label {
   }
 
   .workspace {
-    grid-template-columns: 20rem minmax(0, 1fr);
+    --rail-width: 20rem;
   }
 }
 

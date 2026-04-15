@@ -24,6 +24,8 @@ fn home_surface_has_first_run_setup_panel() {
 
     assert!(index_html.contains("id=\"setup-panel\""));
     assert!(index_html.contains("id=\"setup-open-settings\""));
+    assert!(index_html.contains("id=\"rail-resizer\""));
+    assert!(style_css.contains(".rail-resizer"));
     assert!(style_css.contains(".setup-panel"));
     assert!(style_css.contains(".setup-status-list"));
 }
@@ -67,6 +69,8 @@ fn first_run_surface_offers_recommended_relays_notice() {
 fn backend_prefs_expose_recommended_relays_notice_state() {
     let backend_sh = read_file(&format!("{}/../app/scripts/onstr-backend.sh", env!("CARGO_MANIFEST_DIR")));
 
+    assert!(backend_sh.contains("rail_width=$(pref_get rail_width"));
+    assert!(backend_sh.contains("printf 'rail_width=%s\\n'"));
     assert!(backend_sh.contains("recommended_relays_notice=$(pref_get recommended_relays_notice"));
     assert!(backend_sh.contains("printf 'recommended_relays_notice=%s\\n'"));
 }
