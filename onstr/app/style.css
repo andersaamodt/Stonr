@@ -422,6 +422,13 @@ h5 {
   min-width: 0;
 }
 
+.footer-profile-anchor {
+  position: relative;
+  display: block;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+}
+
 .icon-btn,
 .footer-icon-btn {
   width: 2rem;
@@ -495,6 +502,11 @@ h5 {
   z-index: 40;
 }
 
+.footer-profile-menu {
+  right: 0;
+  left: auto;
+}
+
 .footer-theme-list {
   display: grid;
   gap: 0.2rem;
@@ -521,6 +533,29 @@ h5 {
 
 .footer-theme-item.active {
   background: color-mix(in srgb, var(--accent-main) 26%, transparent);
+}
+
+.footer-profile-btn {
+  min-width: 7.6rem;
+}
+
+.footer-profile-name,
+.footer-profile-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer-profile-meta {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.footer-profile-new {
+  border-top: 1px solid var(--line);
+  margin-top: 0.16rem;
+  padding-top: 0.34rem;
 }
 
 .footer-theme-check {

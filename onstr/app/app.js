@@ -38,7 +38,8 @@
     promptResolver: null,
     railSelectionKind: 'nav',
     railSelectionValue: 'home',
-    bootFinished: false
+    bootFinished: false,
+    profiles: []
   };
 
   var TAB_IDS = ['home', 'discover'];
@@ -110,6 +111,9 @@
     themePickerBtn: document.getElementById('theme-picker-btn'),
     themePickerMenu: document.getElementById('theme-picker-menu'),
     themePickerList: document.getElementById('theme-picker-list'),
+    profilePickerBtn: document.getElementById('profile-picker-btn'),
+    profilePickerMenu: document.getElementById('profile-picker-menu'),
+    profilePickerList: document.getElementById('profile-picker-list'),
 
     settingsOpen: document.getElementById('open-settings'),
     settingsClose: document.getElementById('close-settings'),
@@ -616,6 +620,13 @@
     return name || pubkey || state.activeProfileId;
   }
 
+  function activeProfileFooterLabel() {
+    if (!state.activeProfileId) {
+      return 'Identity';
+    }
+    return String(state.activeProfileName || '').trim() || shortId(String(state.activeProfilePubkey || state.activeProfileId || ''));
+  }
+
   function relayLabel() {
     if (!state.relayReady) {
       return 'No relay configured yet.';
@@ -929,6 +940,7 @@
 
   function openSettings(trigger) {
     closeThemeMenu(false);
+    closeProfileMenu(false);
     state.settingsReturnFocus = trigger || els.settingsOpen;
     els.settingsBackdrop.classList.remove('hidden');
     els.settingsBackdrop.setAttribute('aria-hidden', 'false');
@@ -1092,10 +1104,15 @@
     return !!(els.themePickerMenu && !els.themePickerMenu.classList.contains('hidden'));
   }
 
+  function profileMenuOpen() {
+    return !!(els.profilePickerMenu && !els.profilePickerMenu.classList.contains('hidden'));
+  }
+
   function openThemeMenu() {
     if (!els.themePickerMenu || !els.themePickerBtn) {
       return;
     }
+    closeProfileMenu(false);
     closeOpenMenu();
     renderThemeMenuList();
     els.themePickerMenu.classList.remove('hidden');
@@ -1115,6 +1132,72 @@
     }
   }
 
+  function renderProfileMenuList() {
+    if (!els.profilePickerList) {
+      return;
+    }
+    els.profilePickerList.innerHTML = '';
+
+    state.profiles.forEach(function (profile) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'footer-theme-item' + (profile.id === state.activeProfileId ? ' active' : '');
+      button.setAttribute('data-profile-id', String(profile.id || ''));
+      button.setAttribute('aria-pressed', profile.id === state.activeProfileId ? 'true' : 'false');
+
+      var name = document.createElement('span');
+      name.className = 'footer-profile-name';
+      name.textContent = String(profile.name || 'Unnamed profile');
+      button.appendChild(name);
+
+      var meta = document.createElement('span');
+      meta.className = 'footer-profile-meta';
+      meta.textContent = profile.id === state.activeProfileId ? 'Active' : shortId(String(profile.pubkey || profile.id || ''));
+      button.appendChild(meta);
+
+      els.profilePickerList.appendChild(button);
+    });
+
+    var createButton = document.createElement('button');
+    createButton.type = 'button';
+    createButton.className = 'footer-theme-item footer-profile-new';
+    createButton.setAttribute('data-profile-action', 'create');
+    createButton.textContent = 'New Nostr Profile';
+    els.profilePickerList.appendChild(createButton);
+  }
+
+  function openProfileMenu() {
+    if (!els.profilePickerMenu || !els.profilePickerBtn) {
+      return;
+    }
+    closeThemeMenu(false);
+    closeOpenMenu();
+    renderProfileMenuList();
+    els.profilePickerMenu.classList.remove('hidden');
+    els.profilePickerBtn.classList.add('active');
+    els.profilePickerBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeProfileMenu(restoreFocus) {
+    if (!els.profilePickerMenu || !els.profilePickerBtn) {
+      return;
+    }
+    els.profilePickerMenu.classList.add('hidden');
+    els.profilePickerBtn.classList.remove('active');
+    els.profilePickerBtn.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && typeof els.profilePickerBtn.focus === 'function') {
+      els.profilePickerBtn.focus();
+    }
+  }
+
+  function toggleProfileMenu() {
+    if (profileMenuOpen()) {
+      closeProfileMenu(true);
+      return;
+    }
+    openProfileMenu();
+  }
+
   function toggleThemeMenu() {
     if (themeMenuOpen()) {
       closeThemeMenu(true);
@@ -1124,17 +1207,23 @@
   }
 
   function maybeCloseThemeMenuFromPointer(event) {
-    if (!themeMenuOpen()) {
+    if (!themeMenuOpen() && !profileMenuOpen()) {
       return;
     }
     if (
       event.target &&
       event.target.closest &&
-      (event.target.closest('#theme-picker-menu') || event.target.closest('#theme-picker-btn'))
+      (
+        event.target.closest('#theme-picker-menu') ||
+        event.target.closest('#theme-picker-btn') ||
+        event.target.closest('#profile-picker-menu') ||
+        event.target.closest('#profile-picker-btn')
+      )
     ) {
       return;
     }
     closeThemeMenu(false);
+    closeProfileMenu(false);
   }
 
   function applyTheme(name) {
@@ -1150,6 +1239,13 @@
       els.themePickerBtn.textContent = themeLabel(name);
     }
     renderThemeMenuList();
+  }
+
+  function renderActiveProfileButton() {
+    if (!els.profilePickerBtn) {
+      return;
+    }
+    els.profilePickerBtn.textContent = activeProfileFooterLabel();
   }
 
   async function saveUiPref(key, value) {
@@ -1224,6 +1320,36 @@
         }
         onThemeSelect(String(item.getAttribute('data-theme-name') || '').trim());
         closeThemeMenu(true);
+      });
+    }
+    if (els.profilePickerBtn) {
+      els.profilePickerBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        toggleProfileMenu();
+      });
+    }
+    if (els.profilePickerList) {
+      els.profilePickerList.addEventListener('click', function (event) {
+        var createItem = event.target.closest('button[data-profile-action="create"]');
+        if (createItem) {
+          closeProfileMenu(false);
+          openSettings(els.profilePickerBtn);
+          requestAnimationFrame(function () {
+            if (els.profileCreateName) {
+              els.profileCreateName.focus();
+            }
+          });
+          return;
+        }
+        var item = event.target.closest('button[data-profile-id]');
+        if (!item) {
+          return;
+        }
+        setSelectedProfile(String(item.getAttribute('data-profile-id') || '').trim());
+        runProfileUse().catch(function () {
+          return;
+        });
+        closeProfileMenu(false);
       });
     }
   }
@@ -2417,6 +2543,7 @@
     state.activeProfileId = '';
     state.activeProfileName = '';
     state.activeProfilePubkey = '';
+    state.profiles = [];
     try {
       var blob = await backend('profile-list', []);
       var parsed = parseMaybeJson(blob);
@@ -2425,11 +2552,14 @@
         if (els.profileSummary) {
           els.profileSummary.textContent = activeProfileLabel();
         }
+        renderActiveProfileButton();
+        renderProfileMenuList();
         renderSetupPanel();
         return;
       }
 
       state.activeProfileId = String(parsed.active_profile || '').trim();
+      state.profiles = parsed.profiles.slice();
       parsed.profiles.forEach(function (profile) {
         if (profile.id === state.activeProfileId) {
           state.activeProfileName = String(profile.name || '').trim();
@@ -2440,6 +2570,8 @@
       if (els.profileSummary) {
         els.profileSummary.textContent = activeProfileLabel();
       }
+      renderActiveProfileButton();
+      renderProfileMenuList();
       if (state.activeProfilePubkey && !els.peoplePubkey.value) {
         els.peoplePubkey.value = state.activeProfilePubkey;
       }
@@ -2450,6 +2582,8 @@
       if (els.profileSummary) {
         els.profileSummary.textContent = activeProfileLabel();
       }
+      renderActiveProfileButton();
+      renderProfileMenuList();
       renderSetupPanel();
       return;
     }
@@ -2865,6 +2999,10 @@
         closeThemeMenu(true);
         return;
       }
+      if (profileMenuOpen()) {
+        closeProfileMenu(true);
+        return;
+      }
       closeOpenMenu();
       if (!els.deleteBackdrop.classList.contains('hidden')) {
         closeDelete();
@@ -2904,14 +3042,15 @@
         node === els.promptInput ||
         node === els.promptSubmit ||
         node === els.themePickerBtn ||
-        node === els.themeSelect
+        node === els.themeSelect ||
+        node === els.profilePickerBtn
       ) {
         return true;
       }
       if (node.getAttribute && node.getAttribute('role') === 'tab') {
         return true;
       }
-      if (node.closest && (node.closest('#theme-picker-menu') || node.closest('#compose-type-group'))) {
+      if (node.closest && (node.closest('#theme-picker-menu') || node.closest('#profile-picker-menu') || node.closest('#compose-type-group'))) {
         return true;
       }
       return false;
@@ -2951,6 +3090,9 @@
     }
     if (els.themePickerBtn) {
       els.themePickerBtn.disabled = false;
+    }
+    if (els.profilePickerBtn) {
+      els.profilePickerBtn.disabled = false;
     }
     els.themeSelect.disabled = false;
   }
@@ -3086,6 +3228,8 @@
     state.recommendedRelaysNotice = String(prefs.recommended_relays_notice || '').trim();
     state.manualFollowingRows = parsePubkeyCsv(prefs.manual_follows || '');
     renderRailNavigation();
+    renderActiveProfileButton();
+    renderProfileMenuList();
     renderSetupPanel();
     renderRelaySelectionCard();
     renderFollowingList(state.manualFollowingRows);

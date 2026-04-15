@@ -62,6 +62,8 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(index_html.contains("id=\"following-listbox\" class=\"rail-listbox rail-content-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"library-listbox\" class=\"rail-listbox rail-content-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"relay-listbox\" class=\"rail-listbox settings-listbox\" role=\"listbox\" tabindex=\"0\""));
+    assert!(index_html.contains("id=\"profile-picker-btn\""));
+    assert!(index_html.contains("id=\"profile-picker-menu\""));
     assert!(!index_html.contains("id=\"library-selection-card\""));
     assert!(!index_html.contains("id=\"rail-open-settings\""));
     assert!(app_js.contains("bindListboxKeyboard(els.railNavListbox"));
@@ -70,10 +72,14 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("bindListboxKeyboard(els.libraryListbox"));
     assert!(app_js.contains("railSelectionKind: 'nav'"));
     assert!(app_js.contains("function syncRailSelection()"));
+    assert!(app_js.contains("function renderProfileMenuList()"));
+    assert!(app_js.contains("function renderActiveProfileButton()"));
+    assert!(app_js.contains("button[data-profile-action=\"create\"]"));
     assert!(app_js.contains("setRailSelection('following', state.activeFollowingPubkey);"));
     assert!(app_js.contains("setRailSelection('list', state.selectedListName);"));
     assert!(style_css.contains("-webkit-mask-image: var(--icon-url);"));
     assert!(style_css.contains("mask-image: var(--icon-url);"));
+    assert!(style_css.contains(".footer-profile-anchor"));
 }
 
 #[test]
