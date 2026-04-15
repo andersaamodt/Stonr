@@ -179,7 +179,6 @@ h5 {
 .inline-details,
 .utility-card,
 .form-cluster {
-  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-soft) 48%, transparent);
 }
@@ -189,7 +188,9 @@ h5 {
 .drawer-section,
 .setup-status-card,
 .utility-card,
-.form-cluster {
+.form-cluster,
+.inline-details,
+.feed-item {
   padding: 0.72rem 0.8rem;
 }
 
@@ -877,8 +878,8 @@ label {
 }
 
 .feed-item.is-selected-event {
-  border-color: color-mix(in srgb, var(--accent-main) 54%, var(--line-strong));
   background: color-mix(in srgb, var(--accent-main) 12%, var(--surface-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-main) 40%, transparent);
 }
 
 .feed-head {
@@ -1112,10 +1113,9 @@ label {
 }
 
 .drawer-helper-card {
-  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-soft) 38%, transparent);
-  padding: 0.64rem 0.7rem;
+  background: color-mix(in srgb, var(--surface-soft) 32%, transparent);
+  padding: 0.2rem 0 0;
   display: grid;
   gap: 0.52rem;
 }
