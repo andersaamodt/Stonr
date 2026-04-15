@@ -11,8 +11,9 @@
     bridge: false,
     hostBootReadySent: false,
     activeTab: 'home',
-    activeLibraryBucket: 'all',
+    activeLibraryBucket: 'saved',
     activeLibraryEventId: '',
+    activeFollowingPubkey: '',
     selectedRelayUrl: '',
     activeProfileId: '',
     activeProfileName: '',
@@ -23,6 +24,7 @@
     homeRelayUrl: '',
     railWidth: 352,
     relayRows: [],
+    followingRows: [],
     libraryRows: [],
     homeEvents: [],
     discoverEvents: [],
@@ -34,7 +36,6 @@
   };
 
   var TAB_IDS = ['home', 'discover'];
-  var BUCKETS = ['all', 'liked', 'commented', 'starred', 'saved'];
 
   var COMMAND_ALLOWLIST = Object.freeze({
     'get-ui-prefs': true,
@@ -85,13 +86,14 @@
     railOverviewSummary: document.getElementById('rail-overview-summary'),
     railOpenSettings: document.getElementById('rail-open-settings'),
     railResizer: document.getElementById('rail-resizer'),
-    railRecommendedRelaysList: document.getElementById('rail-recommended-relays-list'),
-    railAddRecommendedRelays: document.getElementById('rail-add-recommended-relays'),
+    followingListbox: document.getElementById('following-listbox'),
     recommendedRelaysNotice: document.getElementById('recommended-relays-notice'),
     recommendedRelaysDismiss: document.getElementById('recommended-relays-dismiss'),
     recommendedRelaysAdd: document.getElementById('recommended-relays-add'),
     recommendedRelaysOpenSettings: document.getElementById('recommended-relays-open-settings'),
     recommendedRelaysList: document.getElementById('recommended-relays-list'),
+    settingsRecommendedRelaysList: document.getElementById('settings-recommended-relays-list'),
+    settingsAddRecommendedRelays: document.getElementById('settings-add-recommended-relays'),
 
     themeLink: document.getElementById('theme-link'),
     themeSelect: document.getElementById('theme-select'),
@@ -187,8 +189,6 @@
     deleteRelays: document.getElementById('delete-relays'),
     deleteLog: document.getElementById('delete-log'),
 
-    libraryFilterBtn: document.getElementById('library-filter-btn'),
-    libraryFilterMenu: document.getElementById('library-filter-menu'),
     libraryListbox: document.getElementById('library-listbox'),
     librarySelectionTitle: document.getElementById('library-selection-title'),
     librarySelectionMeta: document.getElementById('library-selection-meta'),
@@ -203,7 +203,6 @@
     relayListbox: document.getElementById('relay-listbox'),
     relaySelectionTitle: document.getElementById('relay-selection-title'),
     relaySelectionMeta: document.getElementById('relay-selection-meta'),
-    relayManageSelected: document.getElementById('relay-manage-selected'),
 
     profileSummary: document.getElementById('profile-summary'),
     profileListbox: document.getElementById('profile-listbox'),
@@ -493,7 +492,7 @@
   }
 
   function renderRecommendedRelayLists() {
-    [els.recommendedRelaysList, els.railRecommendedRelaysList].forEach(function (node) {
+    [els.recommendedRelaysList, els.settingsRecommendedRelaysList].forEach(function (node) {
       if (!node) {
         return;
       }
@@ -505,17 +504,6 @@
         node.appendChild(item);
       });
     });
-  }
-
-  function prepareRelayControls(relayUrl) {
-    if (els.networkRelayUrl) {
-      els.networkRelayUrl.value = String(relayUrl || '').trim();
-      els.networkRelayUrl.focus();
-      els.networkRelayUrl.select();
-    }
-    if (els.networkRelayMode) {
-      els.networkRelayMode.value = 'both';
-    }
   }
 
   async function saveRecommendedRelaysNotice(value) {
@@ -581,7 +569,7 @@
     }
     if (!state.activeProfileId && !state.relayReady) {
       els.railOverviewTitle.textContent = 'Finish setup';
-      els.railOverviewSummary.textContent = 'Create or import a profile, then add a home relay in the sidebar.';
+      els.railOverviewSummary.textContent = 'Create or import a profile, then add a home relay in Settings.';
       return;
     }
     if (!state.activeProfileId) {
@@ -615,7 +603,7 @@
       els.setupPanel.classList.toggle('hidden', ready);
     }
     if (!state.activeProfileId && !state.relayReady) {
-      els.setupSummary.textContent = 'Create a profile and add a relay in the sidebar so Home, Discover, and publish flows can do real work.';
+      els.setupSummary.textContent = 'Create a profile and add a relay in Settings so Home, Discover, and publish flows can do real work.';
       return;
     }
     if (!state.activeProfileId) {
@@ -623,7 +611,7 @@
       return;
     }
     if (!state.relayReady) {
-      els.setupSummary.textContent = 'Profile is ready. Add a home relay in the sidebar before you fetch timelines or publish drafts.';
+      els.setupSummary.textContent = 'Profile is ready. Add a home relay in Settings before you fetch timelines or publish drafts.';
       return;
     }
     els.setupSummary.textContent = 'Profile and relay are ready. Home and Discover now use your configured network state.';
@@ -655,10 +643,6 @@
   function closeOpenMenu() {
     if (!state.openMenu) {
       return;
-    }
-    if (state.openMenu === els.libraryFilterMenu && els.libraryFilterBtn) {
-      els.libraryFilterBtn.classList.remove('active');
-      els.libraryFilterBtn.setAttribute('aria-expanded', 'false');
     }
     state.openMenu.classList.add('hidden');
     state.openMenu = null;
@@ -1522,37 +1506,11 @@
     setLibraryActiveOption(state.libraryRows[0].id);
   }
 
-  function setLibraryBucket(bucket) {
-    if (BUCKETS.indexOf(bucket) < 0) {
-      bucket = 'all';
-    }
-    state.activeLibraryBucket = bucket;
-    if (els.libraryFilterBtn) {
-      els.libraryFilterBtn.textContent = 'Filter: ' + bucket.charAt(0).toUpperCase() + bucket.slice(1);
-    }
-    if (els.libraryFilterMenu) {
-      var filters = els.libraryFilterMenu.querySelectorAll('button.library-filter-item');
-      filters.forEach(function (button) {
-        var active = button.getAttribute('data-bucket') === bucket;
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-checked', active ? 'true' : 'false');
-      });
-    }
-
-    saveUiPref('library_bucket', bucket).catch(function () {
-      return;
-    });
-    runLibraryList(bucket).catch(function () {
-      return;
-    });
-  }
-
-  async function runLibraryList(bucket) {
-    var effective = bucket || state.activeLibraryBucket;
-    var arg = effective === 'all' ? '' : effective;
-    var blob = await safeBackend('library-list', [arg], 'Failed to load library');
+  async function runLibraryList() {
+    var blob = await safeBackend('library-list', ['saved'], 'Failed to load library');
     var parsed = parseMaybeJson(blob);
-    renderLibraryList(parsed, effective);
+    state.activeLibraryBucket = 'saved';
+    renderLibraryList(parsed, 'saved');
   }
 
   async function runLibraryMutation(command, label, eventId) {
@@ -1563,7 +1521,7 @@
     }
     await safeBackend(command, [id], 'Library update failed');
     toast(label + ' complete.', 'good');
-    await runLibraryList(state.activeLibraryBucket);
+    await runLibraryList();
   }
 
   async function runLibraryToggle(kind) {
@@ -1605,13 +1563,13 @@
     }
     var blob = await safeBackend('library-ingest-authored', [path], 'Failed to ingest authored events');
     writeLog(els.networkLog, 'Ingest authored events', blob);
-    await runLibraryList(state.activeLibraryBucket);
+    await runLibraryList();
   }
 
   async function runLibraryReindex() {
     await safeBackend('library-reindex', [], 'Failed to reindex library');
     toast('Library reindexed.', 'good');
-    await runLibraryList(state.activeLibraryBucket);
+    await runLibraryList();
   }
 
   function relayRowByUrl(url) {
@@ -1625,18 +1583,12 @@
     var row = relayRowByUrl(state.selectedRelayUrl);
     if (!row) {
       els.relaySelectionTitle.textContent = 'No relay selected';
-      els.relaySelectionMeta.textContent = 'Add a relay in the sidebar to choose where Onstr reads and writes.';
-      if (els.relayManageSelected) {
-        els.relayManageSelected.disabled = true;
-      }
+      els.relaySelectionMeta.textContent = 'No relay metadata.';
       return;
     }
     els.relaySelectionTitle.textContent = relayDisplayLabel(row.url);
     els.relaySelectionTitle.title = row.url;
     els.relaySelectionMeta.textContent = relayRoleLabel(row) + ' · ' + row.url;
-    if (els.relayManageSelected) {
-      els.relayManageSelected.disabled = false;
-    }
   }
 
   function setSelectedRelay(url) {
@@ -1726,10 +1678,6 @@
       row.appendChild(badge);
       row.addEventListener('click', function () {
         setSelectedRelay(relay.url);
-      });
-      row.addEventListener('dblclick', function () {
-        setSelectedRelay(relay.url);
-        prepareRelayControls(relay.url);
       });
 
       els.relayListbox.appendChild(row);
@@ -1885,7 +1833,7 @@
         safeBackend('library-star', [String(event.id)], 'Failed to star event')
           .then(function () {
             toast('Starred event.', 'good');
-            return runLibraryList(state.activeLibraryBucket);
+            return runLibraryList();
           })
           .catch(function () {
             return;
@@ -1903,7 +1851,7 @@
         safeBackend('library-save', [String(event.id)], 'Failed to save event')
           .then(function () {
             toast('Saved event.', 'good');
-            return runLibraryList(state.activeLibraryBucket);
+            return runLibraryList();
           })
           .catch(function () {
             return;
@@ -1935,7 +1883,7 @@
     var parsed = writeLog(els.homeLog, 'Timeline fetch', blob);
     if (parsed && parsed.needs_relay) {
       state.homeEvents = [];
-      renderHomeEmptyState('Add a relay in the sidebar to load your timeline.');
+      renderHomeEmptyState('Add a relay in Settings to load your timeline.');
       return;
     }
     renderEventFeed(els.homeFeed, els.homeResultsSummary, parsed, 'No events returned.', 'homeEvents');
@@ -1952,9 +1900,9 @@
     var parsed = writeLog(els.discoverLog, 'Discover search', blob);
     if (parsed && parsed.needs_relay) {
       state.discoverEvents = [];
-      feedEmpty(els.discoverFeed, 'Add a relay in the sidebar to search relay content.');
+      feedEmpty(els.discoverFeed, 'Add a relay in Settings to search relay content.');
       if (els.discoverResultsSummary) {
-        els.discoverResultsSummary.textContent = 'Add a relay in the sidebar to search relay content.';
+        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
       }
       return;
     }
@@ -1968,7 +1916,7 @@
     var parsed = writeLog(els.discoverLog, 'Discover count', blob);
     if (parsed && parsed.needs_relay) {
       if (els.discoverResultsSummary) {
-        els.discoverResultsSummary.textContent = 'Add a relay in the sidebar to search relay content.';
+        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
       }
       return;
     }
@@ -1992,9 +1940,9 @@
     var parsed = writeLog(els.discoverLog, 'Filtered search', blob);
     if (parsed && parsed.needs_relay) {
       state.discoverEvents = [];
-      feedEmpty(els.discoverFeed, 'Add a relay in the sidebar to search relay content.');
+      feedEmpty(els.discoverFeed, 'Add a relay in Settings to search relay content.');
       if (els.discoverResultsSummary) {
-        els.discoverResultsSummary.textContent = 'Add a relay in the sidebar to search relay content.';
+        els.discoverResultsSummary.textContent = 'Add a relay in Settings to search relay content.';
       }
       return;
     }
@@ -2037,28 +1985,81 @@
     });
   }
 
-  async function runPeopleFollowing() {
-    if (!state.activeProfilePubkey) {
-      toast('Set an active profile first to load following.', 'bad');
+  function renderFollowingList(rows) {
+    if (!els.followingListbox) {
+      return;
+    }
+    state.followingRows = Array.isArray(rows) ? rows.slice(0, 200) : [];
+    els.followingListbox.innerHTML = '';
+    if (!state.followingRows.length) {
+      var empty = document.createElement('div');
+      empty.className = 'rail-list-option is-empty';
+      empty.textContent = 'No follows.';
+      els.followingListbox.appendChild(empty);
+      setFollowingActiveOption('');
       return;
     }
 
-    var blob = await safeBackend(
-      'timeline-fetch',
-      [state.activeProfilePubkey, '3', '', '', '', '2', '1', ''],
-      'Failed to load following'
-    );
-    var parsed = parseMaybeJson(blob);
-    if (parsed && parsed.needs_relay) {
-      toast('Add a relay first.', 'bad');
-      return;
-    }
-    var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
-    if (!events.length) {
-      renderPeopleRows([], 'following');
-      return;
-    }
+    state.followingRows.forEach(function (pubkey) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'rail-list-option';
+      row.setAttribute('role', 'option');
+      row.setAttribute('data-following-pubkey', pubkey);
+      row.id = optionDomId('following-option', pubkey);
+      row.tabIndex = -1;
+      row.setAttribute('aria-selected', 'false');
 
+      var copy = document.createElement('span');
+      copy.className = 'rail-option-copy';
+
+      var label = document.createElement('span');
+      label.className = 'rail-option-label';
+      label.textContent = shortId(pubkey);
+      label.title = pubkey;
+
+      var meta = document.createElement('span');
+      meta.className = 'rail-option-meta';
+      meta.textContent = pubkey;
+
+      copy.appendChild(label);
+      copy.appendChild(meta);
+      row.appendChild(copy);
+      row.addEventListener('click', function () {
+        setFollowingActiveOption(pubkey);
+      });
+      els.followingListbox.appendChild(row);
+    });
+
+    if (state.activeFollowingPubkey && state.followingRows.indexOf(state.activeFollowingPubkey) >= 0) {
+      setFollowingActiveOption(state.activeFollowingPubkey);
+      return;
+    }
+    setFollowingActiveOption(state.followingRows[0]);
+  }
+
+  function setFollowingActiveOption(pubkey) {
+    state.activeFollowingPubkey = pubkey || '';
+    var options = listboxOptions(els.followingListbox);
+    var activeOptionId = '';
+    options.forEach(function (node) {
+      var active = node.getAttribute('data-following-pubkey') === state.activeFollowingPubkey;
+      node.classList.toggle('is-active', active);
+      node.setAttribute('aria-selected', active ? 'true' : 'false');
+      if (active) {
+        activeOptionId = node.id;
+      }
+    });
+    setListboxActiveDescendant(els.followingListbox, activeOptionId);
+    if (els.peoplePubkey && state.activeFollowingPubkey) {
+      els.peoplePubkey.value = state.activeFollowingPubkey;
+    }
+  }
+
+  function extractFollowingPubkeys(events) {
+    if (!Array.isArray(events) || !events.length) {
+      return [];
+    }
     var latest = events[0];
     var follows = [];
     (latest.tags || []).forEach(function (tag) {
@@ -2079,8 +2080,39 @@
       seen[pubkey] = true;
       uniq.push(pubkey);
     });
+    return uniq;
+  }
 
-    renderPeopleRows(uniq, 'following');
+  async function fetchFollowingPubkeys() {
+    if (!state.activeProfilePubkey || !state.relayReady) {
+      return [];
+    }
+    var blob = await safeBackend(
+      'timeline-fetch',
+      [state.activeProfilePubkey, '3', '', '', '', '2', '1', ''],
+      'Failed to load following'
+    );
+    var parsed = parseMaybeJson(blob);
+    if (parsed && parsed.needs_relay) {
+      return [];
+    }
+    var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
+    return extractFollowingPubkeys(events);
+  }
+
+  async function runFollowingList() {
+    var follows = await fetchFollowingPubkeys();
+    renderFollowingList(follows);
+  }
+
+  async function runPeopleFollowing() {
+    if (!state.activeProfilePubkey) {
+      toast('Set an active profile first to load following.', 'bad');
+      return;
+    }
+    var follows = await fetchFollowingPubkeys();
+    renderFollowingList(follows);
+    renderPeopleRows(follows, 'following');
     toast('Following list loaded.', 'good');
   }
 
@@ -2357,8 +2389,8 @@
       });
     }
 
-    if (els.railAddRecommendedRelays) {
-      els.railAddRecommendedRelays.addEventListener('click', function () {
+    if (els.settingsAddRecommendedRelays) {
+      els.settingsAddRecommendedRelays.addEventListener('click', function () {
         addRecommendedRelays().catch(function () {
           return;
         });
@@ -2498,29 +2530,6 @@
       });
     });
 
-    els.libraryFilterBtn.addEventListener('click', function (event) {
-      event.preventDefault();
-      if (state.openMenu === els.libraryFilterMenu) {
-        closeOpenMenu();
-        return;
-      }
-      closeOpenMenu();
-      els.libraryFilterMenu.classList.remove('hidden');
-      els.libraryFilterBtn.classList.add('active');
-      els.libraryFilterBtn.setAttribute('aria-expanded', 'true');
-      state.openMenu = els.libraryFilterMenu;
-    });
-
-    els.libraryFilterMenu.addEventListener('click', function (event) {
-      var button = event.target.closest('button.library-filter-item');
-      if (!button) {
-        return;
-      }
-      event.preventDefault();
-      setLibraryBucket(button.getAttribute('data-bucket'));
-      closeOpenMenu();
-    });
-
     if (els.libraryReply) {
       els.libraryReply.addEventListener('click', function () {
         runLibraryReply();
@@ -2551,17 +2560,6 @@
         return;
       });
     });
-
-    if (els.relayManageSelected) {
-      els.relayManageSelected.addEventListener('click', function () {
-        var row = relayRowByUrl(state.selectedRelayUrl);
-        if (!row) {
-          toast('Select a relay first.', 'bad');
-          return;
-        }
-        prepareRelayControls(row.url);
-      });
-    }
 
     els.networkRelayAdd.addEventListener('click', function () {
       var url = String(els.networkRelayUrl.value || '').trim();
@@ -2651,6 +2649,12 @@
       setLibraryActiveOption(value);
     });
 
+    bindListboxKeyboard(els.followingListbox, 'data-following-pubkey', function (value) {
+      setFollowingActiveOption(value);
+    }, function (value) {
+      setFollowingActiveOption(value);
+    });
+
     bindListboxKeyboard(els.profileListbox, 'data-profile-id', function (value) {
       setSelectedProfile(value);
     }, function (value) {
@@ -2734,15 +2738,14 @@
         node === els.composeClose ||
         node === els.deleteClose ||
         node === els.themePickerBtn ||
-        node === els.themeSelect ||
-        node === els.libraryFilterBtn
+        node === els.themeSelect
       ) {
         return true;
       }
       if (node.getAttribute && node.getAttribute('role') === 'tab') {
         return true;
       }
-      if (node.closest && (node.closest('#theme-picker-menu') || node.closest('#library-filter-menu') || node.closest('#compose-type-group'))) {
+      if (node.closest && (node.closest('#theme-picker-menu') || node.closest('#compose-type-group'))) {
         return true;
       }
       return false;
@@ -2773,9 +2776,6 @@
     }
     if (els.deleteClose) {
       els.deleteClose.disabled = false;
-    }
-    if (els.libraryFilterBtn) {
-      els.libraryFilterBtn.disabled = false;
     }
     if (els.themePickerBtn) {
       els.themePickerBtn.disabled = false;
@@ -2842,7 +2842,10 @@
           });
         }
       }
-      await runLibraryList(state.activeLibraryBucket).catch(function () {
+      await runLibraryList().catch(function () {
+        return;
+      });
+      await runFollowingList().catch(function () {
         return;
       });
     }
@@ -2884,7 +2887,7 @@
       if (!state.openMenu) {
         return;
       }
-      if (event.target.closest('.menu-wrap') || event.target.closest('.filter-anchor')) {
+      if (event.target.closest('.menu-wrap')) {
         return;
       }
       closeOpenMenu();
@@ -2905,15 +2908,12 @@
     }
     setActiveTab(prefTab, false);
 
-    var prefBucket = String(prefs.library_bucket || 'all').trim();
-    if (BUCKETS.indexOf(prefBucket) < 0) {
-      prefBucket = 'all';
-    }
     applyRailWidth(prefs.rail_width || 352);
     state.recommendedRelaysNotice = String(prefs.recommended_relays_notice || '').trim();
-    state.activeLibraryBucket = prefBucket;
+    state.activeLibraryBucket = 'saved';
     renderSetupPanel();
     renderRelaySelectionCard();
+    renderFollowingList([]);
     renderLibrarySelectionCard();
     if (els.discoverFeed) {
       feedEmpty(els.discoverFeed, 'Run a search to inspect relay results.');
@@ -2924,7 +2924,10 @@
       await runRelayList().catch(function () {
         return;
       });
-      await runLibraryList(state.activeLibraryBucket).catch(function () {
+      await runFollowingList().catch(function () {
+        return;
+      });
+      await runLibraryList().catch(function () {
         return;
       });
       if (state.relayReady) {
@@ -2932,7 +2935,7 @@
           return;
         });
       } else {
-        renderHomeEmptyState('Add a relay in the sidebar to load your timeline.');
+        renderHomeEmptyState('Add at least one relay in Settings to load your timeline.');
       }
     } else {
       renderHomeEmptyState('Open this app in the Wizardry desktop host to load backend data.');
@@ -2942,7 +2945,6 @@
       feedEmpty(els.discoverFeed, 'Open this app in the Wizardry desktop host to run relay searches.');
     }
 
-    setLibraryBucket(state.activeLibraryBucket);
     disableActionsWhenNoBridge();
     scheduleRefresh();
     revealBootUi();

@@ -35,10 +35,12 @@ fn rail_listboxes_stay_focusable_with_selection_cards() {
     let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
-    assert!(index_html.contains("id=\"relay-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
+    assert!(index_html.contains("id=\"following-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"library-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
+    assert!(index_html.contains("id=\"relay-listbox\" class=\"rail-listbox settings-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"relay-selection-card\""));
     assert!(index_html.contains("id=\"library-selection-card\""));
+    assert!(app_js.contains("bindListboxKeyboard(els.followingListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.relayListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.libraryListbox"));
 }
@@ -60,9 +62,10 @@ fn first_run_surface_offers_recommended_relays_notice() {
 
     assert!(index_html.contains("id=\"recommended-relays-notice\""));
     assert!(index_html.contains("id=\"recommended-relays-add\""));
-    assert!(index_html.contains("id=\"rail-add-recommended-relays\""));
-    assert!(index_html.contains("id=\"rail-recommended-relays-list\""));
-    assert!(!index_html.contains("id=\"settings-add-recommended-relays\""));
+    assert!(index_html.contains("id=\"settings-add-recommended-relays\""));
+    assert!(index_html.contains("id=\"settings-recommended-relays-list\""));
+    assert!(!index_html.contains("id=\"rail-add-recommended-relays\""));
+    assert!(!index_html.contains("id=\"rail-recommended-relays-list\""));
     assert!(app_js.contains("RECOMMENDED_RELAYS = Object.freeze"));
     assert!(app_js.contains("function addRecommendedRelays()"));
 }

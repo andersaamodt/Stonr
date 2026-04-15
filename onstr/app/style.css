@@ -136,8 +136,8 @@ summary:focus-visible {
 
 .rail {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  gap: 0.88rem;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 0.7rem;
   min-height: 0;
   padding: 0.9rem;
   border-right: 1px solid var(--line);
@@ -162,7 +162,7 @@ summary:focus-visible {
   gap: 0.24rem;
 }
 
-.rail-head h1,
+h1,
 h2,
 h3,
 h4,
@@ -184,8 +184,6 @@ h5 {
   max-width: 18rem;
 }
 
-.rail-overview-card,
-.rail-selection-card,
 .drawer-section,
 .setup-status-card,
 .feed-item,
@@ -196,8 +194,6 @@ h5 {
   background: color-mix(in srgb, var(--surface-soft) 48%, transparent);
 }
 
-.rail-overview-card,
-.rail-selection-card,
 .drawer-section,
 .setup-status-card,
 .utility-card,
@@ -209,8 +205,16 @@ h5 {
 
 .rail-section {
   display: grid;
-  gap: 0.52rem;
+  gap: 0.46rem;
   min-height: 0;
+  align-content: start;
+  border-top: 1px solid var(--line);
+  padding-top: 0.56rem;
+}
+
+.rail-section:first-child {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .rail-library {
@@ -233,23 +237,17 @@ h5 {
   text-transform: uppercase;
 }
 
-.section-support {
-  margin: 0.18rem 0 0;
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  line-height: 1.3;
-}
-
 .rail-overview-card {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 0.7rem;
+  padding: 0.08rem 0;
 }
 
 .rail-overview-copy {
   display: grid;
-  gap: 0.18rem;
+  gap: 0.1rem;
 }
 
 .rail-overview-label,
@@ -266,22 +264,30 @@ h5 {
   line-height: 1.28;
 }
 
+.rail-subhead {
+  margin: 0.12rem 0 0;
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .rail-listbox {
-  min-height: 7rem;
+  min-height: 5rem;
   max-height: clamp(8rem, 24vh, 15rem);
   overflow: auto;
   display: grid;
-  gap: 0.26rem;
-  padding: 0.34rem;
-  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  gap: 0.18rem;
+  padding: 0.24rem;
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface) 94%, var(--surface-soft));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface-soft) 56%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 34%, transparent);
+  box-shadow: none;
 }
 
 .rail-list-option {
   width: 100%;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: calc(var(--radius-sm) + 1px);
   background: transparent;
   color: var(--text-main);
@@ -296,21 +302,17 @@ h5 {
 
 .rail-list-option:hover,
 .rail-list-option:focus-visible {
-  border-color: color-mix(in srgb, var(--line-strong) 78%, var(--line));
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
 }
 
 .rail-list-option.is-active {
-  border-color: color-mix(in srgb, var(--accent-main) 52%, var(--line-strong));
   background: color-mix(in srgb, var(--accent-main) 18%, var(--surface));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-main) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-main) 26%, transparent);
 }
 
 .rail-list-option.is-empty {
   min-height: 3.2rem;
   grid-template-columns: 1fr;
-  border-style: dashed;
-  border-color: var(--line);
   color: var(--text-muted);
   align-items: center;
   justify-items: start;
@@ -320,7 +322,6 @@ h5 {
 .rail-list-option.is-empty:hover,
 .rail-list-option.is-empty:focus-visible {
   background: transparent;
-  border-color: var(--line);
 }
 
 .rail-option-copy {
@@ -361,12 +362,16 @@ h5 {
 .rail-selection-card {
   display: grid;
   gap: 0.42rem;
+  padding: 0.54rem 0 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
 }
 
 .rail-helper-card {
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-soft) 32%, transparent);
-  padding: 0.68rem 0.74rem;
+  background: color-mix(in srgb, var(--surface-soft) 22%, transparent);
+  padding: 0.58rem 0.64rem;
   display: grid;
   gap: 0.52rem;
 }
@@ -398,80 +403,6 @@ h5 {
   color: var(--text-muted);
   font-size: 0.79rem;
   line-height: 1.4;
-}
-
-.filter-anchor {
-  position: relative;
-  display: inline-flex;
-}
-
-.filter-btn {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-soft) 84%, transparent);
-  color: var(--text-main);
-  min-height: 1.9rem;
-  padding: 0.24rem 0.7rem;
-  font-size: 0.78rem;
-  line-height: 1;
-}
-
-.filter-btn:hover,
-.filter-btn:focus-visible,
-.filter-btn.active {
-  border-color: color-mix(in srgb, var(--accent-main) 52%, var(--line-strong));
-  background: color-mix(in srgb, var(--accent-main) 14%, transparent);
-}
-
-.filter-menu {
-  position: absolute;
-  top: calc(100% + 0.34rem);
-  right: 0;
-  min-width: 11rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 95%, transparent);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.26);
-  padding: 0.28rem;
-  display: grid;
-  gap: 0.12rem;
-  z-index: 18;
-}
-
-.filter-menu.hidden {
-  display: none;
-}
-
-.library-filter-item {
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-main);
-  text-align: left;
-  min-height: 1.9rem;
-  padding: 0.28rem 0.46rem;
-  font-size: 0.78rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-}
-
-.library-filter-item:hover,
-.library-filter-item:focus-visible {
-  background: color-mix(in srgb, var(--surface-soft) 84%, transparent);
-}
-
-.library-filter-item.active {
-  background: color-mix(in srgb, var(--accent-main) 16%, transparent);
-}
-
-.filter-check {
-  opacity: 0;
-}
-
-.library-filter-item.active .filter-check {
-  opacity: 1;
 }
 
 .rail-footer {
