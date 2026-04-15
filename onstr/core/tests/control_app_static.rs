@@ -18,24 +18,18 @@ fn settings_surface_exposes_profile_setup_controls() {
 }
 
 #[test]
-fn home_surface_has_first_run_setup_panel() {
+fn home_surface_uses_boot_splash_and_identity_footer() {
     let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
     let style_css = read_file(&format!("{}/../app/style.css", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
-    assert!(index_html.contains("id=\"setup-panel\""));
-    assert!(!index_html.contains("id=\"setup-open-settings\""));
-    assert!(index_html.contains("class=\"rail-section rail-setup\""));
     assert!(index_html.contains("id=\"rail-resizer\""));
     assert!(index_html.contains("id=\"splash\" class=\"boot-splash\""));
     assert!(index_html.contains("class=\"boot-splash-icon\" src=\"assets/forge-icon.png\""));
     assert!(index_html.contains("id=\"onstr-app\" class=\"workspace hidden\" aria-hidden=\"true\""));
+    assert!(index_html.contains("id=\"profile-picker-btn\""));
+    assert!(index_html.contains(">Create identity...</button>"));
     assert!(style_css.contains(".rail-resizer"));
-    assert!(style_css.contains(".setup-panel"));
-    assert!(style_css.contains(".rail-setup"));
-    assert!(style_css.contains(".rail-setup-status-list"));
-    assert!(style_css.contains("margin: 0 -0.9rem;"));
-    assert!(style_css.contains(".setup-status-list"));
     assert!(style_css.contains(".boot-splash"));
     assert!(style_css.contains(".boot-splash-icon"));
     assert!(style_css.contains(".boot-splash.hidden"));
@@ -50,7 +44,6 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(style_css.contains("flex-wrap: wrap;"));
     assert!(style_css.contains("label input,"));
     assert!(style_css.contains(".form-row > label,"));
-    assert!(style_css.contains(".setup-status-card,"));
     assert!(app_js.contains("function notifyHostBootReady(attempt)"));
     assert!(app_js.contains("function finishBoot()"));
     assert!(app_js.contains("function withTimeout(promise, ms)"));
@@ -59,6 +52,7 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(app_js.contains("runHomeFetch().catch(function () {"));
     assert!(app_js.contains("els.splash.classList.add('hidden');"));
     assert!(app_js.contains("withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200)"));
+    assert!(app_js.contains("return 'Create identity...';"));
 }
 
 #[test]

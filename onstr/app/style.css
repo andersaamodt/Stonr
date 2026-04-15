@@ -179,7 +179,6 @@ h5 {
 }
 
 .drawer-section,
-.setup-status-card,
 .feed-item,
 .inline-details,
 .utility-card,
@@ -189,7 +188,6 @@ h5 {
 }
 
 .drawer-section,
-.setup-status-card,
 .utility-card,
 .form-cluster,
 .inline-details,
@@ -208,27 +206,6 @@ h5 {
 
 .rail-library {
   align-content: start;
-}
-
-.rail-setup {
-  gap: 0.52rem;
-  margin: 0 -0.9rem;
-  padding: 0.72rem 0.9rem 0;
-  border-top: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface-soft) 26%, transparent);
-}
-
-.rail-setup-head {
-  gap: 0.5rem;
-}
-
-.rail-setup-head h2 {
-  font-size: 0.88rem;
-  color: var(--text-muted);
-}
-
-.rail-setup-status-list {
-  grid-template-columns: 1fr;
 }
 
 .rail-section-head,
@@ -725,38 +702,6 @@ h5 {
   padding-bottom: 0;
 }
 
-.setup-panel {
-  gap: 0.74rem;
-}
-
-.setup-head {
-  align-items: start;
-}
-
-.setup-status-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.62rem;
-  min-width: 0;
-}
-
-.setup-status-card {
-  display: grid;
-  gap: 0.28rem;
-}
-
-.setup-status-card h4 {
-  font-size: 0.74rem;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-}
-
-.setup-status-card p {
-  margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.34;
-}
-
 .form-row,
 .flow-row,
 .compose-form {
@@ -835,8 +780,7 @@ label textarea {
 }
 
 .inline-head,
-.inline-head > *,
-.setup-head > * {
+.inline-head > * {
   min-width: 0;
 }
 
@@ -848,12 +792,6 @@ label textarea {
 .form-row > .action,
 .form-row > button {
   flex: 0 0 auto;
-}
-
-.setup-status-card,
-.setup-status-card p {
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 .type-pills {
@@ -1252,8 +1190,7 @@ label textarea {
 }
 
 @media (max-width: 980px) {
-  .utility-grid,
-  .setup-status-list {
+  .utility-grid {
     grid-template-columns: 1fr;
   }
 

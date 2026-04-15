@@ -140,11 +140,6 @@
     homeSearch: document.getElementById('home-search'),
     homeLimit: document.getElementById('home-limit'),
     homeIncludeRemotes: document.getElementById('home-include-remotes'),
-    setupPanel: document.getElementById('setup-panel'),
-    setupSummary: document.getElementById('setup-summary'),
-    setupOpenSettings: document.getElementById('setup-open-settings'),
-    setupProfileStatus: document.getElementById('setup-profile-status'),
-    setupRelayStatus: document.getElementById('setup-relay-status'),
     homeResultsSummary: document.getElementById('home-results-summary'),
     homeFeed: document.getElementById('home-feed'),
     homeLog: document.getElementById('home-log'),
@@ -632,16 +627,9 @@
 
   function activeProfileFooterLabel() {
     if (!state.activeProfileId) {
-      return 'Identity';
+      return 'Create identity...';
     }
     return String(state.activeProfileName || '').trim() || shortId(String(state.activeProfilePubkey || state.activeProfileId || ''));
-  }
-
-  function relayLabel() {
-    if (!state.relayReady) {
-      return 'No relay configured yet.';
-    }
-    return state.homeRelayUrl ? 'Home relay: ' + state.homeRelayUrl : 'Relay configured.';
   }
 
   function renderRecommendedRelayLists() {
@@ -717,33 +705,7 @@
   }
 
   function renderSetupPanel() {
-    var ready = !!(state.activeProfileId && state.relayReady);
-    if (els.setupProfileStatus) {
-      els.setupProfileStatus.textContent = activeProfileLabel();
-    }
-    if (els.setupRelayStatus) {
-      els.setupRelayStatus.textContent = relayLabel();
-    }
     renderRecommendedRelaysNotice();
-    if (!els.setupSummary) {
-      return;
-    }
-    if (els.setupPanel) {
-      els.setupPanel.classList.toggle('hidden', ready);
-    }
-    if (!state.activeProfileId && !state.relayReady) {
-      els.setupSummary.textContent = 'Create a profile and add a relay in Settings so Home, Discover, and publish flows can do real work.';
-      return;
-    }
-    if (!state.activeProfileId) {
-      els.setupSummary.textContent = 'Relay is ready. Create or import a profile before you publish or load follow relationships.';
-      return;
-    }
-    if (!state.relayReady) {
-      els.setupSummary.textContent = 'Profile is ready. Add a home relay in Settings before you fetch timelines or publish drafts.';
-      return;
-    }
-    els.setupSummary.textContent = 'Profile and relay are ready. Home and Discover now use your configured network state.';
   }
 
   function renderHomeEmptyState(message) {
@@ -2786,12 +2748,6 @@
       });
     }
 
-    if (els.setupOpenSettings) {
-      els.setupOpenSettings.addEventListener('click', function () {
-        openSettings(els.setupOpenSettings);
-      });
-    }
-
     if (els.listCreate) {
       els.listCreate.addEventListener('click', function () {
         createLibraryList().catch(function () {
@@ -3140,7 +3096,6 @@
       if (
         node === els.settingsOpen ||
         node === els.settingsClose ||
-        node === els.setupOpenSettings ||
         node === els.composeClose ||
         node === els.deleteClose ||
         node === els.promptCancel ||
@@ -3169,9 +3124,6 @@
       node.disabled = true;
     });
     els.settingsOpen.disabled = false;
-    if (els.setupOpenSettings) {
-      els.setupOpenSettings.disabled = false;
-    }
     if (els.settingsClose) {
       els.settingsClose.disabled = false;
     }
