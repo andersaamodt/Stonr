@@ -1306,16 +1306,11 @@
       label.textContent = listName;
       label.title = listName;
 
-      var meta = document.createElement('span');
-      meta.className = 'rail-option-meta';
-      meta.textContent = 'Folder';
-
       var badge = document.createElement('span');
       badge.className = 'rail-option-badge';
-      badge.textContent = String(Number(row.count || 0)) + ' event' + (Number(row.count || 0) === 1 ? '' : 's');
+      badge.textContent = String(Number(row.count || 0));
 
       copy.appendChild(label);
-      copy.appendChild(meta);
       button.appendChild(copy);
       button.appendChild(badge);
       button.addEventListener('click', function () {
@@ -1843,12 +1838,7 @@
       label.textContent = shortId(pubkey);
       label.title = pubkey;
 
-      var meta = document.createElement('span');
-      meta.className = 'rail-option-meta';
-      meta.textContent = pubkey;
-
       copy.appendChild(label);
-      copy.appendChild(meta);
       row.appendChild(copy);
       row.addEventListener('click', function () {
         setFollowingActiveOption(pubkey);
