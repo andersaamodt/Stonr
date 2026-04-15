@@ -73,6 +73,7 @@
     'library-list-folders': true,
     'library-create-folder': true,
     'library-list-add-event': true,
+    'library-list-folder-events': true,
     'library-ingest-authored': true,
     'library-reindex': true,
     'relay-list': true,
@@ -1721,6 +1722,10 @@
     state.selectedListName = String(listName || '').trim();
     if (state.selectedListName) {
       setRailSelection('list', state.selectedListName);
+      setActiveTab('home', false);
+      runLibraryListView(state.selectedListName).catch(function () {
+        return;
+      });
       return;
     }
     if (state.railSelectionKind === 'list') {
@@ -1817,6 +1822,54 @@
     var blob = await safeBackend('library-list-folders', [], 'Failed to load lists');
     var parsed = parseMaybeJson(blob);
     renderLibraryList(parsed);
+  }
+
+  function renderListEventFeed(listName, eventIds) {
+    var ids = Array.isArray(eventIds) ? eventIds.slice() : [];
+    var cache = {};
+    state.homeEvents.concat(state.discoverEvents).forEach(function (event) {
+      var id = String(event && event.id || '').trim();
+      if (id) {
+        cache[id] = event;
+      }
+    });
+
+    var payload = {
+      events: ids.map(function (id) {
+        if (cache[id]) {
+          return cache[id];
+        }
+        return {
+          id: id,
+          pubkey: '',
+          created_at: '',
+          kind: 1,
+          content: 'Saved event ' + shortId(id)
+        };
+      })
+    };
+
+    renderEventFeed(
+      els.homeFeed,
+      els.homeResultsSummary,
+      payload,
+      'No saved events in ' + listName + '.',
+      'homeEvents'
+    );
+    if (els.homeResultsSummary) {
+      els.homeResultsSummary.textContent = listName + ' · ' + String(ids.length) + ' saved event' + (ids.length === 1 ? '' : 's') + '.';
+    }
+  }
+
+  async function runLibraryListView(listName) {
+    var name = String(listName || state.selectedListName || '').trim();
+    if (!name) {
+      return;
+    }
+    var blob = await safeBackend('library-list-folder-events', [name], 'Failed to load list');
+    var parsed = parseMaybeJson(blob);
+    var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
+    renderListEventFeed(name, events);
   }
 
   async function createLibraryList() {

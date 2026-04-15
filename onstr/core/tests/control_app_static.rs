@@ -84,6 +84,8 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(!app_js.contains("listBtn.textContent = 'Add To List';"));
     assert!(app_js.contains("function nearDivider(clientX)"));
     assert!(app_js.contains("workspace.addEventListener('pointerdown'"));
+    assert!(app_js.contains("function runLibraryListView(listName)"));
+    assert!(app_js.contains("safeBackend('library-list-folder-events', [name], 'Failed to load list')"));
     assert!(app_js.contains("setRailSelection('following', state.activeFollowingPubkey);"));
     assert!(app_js.contains("setRailSelection('list', state.selectedListName);"));
     assert!(style_css.contains("-webkit-mask-image: var(--icon-url);"));
@@ -132,6 +134,7 @@ fn backend_prefs_expose_recommended_relays_notice_state() {
     assert!(backend_sh.contains("library-list-folders"));
     assert!(backend_sh.contains("library-create-folder"));
     assert!(backend_sh.contains("library-list-add-event"));
+    assert!(backend_sh.contains("library-list-folder-events"));
 }
 
 #[test]

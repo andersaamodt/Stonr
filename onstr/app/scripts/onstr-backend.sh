@@ -128,6 +128,33 @@ list_add_event() {
   printf '%s\n' '{"ok":true}'
 }
 
+list_folder_events_json() {
+  list_name=${1-}
+  [ -n "$list_name" ] || { printf '%s\n' 'missing list name' >&2; exit 2; }
+  ensure_onstr_list_store
+  safe_name=$(sanitize_list_name "$list_name")
+  [ -n "$safe_name" ] || { printf '%s\n' 'invalid list name' >&2; exit 2; }
+  list_dir=$ONSTR_LISTS_DIR/$safe_name
+  printf '%s' '{"ok":true,"name":"'
+  json_escape "$safe_name"
+  printf '%s' '","events":['
+  first=1
+  if [ -d "$list_dir" ]; then
+    for entry in "$list_dir"/*.id; do
+      [ -f "$entry" ] || continue
+      event_id=$(basename "$entry" .id)
+      if [ "$first" -eq 0 ]; then
+        printf ','
+      fi
+      first=0
+      printf '%s' '"'
+      json_escape "$event_id"
+      printf '%s' '"'
+    done
+  fi
+  printf '%s\n' ']}'
+}
+
 run_core() {
   if command -v onstr-core >/dev/null 2>&1; then
     onstr-core "$@"
@@ -186,6 +213,7 @@ Commands:
   library-list-folders
   library-create-folder NAME
   library-list-add-event LIST_NAME EVENT_ID
+  library-list-folder-events LIST_NAME
   library-ingest-authored PATH
   library-reindex
   media-nip94-template URL HASH MIME SIZE [NAME]
@@ -564,6 +592,10 @@ case "$cmd" in
     list_name=${1-}
     event_id=${2-}
     list_add_event "$list_name" "$event_id"
+    ;;
+  library-list-folder-events)
+    list_name=${1-}
+    list_folder_events_json "$list_name"
     ;;
   library-ingest-authored)
     path=${1-}
