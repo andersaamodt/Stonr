@@ -11,8 +11,7 @@
     bridge: false,
     hostBootReadySent: false,
     activeTab: 'home',
-    activeLibraryBucket: 'saved',
-    activeLibraryEventId: '',
+    selectedListName: 'inbox',
     activeFollowingPubkey: '',
     selectedRelayUrl: '',
     activeProfileId: '',
@@ -63,6 +62,9 @@
     'library-unstar': true,
     'library-save': true,
     'library-unsave': true,
+    'library-list-folders': true,
+    'library-create-folder': true,
+    'library-list-add-event': true,
     'library-ingest-authored': true,
     'library-reindex': true,
     'relay-list': true,
@@ -82,11 +84,9 @@
 
     tabList: document.getElementById('primary-tabs'),
 
-    railOverviewTitle: document.getElementById('rail-overview-title'),
-    railOverviewSummary: document.getElementById('rail-overview-summary'),
-    railOpenSettings: document.getElementById('rail-open-settings'),
     railResizer: document.getElementById('rail-resizer'),
     followingListbox: document.getElementById('following-listbox'),
+    listCreate: document.getElementById('list-create'),
     recommendedRelaysNotice: document.getElementById('recommended-relays-notice'),
     recommendedRelaysDismiss: document.getElementById('recommended-relays-dismiss'),
     recommendedRelaysAdd: document.getElementById('recommended-relays-add'),
@@ -190,13 +190,7 @@
     deleteLog: document.getElementById('delete-log'),
 
     libraryListbox: document.getElementById('library-listbox'),
-    librarySelectionTitle: document.getElementById('library-selection-title'),
-    librarySelectionMeta: document.getElementById('library-selection-meta'),
-    librarySelectionPreview: document.getElementById('library-selection-preview'),
-    libraryReply: document.getElementById('library-reply'),
     libraryReindex: document.getElementById('library-reindex'),
-    libraryStar: document.getElementById('library-star'),
-    librarySave: document.getElementById('library-save'),
     libraryIngestForm: document.getElementById('library-ingest-form'),
     libraryAuthoredPath: document.getElementById('library-authored-path'),
 
@@ -379,30 +373,6 @@
     return parts.join(' · ') || 'Configured relay';
   }
 
-  function formatBucketLabel(name) {
-    return String(name || '')
-      .split(/[\s,_-]+/)
-      .filter(Boolean)
-      .map(function (part) {
-        return part.charAt(0).toUpperCase() + part.slice(1);
-      })
-      .join(' ');
-  }
-
-  function bucketListFromRow(row) {
-    var source = row && row.bucket ? String(row.bucket) : '';
-    return source
-      .split(',')
-      .map(function (value) {
-        return String(value || '').trim();
-      })
-      .filter(Boolean);
-  }
-
-  function hasBucket(row, bucket) {
-    return bucketListFromRow(row).indexOf(bucket) >= 0;
-  }
-
   function formatTimestamp(unix) {
     var value = Number(unix || 0);
     if (!value) {
@@ -437,28 +407,6 @@
     empty.className = 'feed-empty';
     empty.textContent = message;
     node.appendChild(empty);
-  }
-
-  function currentLibraryRow() {
-    var id = String(state.activeLibraryEventId || '').trim();
-    return state.libraryRows && state.libraryRows.find(function (row) { return row.id === id; }) || null;
-  }
-
-  function eventFromCaches(eventId) {
-    var id = String(eventId || '').trim();
-    if (!id) {
-      return null;
-    }
-    var pools = [state.homeEvents || [], state.discoverEvents || []];
-    for (var i = 0; i < pools.length; i += 1) {
-      var found = pools[i].find(function (event) {
-        return String(event.id || '').trim() === id;
-      });
-      if (found) {
-        return found;
-      }
-    }
-    return null;
   }
 
   function relayConfigured(relays) {
@@ -563,29 +511,6 @@
     toast('Recommended relays added.', 'good');
   }
 
-  function renderRailOverview() {
-    if (!els.railOverviewTitle || !els.railOverviewSummary) {
-      return;
-    }
-    if (!state.activeProfileId && !state.relayReady) {
-      els.railOverviewTitle.textContent = 'Finish setup';
-      els.railOverviewSummary.textContent = 'Create or import a profile, then add a home relay in Settings.';
-      return;
-    }
-    if (!state.activeProfileId) {
-      els.railOverviewTitle.textContent = 'Add a profile';
-      els.railOverviewSummary.textContent = relayLabel() + ' Create or import a profile before you publish or inspect follows.';
-      return;
-    }
-    if (!state.relayReady) {
-      els.railOverviewTitle.textContent = 'Add a relay';
-      els.railOverviewSummary.textContent = activeProfileLabel() + ' Add a home relay so Home, Discover, and publishing can work.';
-      return;
-    }
-    els.railOverviewTitle.textContent = 'Ready';
-    els.railOverviewSummary.textContent = activeProfileLabel() + ' · ' + relayLabel();
-  }
-
   function renderSetupPanel() {
     var ready = !!(state.activeProfileId && state.relayReady);
     if (els.setupProfileStatus) {
@@ -594,7 +519,6 @@
     if (els.setupRelayStatus) {
       els.setupRelayStatus.textContent = relayLabel();
     }
-    renderRailOverview();
     renderRecommendedRelaysNotice();
     if (!els.setupSummary) {
       return;
@@ -1331,112 +1255,12 @@
     });
   }
 
-  function normalizeLibraryList(payload, bucket) {
-    var out = [];
-    if (payload && payload.bucket && Array.isArray(payload.events)) {
-      payload.events.forEach(function (id) {
-        out.push({ id: String(id), bucket: payload.bucket });
-      });
-      return out;
-    }
-
-    var lib = payload && payload.library ? payload.library : null;
-    if (!lib) {
-      return out;
-    }
-
-    if (bucket !== 'all' && Array.isArray(lib[bucket])) {
-      lib[bucket].forEach(function (id) {
-        out.push({ id: String(id), bucket: bucket });
-      });
-      return out;
-    }
-
-    var seen = {};
-    ['liked', 'commented', 'starred', 'saved'].forEach(function (name) {
-      var arr = Array.isArray(lib[name]) ? lib[name] : [];
-      arr.forEach(function (id) {
-        var key = String(id);
-        if (!seen[key]) {
-          seen[key] = [];
-        }
-        seen[key].push(name);
-      });
-    });
-
-    Object.keys(seen).forEach(function (id) {
-      out.push({ id: id, bucket: seen[id].join(',') });
-    });
-
-    return out;
-  }
-
-  function renderLibrarySelectionCard() {
-    if (!els.librarySelectionTitle || !els.librarySelectionMeta) {
-      return;
-    }
-    var id = String(state.activeLibraryEventId || '').trim();
-    var row = currentLibraryRow();
-    var previewEvent = eventFromCaches(id);
-    var starActive = hasBucket(row, 'starred');
-    var saveActive = hasBucket(row, 'saved');
-
-    if (!id) {
-      els.librarySelectionTitle.textContent = 'No event selected';
-      els.librarySelectionMeta.textContent = 'Choose an event from your local library to manage it here.';
-      if (els.librarySelectionPreview) {
-        els.librarySelectionPreview.textContent = '';
-        els.librarySelectionPreview.classList.add('hidden');
-      }
-      if (els.libraryReply) {
-        els.libraryReply.disabled = true;
-      }
-      if (els.libraryStar) {
-        els.libraryStar.textContent = 'Star';
-        els.libraryStar.disabled = true;
-      }
-      if (els.librarySave) {
-        els.librarySave.textContent = 'Save';
-        els.librarySave.disabled = true;
-      }
-      return;
-    }
-
-    els.librarySelectionTitle.textContent = shortId(id);
-    els.librarySelectionTitle.title = id;
-    els.librarySelectionMeta.textContent = row
-      ? bucketListFromRow(row).map(formatBucketLabel).join(' · ')
-      : 'Selected event is not in the current library filter.';
-
-    if (els.librarySelectionPreview) {
-      if (previewEvent && String(previewEvent.content || '').trim()) {
-        els.librarySelectionPreview.textContent = String(previewEvent.content || '').slice(0, 280);
-        els.librarySelectionPreview.classList.remove('hidden');
-      } else {
-        els.librarySelectionPreview.textContent = '';
-        els.librarySelectionPreview.classList.add('hidden');
-      }
-    }
-
-    if (els.libraryReply) {
-      els.libraryReply.disabled = false;
-    }
-    if (els.libraryStar) {
-      els.libraryStar.textContent = starActive ? 'Unstar' : 'Star';
-      els.libraryStar.disabled = false;
-    }
-    if (els.librarySave) {
-      els.librarySave.textContent = saveActive ? 'Unsave' : 'Save';
-      els.librarySave.disabled = false;
-    }
-  }
-
-  function setLibraryActiveOption(eventId) {
-    state.activeLibraryEventId = eventId || '';
+  function setActiveListOption(listName) {
+    state.selectedListName = String(listName || '').trim();
     var options = listboxOptions(els.libraryListbox);
     var activeOptionId = '';
     options.forEach(function (node) {
-      var active = node.getAttribute('data-event-id') === state.activeLibraryEventId;
+      var active = node.getAttribute('data-list-name') === state.selectedListName;
       node.classList.toggle('is-active', active);
       node.setAttribute('aria-selected', active ? 'true' : 'false');
       if (active) {
@@ -1444,115 +1268,114 @@
       }
     });
     setListboxActiveDescendant(els.libraryListbox, activeOptionId);
-    renderLibrarySelectionCard();
   }
 
-  function renderLibraryList(payload, bucket) {
-    var rows = normalizeLibraryList(payload, bucket || state.activeLibraryBucket);
-    state.libraryRows = rows.slice(0, 300);
+  function renderLibraryList(payload) {
+    var rows = payload && Array.isArray(payload.lists) ? payload.lists : [];
+    state.libraryRows = rows.slice(0, 250);
     els.libraryListbox.innerHTML = '';
     if (!state.libraryRows.length) {
       var empty = document.createElement('div');
       empty.className = 'rail-list-option is-empty';
-      empty.textContent = 'No events in this bucket.';
+      empty.textContent = 'No lists yet.';
       els.libraryListbox.appendChild(empty);
       setListboxActiveDescendant(els.libraryListbox, '');
-      setLibraryActiveOption('');
+      state.selectedListName = '';
       return;
     }
 
     state.libraryRows.forEach(function (row) {
+      var listName = String(row && row.name ? row.name : '').trim();
+      if (!listName) {
+        return;
+      }
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'rail-list-option';
       button.setAttribute('role', 'option');
-      button.setAttribute('data-event-id', row.id);
-      button.id = optionDomId('library-option', row.id);
+      button.setAttribute('data-list-name', listName);
+      button.id = optionDomId('library-option', listName);
       button.tabIndex = -1;
+      button.title = 'Drop events here to add and star';
 
       var copy = document.createElement('span');
       copy.className = 'rail-option-copy';
 
       var label = document.createElement('span');
       label.className = 'rail-option-label';
-      label.textContent = shortId(row.id);
-      label.title = row.id;
+      label.textContent = listName;
+      label.title = listName;
 
       var meta = document.createElement('span');
       meta.className = 'rail-option-meta';
-      meta.textContent = bucketListFromRow(row).map(formatBucketLabel).join(' · ');
+      meta.textContent = 'Folder';
 
       var badge = document.createElement('span');
       badge.className = 'rail-option-badge';
-      badge.textContent = bucketListFromRow(row).length > 1
-        ? String(bucketListFromRow(row).length) + ' buckets'
-        : formatBucketLabel(bucketListFromRow(row)[0] || 'Event');
+      badge.textContent = String(Number(row.count || 0)) + ' event' + (Number(row.count || 0) === 1 ? '' : 's');
 
       copy.appendChild(label);
       copy.appendChild(meta);
       button.appendChild(copy);
       button.appendChild(badge);
       button.addEventListener('click', function () {
-        setLibraryActiveOption(row.id);
+        setActiveListOption(listName);
+      });
+      button.addEventListener('dragover', function (event) {
+        event.preventDefault();
+      });
+      button.addEventListener('drop', function (event) {
+        event.preventDefault();
+        var eventId = String(event.dataTransfer && event.dataTransfer.getData('text/x-nostr-event-id') || '').trim();
+        if (!eventId) {
+          return;
+        }
+        addEventToList(listName, eventId).catch(function () {
+          return;
+        });
       });
 
       els.libraryListbox.appendChild(button);
     });
 
-    if (state.activeLibraryEventId && state.libraryRows.some(function (row) { return row.id === state.activeLibraryEventId; })) {
-      setLibraryActiveOption(state.activeLibraryEventId);
+    if (state.selectedListName && state.libraryRows.some(function (row) { return String(row.name || '') === state.selectedListName; })) {
+      setActiveListOption(state.selectedListName);
       return;
     }
-    setLibraryActiveOption(state.libraryRows[0].id);
+    setActiveListOption(String(state.libraryRows[0].name || ''));
   }
 
   async function runLibraryList() {
-    var blob = await safeBackend('library-list', ['saved'], 'Failed to load library');
+    var blob = await safeBackend('library-list-folders', [], 'Failed to load lists');
     var parsed = parseMaybeJson(blob);
-    state.activeLibraryBucket = 'saved';
-    renderLibraryList(parsed, 'saved');
+    renderLibraryList(parsed);
   }
 
-  async function runLibraryMutation(command, label, eventId) {
-    var id = String(eventId || state.activeLibraryEventId || '').trim();
-    if (!id) {
-      toast('Select an event first.', 'bad');
+  async function createLibraryList() {
+    var raw = window.prompt('List name');
+    if (raw === null) {
       return;
     }
-    await safeBackend(command, [id], 'Library update failed');
-    toast(label + ' complete.', 'good');
+    var name = String(raw || '').trim();
+    if (!name) {
+      toast('List name is required.', 'bad');
+      return;
+    }
+    await safeBackend('library-create-folder', [name], 'Failed to create list');
+    state.selectedListName = name;
     await runLibraryList();
+    toast('List created.', 'good');
   }
 
-  async function runLibraryToggle(kind) {
-    var row = currentLibraryRow();
-    var id = String(state.activeLibraryEventId || '').trim();
+  async function addEventToList(listName, eventId) {
+    var list = String(listName || state.selectedListName || 'inbox').trim() || 'inbox';
+    var id = String(eventId || '').trim();
     if (!id) {
-      toast('Select an event first.', 'bad');
       return;
     }
-    if (kind === 'star') {
-      await runLibraryMutation(hasBucket(row, 'starred') ? 'library-unstar' : 'library-star', hasBucket(row, 'starred') ? 'Unstar' : 'Star', id);
-      return;
-    }
-    if (kind === 'save') {
-      await runLibraryMutation(hasBucket(row, 'saved') ? 'library-unsave' : 'library-save', hasBucket(row, 'saved') ? 'Unsave' : 'Save', id);
-    }
-  }
-
-  function runLibraryReply() {
-    var id = String(state.activeLibraryEventId || '').trim();
-    if (!id) {
-      toast('Select an event first.', 'bad');
-      return;
-    }
-    setComposeType('reply');
-    els.composeReplyEvent.value = id;
-    els.composeContent.value = '';
-    if (!els.composeDraft.value) {
-      els.composeDraft.value = 'reply-' + id.slice(0, 12);
-    }
-    openCompose();
+    await safeBackend('library-list-add-event', [list, id], 'Failed to add event to list');
+    toast('Added to ' + list + '.', 'good');
+    await runLibraryList();
   }
 
   async function runLibraryIngest() {
@@ -1771,7 +1594,14 @@
 
     events.slice(0, 120).forEach(function (event) {
       var card = document.createElement('article');
-      card.className = 'feed-item' + (String(event.id || '') === String(state.activeLibraryEventId || '') ? ' is-selected-event' : '');
+      card.className = 'feed-item';
+      card.draggable = !!event.id;
+      if (event.id) {
+        card.addEventListener('dragstart', function (dragEvent) {
+          dragEvent.dataTransfer.setData('text/x-nostr-event-id', String(event.id));
+          dragEvent.dataTransfer.effectAllowed = 'copy';
+        });
+      }
 
       var head = document.createElement('div');
       head.className = 'feed-head';
@@ -1830,28 +1660,26 @@
         if (!event.id) {
           return;
         }
-        safeBackend('library-star', [String(event.id)], 'Failed to star event')
+        addEventToList('inbox', String(event.id))
           .then(function () {
-            toast('Starred event.', 'good');
-            return runLibraryList();
+            return;
           })
           .catch(function () {
             return;
           });
       });
 
-      var saveBtn = document.createElement('button');
-      saveBtn.className = 'action';
-      saveBtn.type = 'button';
-      saveBtn.textContent = 'Save';
-      saveBtn.addEventListener('click', function () {
+      var listBtn = document.createElement('button');
+      listBtn.className = 'action';
+      listBtn.type = 'button';
+      listBtn.textContent = 'Add To List';
+      listBtn.addEventListener('click', function () {
         if (!event.id) {
           return;
         }
-        safeBackend('library-save', [String(event.id)], 'Failed to save event')
+        addEventToList(state.selectedListName || 'inbox', String(event.id))
           .then(function () {
-            toast('Saved event.', 'good');
-            return runLibraryList();
+            return;
           })
           .catch(function () {
             return;
@@ -1859,7 +1687,7 @@
       });
 
       actions.appendChild(starBtn);
-      actions.appendChild(saveBtn);
+      actions.appendChild(listBtn);
 
       card.appendChild(head);
       card.appendChild(body);
@@ -1887,7 +1715,6 @@
       return;
     }
     renderEventFeed(els.homeFeed, els.homeResultsSummary, parsed, 'No events returned.', 'homeEvents');
-    renderLibrarySelectionCard();
   }
 
   async function runDiscoverSearch() {
@@ -1907,7 +1734,6 @@
       return;
     }
     renderEventFeed(els.discoverFeed, els.discoverResultsSummary, parsed, 'No discover results returned.', 'discoverEvents');
-    renderLibrarySelectionCard();
   }
 
   async function runDiscoverCount() {
@@ -1947,7 +1773,6 @@
       return;
     }
     renderEventFeed(els.discoverFeed, els.discoverResultsSummary, parsed, 'No discover results returned.', 'discoverEvents');
-    renderLibrarySelectionCard();
   }
 
   async function runRelayInfo() {
@@ -2397,15 +2222,17 @@
       });
     }
 
-    if (els.railOpenSettings) {
-      els.railOpenSettings.addEventListener('click', function () {
-        openSettings(els.railOpenSettings);
-      });
-    }
-
     if (els.setupOpenSettings) {
       els.setupOpenSettings.addEventListener('click', function () {
         openSettings(els.setupOpenSettings);
+      });
+    }
+
+    if (els.listCreate) {
+      els.listCreate.addEventListener('click', function () {
+        createLibraryList().catch(function () {
+          return;
+        });
       });
     }
 
@@ -2530,24 +2357,6 @@
       });
     });
 
-    if (els.libraryReply) {
-      els.libraryReply.addEventListener('click', function () {
-        runLibraryReply();
-      });
-    }
-
-    els.libraryStar.addEventListener('click', function () {
-      runLibraryToggle('star').catch(function () {
-        return;
-      });
-    });
-
-    els.librarySave.addEventListener('click', function () {
-      runLibraryToggle('save').catch(function () {
-        return;
-      });
-    });
-
     els.libraryIngestForm.addEventListener('submit', function (event) {
       event.preventDefault();
       runLibraryIngest().catch(function () {
@@ -2643,10 +2452,10 @@
       setSelectedRelay(value);
     });
 
-    bindListboxKeyboard(els.libraryListbox, 'data-event-id', function (value) {
-      setLibraryActiveOption(value);
+    bindListboxKeyboard(els.libraryListbox, 'data-list-name', function (value) {
+      setActiveListOption(value);
     }, function (value) {
-      setLibraryActiveOption(value);
+      setActiveListOption(value);
     });
 
     bindListboxKeyboard(els.followingListbox, 'data-following-pubkey', function (value) {
@@ -2732,7 +2541,6 @@
       if (
         node === els.settingsOpen ||
         node === els.settingsClose ||
-        node === els.railOpenSettings ||
         node === els.setupOpenSettings ||
         node === els.composeOpen ||
         node === els.composeClose ||
@@ -2759,9 +2567,6 @@
       node.disabled = true;
     });
     els.settingsOpen.disabled = false;
-    if (els.railOpenSettings) {
-      els.railOpenSettings.disabled = false;
-    }
     if (els.setupOpenSettings) {
       els.setupOpenSettings.disabled = false;
     }
@@ -2910,11 +2715,9 @@
 
     applyRailWidth(prefs.rail_width || 352);
     state.recommendedRelaysNotice = String(prefs.recommended_relays_notice || '').trim();
-    state.activeLibraryBucket = 'saved';
     renderSetupPanel();
     renderRelaySelectionCard();
     renderFollowingList([]);
-    renderLibrarySelectionCard();
     if (els.discoverFeed) {
       feedEmpty(els.discoverFeed, 'Run a search to inspect relay results.');
     }

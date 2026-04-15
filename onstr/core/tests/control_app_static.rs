@@ -31,15 +31,15 @@ fn home_surface_has_first_run_setup_panel() {
 }
 
 #[test]
-fn rail_listboxes_stay_focusable_with_selection_cards() {
+fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
     assert!(index_html.contains("id=\"following-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"library-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"relay-listbox\" class=\"rail-listbox settings-listbox\" role=\"listbox\" tabindex=\"0\""));
-    assert!(index_html.contains("id=\"relay-selection-card\""));
-    assert!(index_html.contains("id=\"library-selection-card\""));
+    assert!(!index_html.contains("id=\"library-selection-card\""));
+    assert!(!index_html.contains("id=\"rail-open-settings\""));
     assert!(app_js.contains("bindListboxKeyboard(els.followingListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.relayListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.libraryListbox"));
@@ -78,6 +78,10 @@ fn backend_prefs_expose_recommended_relays_notice_state() {
     assert!(backend_sh.contains("printf 'rail_width=%s\\n'"));
     assert!(backend_sh.contains("recommended_relays_notice=$(pref_get recommended_relays_notice"));
     assert!(backend_sh.contains("printf 'recommended_relays_notice=%s\\n'"));
+    assert!(backend_sh.contains("ONSTR_LIST_ROOT=$HOME/.onstr"));
+    assert!(backend_sh.contains("library-list-folders"));
+    assert!(backend_sh.contains("library-create-folder"));
+    assert!(backend_sh.contains("library-list-add-event"));
 }
 
 #[test]

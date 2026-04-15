@@ -17,38 +17,19 @@
 
   <div class="workspace">
     <aside class="rail" aria-label="Onstr rail">
-      <section class="rail-section rail-overview">
-        <div class="rail-overview-card">
-          <div class="rail-overview-copy">
-            <span class="rail-overview-label">Current Session</span>
-            <strong id="rail-overview-title">Finish setup</strong>
-            <p id="rail-overview-summary" class="support-copy">No active profile.</p>
-          </div>
-          <button id="rail-open-settings" class="action" type="button">Open Settings</button>
+      <section class="rail-section rail-library">
+        <div class="rail-section-head">
+          <h2>Following</h2>
         </div>
+        <div id="following-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Following list"></div>
       </section>
 
       <section class="rail-section rail-library">
         <div class="rail-section-head">
-          <h2>Library</h2>
+          <h2>Lists</h2>
+          <button id="list-create" class="action" type="button">New List</button>
         </div>
-        <h3 class="rail-subhead">Following</h3>
-        <div id="following-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Following list"></div>
-
-        <h3 class="rail-subhead">Saved Events</h3>
         <div id="library-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Library events"></div>
-
-        <div id="library-selection-card" class="rail-selection-card">
-          <span class="selection-eyebrow">Selected event</span>
-          <strong id="library-selection-title">No event selected</strong>
-          <p id="library-selection-meta" class="support-copy">No metadata.</p>
-          <p id="library-selection-preview" class="selection-preview hidden"></p>
-          <div class="flow-row compact">
-            <button id="library-reply" class="action" type="button">Reply</button>
-            <button id="library-star" class="action" type="button">Star</button>
-            <button id="library-save" class="action" type="button">Save</button>
-          </div>
-        </div>
       </section>
 
       <footer class="rail-footer">

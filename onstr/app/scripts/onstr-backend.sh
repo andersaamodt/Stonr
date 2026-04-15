@@ -8,6 +8,10 @@ ONSTR_DIR=$(CDPATH= cd -- "$APP_DIR/.." && pwd -P)
 REPO_ROOT=$(CDPATH= cd -- "$ONSTR_DIR/.." && pwd -P)
 PREF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/onstr/app
 PREF_FILE=$PREF_DIR/ui-prefs.env
+ONSTR_LIST_ROOT=$HOME/.onstr
+ONSTR_EVENTS_DIR=$ONSTR_LIST_ROOT/events
+ONSTR_LISTS_DIR=$ONSTR_LIST_ROOT/lists
+ONSTR_DEFAULT_LIST=inbox
 
 ensure_pref_dir() {
   mkdir -p "$PREF_DIR"
@@ -55,6 +59,73 @@ list_themes() {
     | awk -F/ '{print $NF}' \
     | sed 's/\.css$//' \
     | sort
+}
+
+ensure_onstr_list_store() {
+  mkdir -p "$ONSTR_EVENTS_DIR" "$ONSTR_LISTS_DIR/$ONSTR_DEFAULT_LIST"
+}
+
+sanitize_list_name() {
+  name=${1-}
+  sanitized=$(printf '%s' "$name" | tr -cs 'A-Za-z0-9._- ' '_' | awk '{gsub(/^[_[:space:]]+|[_[:space:]]+$/, ""); print}')
+  printf '%s' "$sanitized"
+}
+
+json_escape() {
+  printf '%s' "${1-}" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+list_store_json() {
+  ensure_onstr_list_store
+  printf '%s' '{"ok":true,"root":"'
+  json_escape "$ONSTR_LISTS_DIR"
+  printf '%s' '","default":"'
+  json_escape "$ONSTR_DEFAULT_LIST"
+  printf '%s' '","lists":['
+  first=1
+  for dir in "$ONSTR_LISTS_DIR"/*; do
+    [ -d "$dir" ] || continue
+    name=$(basename "$dir")
+    count=$(find "$dir" -mindepth 1 -maxdepth 1 -type f 2>/dev/null | wc -l | awk '{print $1}')
+    if [ "$first" -eq 0 ]; then
+      printf ','
+    fi
+    first=0
+    printf '%s' '{"name":"'
+    json_escape "$name"
+    printf '%s' '","count":'"$count"'}'
+  done
+  printf '%s\n' ']}'
+}
+
+list_create() {
+  raw_name=${1-}
+  [ -n "$raw_name" ] || { printf '%s\n' 'missing list name' >&2; exit 2; }
+  ensure_onstr_list_store
+  name=$(sanitize_list_name "$raw_name")
+  [ -n "$name" ] || { printf '%s\n' 'invalid list name' >&2; exit 2; }
+  mkdir -p "$ONSTR_LISTS_DIR/$name"
+  list_store_json
+}
+
+list_add_event() {
+  list_name=${1-}
+  event_id=${2-}
+  [ -n "$list_name" ] && [ -n "$event_id" ] || { printf '%s\n' 'missing list/event id' >&2; exit 2; }
+  ensure_onstr_list_store
+  safe_name=$(sanitize_list_name "$list_name")
+  [ -n "$safe_name" ] || { printf '%s\n' 'invalid list name' >&2; exit 2; }
+  mkdir -p "$ONSTR_LISTS_DIR/$safe_name"
+  event_file="$ONSTR_EVENTS_DIR/$event_id.id"
+  list_file="$ONSTR_LISTS_DIR/$safe_name/$event_id.id"
+  if [ ! -f "$event_file" ]; then
+    printf '%s\n' "$event_id" > "$event_file"
+  fi
+  if [ ! -f "$list_file" ]; then
+    ln "$event_file" "$list_file"
+  fi
+  run_core library star --event-id "$event_id" >/dev/null
+  printf '%s\n' '{"ok":true}'
 }
 
 run_core() {
@@ -112,6 +183,9 @@ Commands:
   library-unstar EVENT_ID
   library-save EVENT_ID
   library-unsave EVENT_ID
+  library-list-folders
+  library-create-folder NAME
+  library-list-add-event LIST_NAME EVENT_ID
   library-ingest-authored PATH
   library-reindex
   media-nip94-template URL HASH MIME SIZE [NAME]
@@ -476,6 +550,18 @@ case "$cmd" in
     event_id=${1-}
     [ -n "$event_id" ] || { printf '%s\n' 'missing event id' >&2; exit 2; }
     run_core library unsave --event-id "$event_id"
+    ;;
+  library-list-folders)
+    list_store_json
+    ;;
+  library-create-folder)
+    name=${1-}
+    list_create "$name"
+    ;;
+  library-list-add-event)
+    list_name=${1-}
+    event_id=${2-}
+    list_add_event "$list_name" "$event_id"
     ;;
   library-ingest-authored)
     path=${1-}
