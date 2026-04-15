@@ -84,8 +84,6 @@
   var els = {
     toast: document.getElementById('toast'),
 
-    tabList: document.getElementById('primary-tabs'),
-
     railResizer: document.getElementById('rail-resizer'),
     railNavListbox: document.getElementById('rail-nav-listbox'),
     followingListbox: document.getElementById('following-listbox'),
@@ -364,9 +362,9 @@
       return;
     }
     var items = [
-      { id: 'home', label: 'Home' },
-      { id: 'feed', label: 'Feed' },
-      { id: 'discover', label: 'Discover' }
+      { id: 'home', label: 'Home', icon: 'assets/home-outline.svg' },
+      { id: 'feed', label: 'Feed', icon: 'assets/feed-outline.svg' },
+      { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' }
     ];
     els.railNavListbox.innerHTML = '';
     items.forEach(function (item) {
@@ -381,10 +379,17 @@
       var copy = document.createElement('span');
       copy.className = 'rail-option-copy';
 
+      var icon = document.createElement('img');
+      icon.className = 'rail-nav-icon';
+      icon.src = item.icon;
+      icon.alt = '';
+      icon.setAttribute('aria-hidden', 'true');
+
       var label = document.createElement('span');
       label.className = 'rail-option-label';
       label.textContent = item.label;
 
+      copy.appendChild(icon);
       copy.appendChild(label);
       row.appendChild(copy);
       row.addEventListener('click', function () {
@@ -748,15 +753,11 @@
     state.activeTab = tabId;
 
     TAB_IDS.forEach(function (id) {
-      var tab = document.getElementById('tab-btn-' + id);
       var panel = document.getElementById('tab-' + id);
       var active = id === tabId;
-      tab.classList.toggle('is-active', active);
-      tab.setAttribute('aria-selected', active ? 'true' : 'false');
-      tab.tabIndex = active ? 0 : -1;
       panel.classList.toggle('hidden', !active);
-      if (active && focusTab) {
-        tab.focus();
+      if (active && focusTab && typeof panel.focus === 'function') {
+        panel.focus();
       }
     });
     if (tabId === 'discover') {
@@ -771,37 +772,7 @@
   }
 
   function bindTabSemantics() {
-    TAB_IDS.forEach(function (id) {
-      var tab = document.getElementById('tab-btn-' + id);
-      tab.addEventListener('click', function () {
-        setActiveTab(id, false);
-      });
-    });
-
-    els.tabList.addEventListener('keydown', function (event) {
-      var key = event.key;
-      if (['ArrowRight', 'ArrowLeft', 'Home', 'End'].indexOf(key) < 0) {
-        return;
-      }
-      event.preventDefault();
-      var current = TAB_IDS.indexOf(state.activeTab);
-      if (key === 'Home') {
-        setActiveTab(TAB_IDS[0], true);
-        return;
-      }
-      if (key === 'End') {
-        setActiveTab(TAB_IDS[TAB_IDS.length - 1], true);
-        return;
-      }
-      var next = current + (key === 'ArrowRight' ? 1 : -1);
-      if (next < 0) {
-        next = TAB_IDS.length - 1;
-      }
-      if (next >= TAB_IDS.length) {
-        next = 0;
-      }
-      setActiveTab(TAB_IDS[next], true);
-    });
+    return;
   }
 
   function openSettings(trigger) {

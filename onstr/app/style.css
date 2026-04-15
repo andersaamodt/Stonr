@@ -135,9 +135,9 @@ summary:focus-visible {
 }
 
 .rail {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
   min-height: 0;
   padding: calc(0.9rem + env(safe-area-inset-top) + 1rem) 0.9rem 0.9rem;
   border-right: 1px solid var(--line);
@@ -205,9 +205,10 @@ h5 {
 
 .rail-section {
   display: grid;
-  gap: 0.36rem;
+  gap: 0.24rem;
   min-height: 0;
   align-content: start;
+  flex: 0 0 auto;
 }
 
 .rail-library {
@@ -242,16 +243,26 @@ h5 {
 }
 
 .rail-listbox {
-  min-height: 5rem;
-  max-height: clamp(8rem, 24vh, 15rem);
-  overflow: auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
   display: grid;
-  gap: 0.18rem;
+  align-content: start;
+  gap: 0.1rem;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.rail-content-listbox {
+  max-height: min(11rem, 26vh);
+  overflow: auto;
+}
+
+.rail-nav-listbox {
+  gap: 0.08rem;
 }
 
 .rail-list-option {
@@ -261,12 +272,12 @@ h5 {
   background: transparent;
   color: var(--text-main);
   text-align: left;
-  padding: 0.54rem 0.62rem;
-  min-height: 2.85rem;
+  padding: 0.22rem 0.5rem;
+  min-height: 2rem;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 0.52rem;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .rail-list-option:hover,
@@ -280,12 +291,12 @@ h5 {
 }
 
 .rail-list-option.is-empty {
-  min-height: 3.2rem;
+  min-height: 2rem;
   grid-template-columns: 1fr;
   color: var(--text-muted);
   align-items: center;
   justify-items: start;
-  padding: 0.74rem 0.78rem;
+  padding: 0.24rem 0.5rem;
 }
 
 .rail-list-option.is-empty:hover,
@@ -295,7 +306,9 @@ h5 {
 
 .rail-option-copy {
   min-width: 0;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
 }
 
 .rail-option-label {
@@ -303,8 +316,15 @@ h5 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.84rem;
+  font-size: 0.83rem;
   font-weight: 600;
+}
+
+.rail-nav-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+  opacity: 0.84;
 }
 
 .rail-option-meta {
@@ -373,7 +393,7 @@ h5 {
 
 .rail-footer {
   border-top: 1px solid var(--line);
-  margin: 0 -0.9rem -0.9rem;
+  margin: auto -0.9rem -0.9rem;
   display: block;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
@@ -504,7 +524,7 @@ h5 {
 .stage {
   min-height: 0;
   overflow: auto;
-  padding: 1rem 1.14rem 1.18rem;
+  padding: 0.9rem 1.14rem 1.18rem;
   background: color-mix(in srgb, var(--stage) 90%, transparent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -571,38 +591,9 @@ h5 {
 
 .stage-head {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-end;
   gap: 0.8rem;
-}
-
-.tab-strip {
-  display: flex;
-  align-items: end;
-  gap: 0.28rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.tab {
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  background: transparent;
-  color: var(--text-muted);
-  min-height: 2rem;
-  padding: 0.34rem 0.82rem;
-}
-
-.tab:hover,
-.tab:focus-visible {
-  color: var(--text-main);
-  background: color-mix(in srgb, var(--surface-soft) 54%, transparent);
-}
-
-.tab.is-active {
-  color: var(--text-main);
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  border-color: var(--line);
 }
 
 .action {

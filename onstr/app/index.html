@@ -18,7 +18,7 @@
   <div class="workspace">
     <aside class="rail" aria-label="Onstr rail">
       <section class="rail-section rail-library">
-        <div id="rail-nav-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Navigation"></div>
+        <div id="rail-nav-listbox" class="rail-listbox rail-nav-listbox" role="listbox" tabindex="0" aria-label="Navigation"></div>
       </section>
 
       <section class="rail-section rail-library">
@@ -26,7 +26,7 @@
           <h2>Following</h2>
           <button id="following-add" class="icon-btn" type="button" title="Add follow" aria-label="Add follow">+</button>
         </div>
-        <div id="following-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Following list"></div>
+        <div id="following-listbox" class="rail-listbox rail-content-listbox" role="listbox" tabindex="0" aria-label="Following list"></div>
       </section>
 
       <section class="rail-section rail-library">
@@ -34,7 +34,7 @@
           <h2>Lists</h2>
           <button id="list-create" class="icon-btn" type="button" title="Create list" aria-label="Create list">+</button>
         </div>
-        <div id="library-listbox" class="rail-listbox" role="listbox" tabindex="0" aria-label="Library events"></div>
+        <div id="library-listbox" class="rail-listbox rail-content-listbox" role="listbox" tabindex="0" aria-label="Library events"></div>
       </section>
 
       <footer class="rail-footer">
@@ -56,10 +56,6 @@
 
     <main class="stage">
       <header class="stage-head">
-        <nav id="primary-tabs" class="tab-strip" role="tablist" aria-label="Onstr primary sections">
-          <button id="tab-btn-home" class="tab is-active" type="button" role="tab" aria-selected="true" aria-controls="tab-home" tabindex="0">Home</button>
-          <button id="tab-btn-discover" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-discover" tabindex="-1">Discover</button>
-        </nav>
         <button id="open-compose" class="action primary" type="button">Compose</button>
       </header>
 
@@ -79,7 +75,7 @@
         </div>
       </aside>
 
-      <section id="tab-home" class="tab-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-home">
+      <section id="tab-home" class="tab-panel" tabindex="0">
         <section id="setup-panel" class="stage-section setup-panel">
           <header class="inline-head setup-head">
             <div>
@@ -147,7 +143,7 @@
         </details>
       </section>
 
-      <section id="tab-discover" class="tab-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="tab-btn-discover">
+      <section id="tab-discover" class="tab-panel hidden" tabindex="0">
         <section class="stage-section">
           <header class="inline-head">
             <div>
