@@ -11,6 +11,7 @@
     bridge: false,
     hostBootReadySent: false,
     activeTab: 'home',
+    activeRailNav: 'home',
     selectedListName: 'inbox',
     activeFollowingPubkey: '',
     manualFollowingRows: [],
@@ -86,6 +87,7 @@
     tabList: document.getElementById('primary-tabs'),
 
     railResizer: document.getElementById('rail-resizer'),
+    railNavListbox: document.getElementById('rail-nav-listbox'),
     followingListbox: document.getElementById('following-listbox'),
     followingAdd: document.getElementById('following-add'),
     listCreate: document.getElementById('list-create'),
@@ -355,6 +357,71 @@
 
   function listboxOptions(listbox) {
     return Array.prototype.slice.call(listbox.querySelectorAll('.rail-list-option[role="option"]'));
+  }
+
+  function renderRailNavigation() {
+    if (!els.railNavListbox) {
+      return;
+    }
+    var items = [
+      { id: 'home', label: 'Home' },
+      { id: 'feed', label: 'Feed' },
+      { id: 'discover', label: 'Discover' }
+    ];
+    els.railNavListbox.innerHTML = '';
+    items.forEach(function (item) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'rail-list-option';
+      row.setAttribute('role', 'option');
+      row.setAttribute('data-rail-nav', item.id);
+      row.id = optionDomId('rail-nav-option', item.id);
+      row.tabIndex = -1;
+
+      var copy = document.createElement('span');
+      copy.className = 'rail-option-copy';
+
+      var label = document.createElement('span');
+      label.className = 'rail-option-label';
+      label.textContent = item.label;
+
+      copy.appendChild(label);
+      row.appendChild(copy);
+      row.addEventListener('click', function () {
+        setActiveRailNav(item.id, true);
+      });
+      els.railNavListbox.appendChild(row);
+    });
+    setActiveRailNav(state.activeRailNav || 'home', false);
+  }
+
+  function setActiveRailNav(viewId, userInitiated) {
+    var view = String(viewId || '').trim();
+    if (['home', 'feed', 'discover'].indexOf(view) < 0) {
+      view = 'home';
+    }
+    state.activeRailNav = view;
+    var activeOptionId = '';
+    listboxOptions(els.railNavListbox).forEach(function (node) {
+      var active = node.getAttribute('data-rail-nav') === view;
+      node.classList.toggle('is-active', active);
+      node.setAttribute('aria-selected', active ? 'true' : 'false');
+      if (active) {
+        activeOptionId = node.id;
+      }
+    });
+    setListboxActiveDescendant(els.railNavListbox, activeOptionId);
+    if (!userInitiated) {
+      return;
+    }
+    if (view === 'discover') {
+      setActiveTab('discover', false);
+      return;
+    }
+    setActiveTab('home', false);
+    if (view === 'feed' && els.homeFeed && typeof els.homeFeed.scrollIntoView === 'function') {
+      els.homeFeed.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
   }
 
   function relayDisplayLabel(url) {
@@ -692,6 +759,11 @@
         tab.focus();
       }
     });
+    if (tabId === 'discover') {
+      setActiveRailNav('discover', false);
+    } else if (state.activeRailNav === 'discover') {
+      setActiveRailNav('home', false);
+    }
 
     saveUiPref('active_tab', tabId).catch(function () {
       return;
@@ -2513,6 +2585,12 @@
       setSelectedRelay(value);
     });
 
+    bindListboxKeyboard(els.railNavListbox, 'data-rail-nav', function (value) {
+      setActiveRailNav(value, true);
+    }, function (value) {
+      setActiveRailNav(value, true);
+    });
+
     bindListboxKeyboard(els.libraryListbox, 'data-list-name', function (value) {
       setActiveListOption(value);
     }, function (value) {
@@ -2777,6 +2855,7 @@
     applyRailWidth(prefs.rail_width || 352);
     state.recommendedRelaysNotice = String(prefs.recommended_relays_notice || '').trim();
     state.manualFollowingRows = parsePubkeyCsv(prefs.manual_follows || '');
+    renderRailNavigation();
     renderSetupPanel();
     renderRelaySelectionCard();
     renderFollowingList(state.manualFollowingRows);

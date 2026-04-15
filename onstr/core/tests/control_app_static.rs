@@ -35,11 +35,13 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
+    assert!(index_html.contains("id=\"rail-nav-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"following-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"library-listbox\" class=\"rail-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"relay-listbox\" class=\"rail-listbox settings-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(!index_html.contains("id=\"library-selection-card\""));
     assert!(!index_html.contains("id=\"rail-open-settings\""));
+    assert!(app_js.contains("bindListboxKeyboard(els.railNavListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.followingListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.relayListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.libraryListbox"));
