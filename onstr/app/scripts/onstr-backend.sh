@@ -227,11 +227,13 @@ case "$cmd" in
     library_bucket=$(pref_get library_bucket 2>/dev/null || printf 'all')
     rail_width=$(pref_get rail_width 2>/dev/null || printf '')
     recommended_relays_notice=$(pref_get recommended_relays_notice 2>/dev/null || printf '')
+    manual_follows=$(pref_get manual_follows 2>/dev/null || printf '')
     printf 'theme=%s\n' "$theme"
     printf 'active_tab=%s\n' "$active_tab"
     printf 'library_bucket=%s\n' "$library_bucket"
     printf 'rail_width=%s\n' "$rail_width"
     printf 'recommended_relays_notice=%s\n' "$recommended_relays_notice"
+    printf 'manual_follows=%s\n' "$manual_follows"
     ;;
   set-ui-pref)
     key=${1-}

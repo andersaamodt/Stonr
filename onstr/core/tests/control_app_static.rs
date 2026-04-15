@@ -78,6 +78,8 @@ fn backend_prefs_expose_recommended_relays_notice_state() {
     assert!(backend_sh.contains("printf 'rail_width=%s\\n'"));
     assert!(backend_sh.contains("recommended_relays_notice=$(pref_get recommended_relays_notice"));
     assert!(backend_sh.contains("printf 'recommended_relays_notice=%s\\n'"));
+    assert!(backend_sh.contains("manual_follows=$(pref_get manual_follows"));
+    assert!(backend_sh.contains("printf 'manual_follows=%s\\n'"));
     assert!(backend_sh.contains("ONSTR_LIST_ROOT=$HOME/.onstr"));
     assert!(backend_sh.contains("library-list-folders"));
     assert!(backend_sh.contains("library-create-folder"));

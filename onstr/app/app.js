@@ -13,6 +13,7 @@
     activeTab: 'home',
     selectedListName: 'inbox',
     activeFollowingPubkey: '',
+    manualFollowingRows: [],
     selectedRelayUrl: '',
     activeProfileId: '',
     activeProfileName: '',
@@ -86,6 +87,7 @@
 
     railResizer: document.getElementById('rail-resizer'),
     followingListbox: document.getElementById('following-listbox'),
+    followingAdd: document.getElementById('following-add'),
     listCreate: document.getElementById('list-create'),
     recommendedRelaysNotice: document.getElementById('recommended-relays-notice'),
     recommendedRelaysDismiss: document.getElementById('recommended-relays-dismiss'),
@@ -371,6 +373,48 @@
       parts.push('Write');
     }
     return parts.join(' · ') || 'Configured relay';
+  }
+
+  function normalizePubkey(value) {
+    var candidate = String(value || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(candidate)) {
+      return '';
+    }
+    return candidate;
+  }
+
+  function parsePubkeyCsv(value) {
+    if (!value) {
+      return [];
+    }
+    var seen = {};
+    return String(value)
+      .split(',')
+      .map(function (entry) {
+        return normalizePubkey(entry);
+      })
+      .filter(Boolean)
+      .filter(function (entry) {
+        if (seen[entry]) {
+          return false;
+        }
+        seen[entry] = true;
+        return true;
+      });
+  }
+
+  function mergeFollowingRows(remoteRows, manualRows) {
+    var out = [];
+    var seen = {};
+    (Array.isArray(remoteRows) ? remoteRows : []).concat(Array.isArray(manualRows) ? manualRows : []).forEach(function (pubkey) {
+      var value = normalizePubkey(pubkey);
+      if (!value || seen[value]) {
+        return;
+      }
+      seen[value] = true;
+      out.push(value);
+    });
+    return out;
   }
 
   function formatTimestamp(unix) {
@@ -1916,7 +1960,7 @@
   }
 
   async function runFollowingList() {
-    var follows = await fetchFollowingPubkeys();
+    var follows = mergeFollowingRows(await fetchFollowingPubkeys(), state.manualFollowingRows);
     renderFollowingList(follows);
   }
 
@@ -1925,10 +1969,30 @@
       toast('Set an active profile first to load following.', 'bad');
       return;
     }
-    var follows = await fetchFollowingPubkeys();
+    var follows = mergeFollowingRows(await fetchFollowingPubkeys(), state.manualFollowingRows);
     renderFollowingList(follows);
     renderPeopleRows(follows, 'following');
     toast('Following list loaded.', 'good');
+  }
+
+  async function addFollowingPubkey() {
+    var input = window.prompt('Pubkey (hex)');
+    if (input === null) {
+      return;
+    }
+    var pubkey = normalizePubkey(input);
+    if (!pubkey) {
+      toast('Pubkey must be 64 hex characters.', 'bad');
+      return;
+    }
+    if (state.manualFollowingRows.indexOf(pubkey) < 0) {
+      state.manualFollowingRows = state.manualFollowingRows.concat([pubkey]);
+    }
+    if (state.bridge) {
+      await saveUiPref('manual_follows', state.manualFollowingRows.join(','));
+    }
+    renderFollowingList(mergeFollowingRows(state.followingRows, state.manualFollowingRows));
+    toast('Follow added.', 'good');
   }
 
   async function runPeopleFollowers() {
@@ -2221,6 +2285,13 @@
     if (els.listCreate) {
       els.listCreate.addEventListener('click', function () {
         createLibraryList().catch(function () {
+          return;
+        });
+      });
+    }
+    if (els.followingAdd) {
+      els.followingAdd.addEventListener('click', function () {
+        addFollowingPubkey().catch(function () {
           return;
         });
       });
@@ -2705,9 +2776,10 @@
 
     applyRailWidth(prefs.rail_width || 352);
     state.recommendedRelaysNotice = String(prefs.recommended_relays_notice || '').trim();
+    state.manualFollowingRows = parsePubkeyCsv(prefs.manual_follows || '');
     renderSetupPanel();
     renderRelaySelectionCard();
-    renderFollowingList([]);
+    renderFollowingList(state.manualFollowingRows);
     if (els.discoverFeed) {
       feedEmpty(els.discoverFeed, 'Run a search to inspect relay results.');
     }

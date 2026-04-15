@@ -139,7 +139,7 @@ summary:focus-visible {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 0.7rem;
   min-height: 0;
-  padding: 0.9rem;
+  padding: calc(0.9rem + env(safe-area-inset-top) + 0.7rem) 0.9rem 0.9rem;
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
@@ -227,7 +227,6 @@ h5 {
   font-size: 0.88rem;
   letter-spacing: 0.03em;
   color: var(--text-muted);
-  text-transform: uppercase;
 }
 
 .rail-overview-label,
@@ -235,7 +234,6 @@ h5 {
   color: var(--text-muted);
   font-size: 0.72rem;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
 }
 
 .rail-selection-card strong {
@@ -348,7 +346,6 @@ h5 {
 .rail-helper-card h3 {
   font-size: 0.82rem;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -675,7 +672,6 @@ h5 {
 .setup-status-card h4 {
   font-size: 0.74rem;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -780,7 +776,6 @@ label {
 .cluster-header h5 {
   font-size: 0.82rem;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -1059,7 +1054,6 @@ label {
 .drawer-helper-card h5 {
   font-size: 0.78rem;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--text-muted);
 }
 
