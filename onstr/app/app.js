@@ -38,8 +38,7 @@
     promptResolver: null,
     railSelectionKind: 'nav',
     railSelectionValue: 'home',
-    bootFinished: false,
-    bootWatchdog: null
+    bootFinished: false
   };
 
   var TAB_IDS = ['home', 'discover'];
@@ -734,22 +733,6 @@
     feedEmpty(els.homeFeed, message);
   }
 
-  function clearBootWatchdog() {
-    if (!state.bootWatchdog) {
-      return;
-    }
-    clearTimeout(state.bootWatchdog);
-    state.bootWatchdog = null;
-  }
-
-  function armBootWatchdog() {
-    clearBootWatchdog();
-    state.bootWatchdog = setTimeout(function () {
-      revealUi();
-      toast('Startup took too long. Revealed UI before boot finished.', 'bad');
-    }, 5000);
-  }
-
   function withTimeout(promise, ms) {
     return new Promise(function (resolve, reject) {
       var settled = false;
@@ -784,7 +767,6 @@
       return;
     }
     state.bootFinished = true;
-    clearBootWatchdog();
     if (els.app) {
       els.app.classList.remove('hidden');
       els.app.setAttribute('aria-hidden', 'false');
@@ -833,6 +815,20 @@
         notifyHostBootReady(0);
       });
     });
+  }
+
+  function startInitialRefresh() {
+    if (!state.bridge) {
+      return;
+    }
+    runFollowingList().catch(function () {
+      return;
+    });
+    if (state.relayReady) {
+      runHomeFetch().catch(function () {
+        return;
+      });
+    }
   }
 
   function closeOpenMenu() {
@@ -3051,7 +3047,6 @@
 
   async function init() {
     state.bridge = bridgeAvailable();
-    armBootWatchdog();
     bindTabSemantics();
     bindForms();
     bindDrawers();
@@ -3093,6 +3088,7 @@
     renderSetupPanel();
     renderRelaySelectionCard();
     renderFollowingList(state.manualFollowingRows);
+    renderHomeEmptyState('Loading timeline...');
     if (els.discoverFeed) {
       feedEmpty(els.discoverFeed, 'Run a search to inspect relay results.');
     }
@@ -3102,17 +3098,10 @@
       await runRelayList().catch(function () {
         return;
       });
-      await runFollowingList().catch(function () {
-        return;
-      });
       await runLibraryList().catch(function () {
         return;
       });
-      if (state.relayReady) {
-        await runHomeFetch().catch(function () {
-          return;
-        });
-      } else {
+      if (!state.relayReady) {
         renderHomeEmptyState('Add at least one relay in Settings to load your timeline.');
       }
     } else {
@@ -3126,6 +3115,7 @@
     disableActionsWhenNoBridge();
     scheduleRefresh();
     finishBoot();
+    startInitialRefresh();
   }
 
   init().catch(function (error) {
