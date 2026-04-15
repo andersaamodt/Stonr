@@ -2053,7 +2053,7 @@
     search.id = 'events-search';
     search.type = 'text';
     search.spellcheck = false;
-    search.placeholder = 'Search stored event text';
+    search.placeholder = 'Search events';
     search.value = state.eventsSearch;
     search.disabled = !state.bridge;
     search.title = 'Filter stored events by words in their content.';
