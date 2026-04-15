@@ -35,7 +35,9 @@
     refreshTimer: null,
     settingsReturnFocus: null,
     promptReturnFocus: null,
-    promptResolver: null
+    promptResolver: null,
+    railSelectionKind: 'nav',
+    railSelectionValue: 'home'
   };
 
   var TAB_IDS = ['home', 'discover'];
@@ -389,11 +391,10 @@
       var copy = document.createElement('span');
       copy.className = 'rail-option-copy';
 
-      var icon = document.createElement('img');
+      var icon = document.createElement('span');
       icon.className = 'rail-nav-icon';
-      icon.src = item.icon;
-      icon.alt = '';
       icon.setAttribute('aria-hidden', 'true');
+      icon.style.setProperty('--icon-url', 'url("' + item.icon + '")');
 
       var label = document.createElement('span');
       label.className = 'rail-option-label';
@@ -410,22 +411,75 @@
     setActiveRailNav(state.activeRailNav || 'home', false);
   }
 
+  function setRailSelection(kind, value) {
+    state.railSelectionKind = String(kind || '').trim();
+    state.railSelectionValue = String(value || '').trim();
+    syncRailSelection();
+  }
+
+  function clearListboxSelection(listbox) {
+    if (!listbox) {
+      return;
+    }
+    listboxOptions(listbox).forEach(function (node) {
+      node.classList.remove('is-active');
+      node.setAttribute('aria-selected', 'false');
+    });
+    setListboxActiveDescendant(listbox, '');
+  }
+
+  function syncListboxSelection(listbox, attrName, expectedValue, active) {
+    if (!listbox) {
+      return;
+    }
+    if (!active) {
+      clearListboxSelection(listbox);
+      return;
+    }
+    var activeOptionId = '';
+    listboxOptions(listbox).forEach(function (node) {
+      var selected = node.getAttribute(attrName) === expectedValue;
+      node.classList.toggle('is-active', selected);
+      node.setAttribute('aria-selected', selected ? 'true' : 'false');
+      if (selected) {
+        activeOptionId = node.id;
+      }
+    });
+    setListboxActiveDescendant(listbox, activeOptionId);
+  }
+
+  function syncRailSelection() {
+    syncListboxSelection(
+      els.railNavListbox,
+      'data-rail-nav',
+      state.railSelectionKind === 'nav' ? state.railSelectionValue : '',
+      state.railSelectionKind === 'nav'
+    );
+    syncListboxSelection(
+      els.followingListbox,
+      'data-following-pubkey',
+      state.railSelectionKind === 'following' ? state.railSelectionValue : '',
+      state.railSelectionKind === 'following'
+    );
+    syncListboxSelection(
+      els.libraryListbox,
+      'data-list-name',
+      state.railSelectionKind === 'list' ? state.railSelectionValue : '',
+      state.railSelectionKind === 'list'
+    );
+  }
+
   function setActiveRailNav(viewId, userInitiated) {
     var view = String(viewId || '').trim();
     if (['home', 'feed', 'discover'].indexOf(view) < 0) {
       view = 'home';
     }
     state.activeRailNav = view;
-    var activeOptionId = '';
-    listboxOptions(els.railNavListbox).forEach(function (node) {
-      var active = node.getAttribute('data-rail-nav') === view;
-      node.classList.toggle('is-active', active);
-      node.setAttribute('aria-selected', active ? 'true' : 'false');
-      if (active) {
-        activeOptionId = node.id;
-      }
-    });
-    setListboxActiveDescendant(els.railNavListbox, activeOptionId);
+    if (userInitiated || state.railSelectionKind === 'nav' || !state.railSelectionKind) {
+      setRailSelection('nav', view);
+    } else {
+      syncRailSelection();
+    }
     if (!userInitiated) {
       return;
     }
@@ -1399,17 +1453,15 @@
 
   function setActiveListOption(listName) {
     state.selectedListName = String(listName || '').trim();
-    var options = listboxOptions(els.libraryListbox);
-    var activeOptionId = '';
-    options.forEach(function (node) {
-      var active = node.getAttribute('data-list-name') === state.selectedListName;
-      node.classList.toggle('is-active', active);
-      node.setAttribute('aria-selected', active ? 'true' : 'false');
-      if (active) {
-        activeOptionId = node.id;
-      }
-    });
-    setListboxActiveDescendant(els.libraryListbox, activeOptionId);
+    if (state.selectedListName) {
+      setRailSelection('list', state.selectedListName);
+      return;
+    }
+    if (state.railSelectionKind === 'list') {
+      setRailSelection('nav', state.activeRailNav || 'home');
+      return;
+    }
+    syncRailSelection();
   }
 
   function renderLibraryList(payload) {
@@ -1421,8 +1473,12 @@
       empty.className = 'rail-list-option is-empty';
       empty.textContent = 'No lists yet.';
       els.libraryListbox.appendChild(empty);
-      setListboxActiveDescendant(els.libraryListbox, '');
       state.selectedListName = '';
+      if (state.railSelectionKind === 'list') {
+        setRailSelection('nav', state.activeRailNav || 'home');
+        return;
+      }
+      syncRailSelection();
       return;
     }
 
@@ -1476,10 +1532,19 @@
     });
 
     if (state.selectedListName && state.libraryRows.some(function (row) { return String(row.name || '') === state.selectedListName; })) {
-      setActiveListOption(state.selectedListName);
+      if (state.railSelectionKind === 'list') {
+        setRailSelection('list', state.selectedListName);
+      } else {
+        syncRailSelection();
+      }
       return;
     }
-    setActiveListOption(String(state.libraryRows[0].name || ''));
+    state.selectedListName = String(state.libraryRows[0].name || '');
+    if (state.railSelectionKind === 'list' && state.selectedListName) {
+      setRailSelection('list', state.selectedListName);
+      return;
+    }
+    syncRailSelection();
   }
 
   async function runLibraryList() {
@@ -1962,7 +2027,12 @@
       empty.className = 'rail-list-option is-empty';
       empty.textContent = 'No follows.';
       els.followingListbox.appendChild(empty);
-      setFollowingActiveOption('');
+      state.activeFollowingPubkey = '';
+      if (state.railSelectionKind === 'following') {
+        setRailSelection('nav', state.activeRailNav || 'home');
+        return;
+      }
+      syncRailSelection();
       return;
     }
 
@@ -1993,25 +2063,30 @@
     });
 
     if (state.activeFollowingPubkey && state.followingRows.indexOf(state.activeFollowingPubkey) >= 0) {
-      setFollowingActiveOption(state.activeFollowingPubkey);
+      if (state.railSelectionKind === 'following') {
+        setRailSelection('following', state.activeFollowingPubkey);
+      } else {
+        syncRailSelection();
+      }
       return;
     }
-    setFollowingActiveOption(state.followingRows[0]);
+    state.activeFollowingPubkey = state.followingRows[0];
+    if (state.railSelectionKind === 'following' && state.activeFollowingPubkey) {
+      setRailSelection('following', state.activeFollowingPubkey);
+      return;
+    }
+    syncRailSelection();
   }
 
   function setFollowingActiveOption(pubkey) {
     state.activeFollowingPubkey = pubkey || '';
-    var options = listboxOptions(els.followingListbox);
-    var activeOptionId = '';
-    options.forEach(function (node) {
-      var active = node.getAttribute('data-following-pubkey') === state.activeFollowingPubkey;
-      node.classList.toggle('is-active', active);
-      node.setAttribute('aria-selected', active ? 'true' : 'false');
-      if (active) {
-        activeOptionId = node.id;
-      }
-    });
-    setListboxActiveDescendant(els.followingListbox, activeOptionId);
+    if (state.activeFollowingPubkey) {
+      setRailSelection('following', state.activeFollowingPubkey);
+    } else if (state.railSelectionKind === 'following') {
+      setRailSelection('nav', state.activeRailNav || 'home');
+    } else {
+      syncRailSelection();
+    }
     if (els.peoplePubkey && state.activeFollowingPubkey) {
       els.peoplePubkey.value = state.activeFollowingPubkey;
     }

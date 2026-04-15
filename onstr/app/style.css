@@ -139,9 +139,11 @@ summary:focus-visible {
   flex-direction: column;
   gap: 0.55rem;
   min-height: 0;
-  padding: calc(0.9rem + env(safe-area-inset-top) + 1rem) 0.9rem 0.9rem;
+  min-width: 0;
+  padding: calc(1.35rem + env(safe-area-inset-top) + 1rem) 0.9rem 0.9rem;
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
+  overflow: hidden;
 }
 
 .rail-resizer {
@@ -207,6 +209,7 @@ h5 {
   display: grid;
   gap: 0.24rem;
   min-height: 0;
+  min-width: 0;
   align-content: start;
   flex: 0 0 auto;
 }
@@ -244,6 +247,7 @@ h5 {
 
 .rail-listbox {
   min-height: 0;
+  min-width: 0;
   max-height: none;
   overflow: visible;
   display: grid;
@@ -259,6 +263,7 @@ h5 {
 .rail-content-listbox {
   max-height: min(11rem, 26vh);
   overflow: auto;
+  padding-right: 0.06rem;
 }
 
 .rail-nav-listbox {
@@ -267,6 +272,7 @@ h5 {
 
 .rail-list-option {
   width: 100%;
+  max-width: 100%;
   border: 0;
   border-radius: calc(var(--radius-sm) + 1px);
   background: transparent;
@@ -278,6 +284,7 @@ h5 {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.4rem;
+  overflow: hidden;
 }
 
 .rail-list-option:hover,
@@ -309,6 +316,7 @@ h5 {
   display: flex;
   align-items: center;
   gap: 0.42rem;
+  overflow: hidden;
 }
 
 .rail-option-label {
@@ -321,10 +329,20 @@ h5 {
 }
 
 .rail-nav-icon {
+  display: block;
   width: 0.95rem;
   height: 0.95rem;
   flex: 0 0 auto;
   opacity: 0.84;
+  background: currentColor;
+  -webkit-mask-image: var(--icon-url);
+  mask-image: var(--icon-url);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .rail-option-meta {

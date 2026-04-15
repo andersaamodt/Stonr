@@ -34,6 +34,7 @@ fn home_surface_has_first_run_setup_panel() {
 fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
+    let style_css = read_file(&format!("{}/../app/style.css", env!("CARGO_MANIFEST_DIR")));
 
     assert!(index_html.contains("id=\"rail-nav-listbox\" class=\"rail-listbox rail-nav-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(!index_html.contains("id=\"primary-tabs\""));
@@ -46,6 +47,12 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("bindListboxKeyboard(els.followingListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.relayListbox"));
     assert!(app_js.contains("bindListboxKeyboard(els.libraryListbox"));
+    assert!(app_js.contains("railSelectionKind: 'nav'"));
+    assert!(app_js.contains("function syncRailSelection()"));
+    assert!(app_js.contains("setRailSelection('following', state.activeFollowingPubkey);"));
+    assert!(app_js.contains("setRailSelection('list', state.selectedListName);"));
+    assert!(style_css.contains("-webkit-mask-image: var(--icon-url);"));
+    assert!(style_css.contains("mask-image: var(--icon-url);"));
 }
 
 #[test]
