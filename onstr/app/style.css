@@ -44,40 +44,29 @@ body.onstr-booting {
 }
 
 body.onstr-booting .workspace {
+  opacity: 0;
   visibility: hidden;
 }
 
 .boot-splash {
   position: fixed;
   inset: 0;
-  z-index: 2147483647;
-  display: grid;
-  place-items: center;
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-main) 16%, transparent), transparent 34rem),
-    linear-gradient(145deg, color-mix(in srgb, var(--stage) 95%, black), color-mix(in srgb, var(--surface) 26%, var(--stage)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--stage);
+  z-index: 1000;
 }
 
-body:not(.onstr-booting) .boot-splash {
-  display: none;
+#onstr-app.hidden {
+  opacity: 0;
+  visibility: hidden;
 }
 
-.boot-mark {
-  display: grid;
-  justify-items: center;
-  gap: 0.75rem;
-}
-
-.boot-mark img {
-  width: 6.4rem;
-  height: 6.4rem;
-  object-fit: contain;
-  filter: drop-shadow(0 14px 26px color-mix(in srgb, var(--accent-main) 30%, transparent));
-}
-
-.boot-mark strong {
-  letter-spacing: 0.03em;
-  font-size: 1.2rem;
+.boot-splash-icon {
+  width: clamp(72px, 16vw, 112px);
+  height: clamp(72px, 16vw, 112px);
+  display: block;
 }
 
 button,

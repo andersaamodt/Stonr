@@ -86,6 +86,9 @@
   });
 
   var els = {
+    body: document.body,
+    app: document.getElementById('onstr-app'),
+    splash: document.getElementById('splash'),
     toast: document.getElementById('toast'),
 
     railResizer: document.getElementById('rail-resizer'),
@@ -729,17 +732,53 @@
     feedEmpty(els.homeFeed, message);
   }
 
-  function revealBootUi() {
-    document.body.classList.remove('onstr-booting');
-    if (state.hostBootReadySent || !state.bridge) {
+  function revealUi() {
+    if (els.app) {
+      els.app.classList.remove('hidden');
+      els.app.setAttribute('aria-hidden', 'false');
+    }
+    if (els.splash) {
+      els.splash.hidden = true;
+      els.splash.setAttribute('aria-hidden', 'true');
+    }
+    if (els.body) {
+      els.body.classList.remove('onstr-booting');
+    }
+  }
+
+  function notifyHostBootReady(attempt) {
+    var tries = typeof attempt === 'number' ? attempt : 0;
+    if (state.hostBootReadySent) {
+      revealUi();
+      return;
+    }
+    if (!bridgeAvailable()) {
+      revealUi();
       return;
     }
     state.hostBootReadySent = true;
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        execArgv(['__wizardry_host_boot_ready']).catch(function () {
-          return;
+        execArgv(['__wizardry_host_boot_ready']).then(function () {
+          revealUi();
+        }).catch(function () {
+          state.hostBootReadySent = false;
+          if (tries >= 160) {
+            revealUi();
+            return;
+          }
+          setTimeout(function () {
+            notifyHostBootReady(tries + 1);
+          }, 50);
         });
+      });
+    });
+  }
+
+  function finishBoot() {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        notifyHostBootReady(0);
       });
     });
   }
@@ -2967,7 +3006,6 @@
     bindRailResizer();
     setComposeType('note');
     renderRecommendedRelayLists();
-    revealBootUi();
 
     document.addEventListener('click', function (event) {
       maybeCloseThemeMenuFromPointer(event);
@@ -3018,7 +3056,7 @@
         return;
       });
       if (state.relayReady) {
-        runHomeFetch().catch(function () {
+        await runHomeFetch().catch(function () {
           return;
         });
       } else {
@@ -3034,12 +3072,12 @@
 
     disableActionsWhenNoBridge();
     scheduleRefresh();
-    revealBootUi();
+    finishBoot();
   }
 
   init().catch(function (error) {
     console.error(error);
     toast(String((error && error.message) || error), 'bad');
-    revealBootUi();
+    finishBoot();
   });
 })();

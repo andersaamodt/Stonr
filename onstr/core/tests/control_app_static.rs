@@ -21,19 +21,27 @@ fn settings_surface_exposes_profile_setup_controls() {
 fn home_surface_has_first_run_setup_panel() {
     let index_html = read_file(&format!("{}/../app/index.html", env!("CARGO_MANIFEST_DIR")));
     let style_css = read_file(&format!("{}/../app/style.css", env!("CARGO_MANIFEST_DIR")));
+    let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
     assert!(index_html.contains("id=\"setup-panel\""));
     assert!(index_html.contains("id=\"setup-open-settings\""));
     assert!(index_html.contains("id=\"rail-resizer\""));
+    assert!(index_html.contains("id=\"splash\" class=\"boot-splash\""));
+    assert!(index_html.contains("id=\"onstr-app\" class=\"workspace hidden\" aria-hidden=\"true\""));
     assert!(style_css.contains(".rail-resizer"));
     assert!(style_css.contains(".setup-panel"));
     assert!(style_css.contains(".setup-status-list"));
+    assert!(style_css.contains(".boot-splash"));
+    assert!(style_css.contains(".boot-splash-icon"));
     assert!(style_css.contains(".stage {"));
     assert!(style_css.contains(".stage-head {"));
     assert!(style_css.contains(".tab-panel {"));
     assert!(style_css.contains(".stage-section {"));
     assert!(style_css.contains("min-width: min(9.8rem, 100%);"));
     assert!(style_css.contains(".form-row > *,"));
+    assert!(app_js.contains("function notifyHostBootReady(attempt)"));
+    assert!(app_js.contains("function finishBoot()"));
+    assert!(app_js.contains("await runHomeFetch().catch(function () {"));
 }
 
 #[test]
