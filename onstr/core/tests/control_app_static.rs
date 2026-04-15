@@ -76,12 +76,15 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("function renderActiveProfileButton()"));
     assert!(app_js.contains("button[data-profile-action=\"create\"]"));
     assert!(app_js.contains("scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' })"));
+    assert!(app_js.contains("starBtn.className = 'feed-icon-btn';"));
+    assert!(!app_js.contains("listBtn.textContent = 'Add To List';"));
     assert!(app_js.contains("setRailSelection('following', state.activeFollowingPubkey);"));
     assert!(app_js.contains("setRailSelection('list', state.selectedListName);"));
     assert!(style_css.contains("-webkit-mask-image: var(--icon-url);"));
     assert!(style_css.contains("mask-image: var(--icon-url);"));
     assert!(style_css.contains(".footer-profile-anchor"));
     assert!(style_css.contains("grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);"));
+    assert!(style_css.contains(".feed-icon-btn"));
 }
 
 #[test]

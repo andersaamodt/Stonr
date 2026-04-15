@@ -2073,9 +2073,15 @@
       actions.className = 'feed-actions';
 
       var starBtn = document.createElement('button');
-      starBtn.className = 'action';
+      starBtn.className = 'feed-icon-btn';
       starBtn.type = 'button';
-      starBtn.textContent = 'Star';
+      starBtn.title = 'Star to inbox';
+      starBtn.setAttribute('aria-label', 'Star to inbox');
+      starBtn.innerHTML = (
+        '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+        '<path d="m8 2.1 1.7 3.5 3.9.6-2.8 2.7.7 3.9L8 10.9l-3.5 1.9.7-3.9-2.8-2.7 3.9-.6L8 2.1Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' +
+        '</svg>'
+      );
       starBtn.addEventListener('click', function () {
         if (!event.id) {
           return;
@@ -2089,25 +2095,7 @@
           });
       });
 
-      var listBtn = document.createElement('button');
-      listBtn.className = 'action';
-      listBtn.type = 'button';
-      listBtn.textContent = 'Add To List';
-      listBtn.addEventListener('click', function () {
-        if (!event.id) {
-          return;
-        }
-        addEventToList(state.selectedListName || 'inbox', String(event.id))
-          .then(function () {
-            return;
-          })
-          .catch(function () {
-            return;
-          });
-      });
-
       actions.appendChild(starBtn);
-      actions.appendChild(listBtn);
 
       card.appendChild(head);
       card.appendChild(body);
