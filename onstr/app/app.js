@@ -497,7 +497,7 @@
     }
     setActiveTab('home', false);
     if (view === 'feed' && els.homeFeed && typeof els.homeFeed.scrollIntoView === 'function') {
-      els.homeFeed.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      els.homeFeed.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' });
     }
   }
 
