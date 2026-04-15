@@ -27,6 +27,7 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(index_html.contains("id=\"setup-open-settings\""));
     assert!(index_html.contains("id=\"rail-resizer\""));
     assert!(index_html.contains("id=\"splash\" class=\"boot-splash\""));
+    assert!(index_html.contains("class=\"boot-splash-icon\" src=\"assets/forge-icon.png\""));
     assert!(index_html.contains("id=\"onstr-app\" class=\"workspace hidden\" aria-hidden=\"true\""));
     assert!(style_css.contains(".rail-resizer"));
     assert!(style_css.contains(".setup-panel"));
