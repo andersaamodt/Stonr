@@ -675,8 +675,8 @@ h4 {
 
 .events-search {
   display: inline-flex;
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 1 21rem;
+  min-width: 14rem;
   align-items: center;
   gap: 0.55rem;
   color: var(--muted);
@@ -684,8 +684,9 @@ h4 {
 }
 
 .events-search input {
+  flex: 1 1 auto;
   min-width: 0;
-  width: min(26.6rem, 100%);
+  width: 100%;
 }
 
 .event-list {
