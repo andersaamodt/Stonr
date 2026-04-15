@@ -22,6 +22,7 @@
   --good: #247043;
   --warn: #647255;
   --bad: #a33838;
+  --section-list-item-height: 2.15rem;
   --rail-width: 14rem;
   --divider-width: 0.65rem;
   --shell-pad: 0;
@@ -392,7 +393,7 @@ h4 {
 }
 
 .section-gap-divider {
-  height: 1px;
+  height: var(--section-list-item-height);
   position: relative;
   pointer-events: none;
 }
@@ -402,9 +403,10 @@ h4 {
   position: absolute;
   left: 0;
   right: 0;
-  top: 0;
+  top: 50%;
   height: 1px;
   background: var(--line-strong);
+  transform: translateY(-50%);
 }
 
 .section-head {
@@ -419,7 +421,7 @@ h4 {
   display: block;
   width: 100%;
   text-align: left;
-  min-height: 2.15rem;
+  min-height: var(--section-list-item-height);
   padding: 0.16rem 0.55rem 0.16rem 0.8rem;
   border: 0;
   border-radius: 0;
