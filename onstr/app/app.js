@@ -120,7 +120,6 @@
     settingsClose: document.getElementById('close-settings'),
     settingsBackdrop: document.getElementById('drawer-backdrop'),
 
-    composeOpen: document.getElementById('open-compose'),
     composeClose: document.getElementById('close-compose'),
     composeBackdrop: document.getElementById('compose-backdrop'),
 
@@ -385,7 +384,8 @@
     var items = [
       { id: 'home', label: 'Home', icon: 'assets/home-outline.svg' },
       { id: 'feed', label: 'Feed', icon: 'assets/feed-outline.svg' },
-      { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' }
+      { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' },
+      { id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' }
     ];
     els.railNavListbox.innerHTML = '';
     items.forEach(function (item) {
@@ -480,8 +480,17 @@
 
   function setActiveRailNav(viewId, userInitiated) {
     var view = String(viewId || '').trim();
-    if (['home', 'feed', 'discover'].indexOf(view) < 0) {
+    if (['home', 'feed', 'discover', 'compose'].indexOf(view) < 0) {
       view = 'home';
+    }
+    if (view === 'compose') {
+      if (userInitiated) {
+        setRailSelection('nav', 'compose');
+        openCompose();
+      } else {
+        syncRailSelection();
+      }
+      return;
     }
     state.activeRailNav = view;
     if (userInitiated || state.railSelectionKind === 'nav' || !state.railSelectionKind) {
@@ -973,7 +982,12 @@
   function closeCompose() {
     els.composeBackdrop.classList.add('hidden');
     els.composeBackdrop.setAttribute('aria-hidden', 'true');
-    els.composeOpen.focus();
+    if (state.railSelectionKind === 'nav' && state.railSelectionValue === 'compose') {
+      setRailSelection('nav', state.activeRailNav || 'home');
+    }
+    if (els.railNavListbox && typeof els.railNavListbox.focus === 'function') {
+      els.railNavListbox.focus();
+    }
   }
 
   function openDelete(eventId) {
@@ -3054,7 +3068,6 @@
     });
     els.settingsClose.addEventListener('click', closeSettings);
 
-    els.composeOpen.addEventListener('click', openCompose);
     els.composeClose.addEventListener('click', closeCompose);
 
     els.deleteClose.addEventListener('click', closeDelete);
@@ -3128,7 +3141,6 @@
         node === els.settingsOpen ||
         node === els.settingsClose ||
         node === els.setupOpenSettings ||
-        node === els.composeOpen ||
         node === els.composeClose ||
         node === els.deleteClose ||
         node === els.promptCancel ||
@@ -3162,9 +3174,6 @@
     }
     if (els.settingsClose) {
       els.settingsClose.disabled = false;
-    }
-    if (els.composeOpen) {
-      els.composeOpen.disabled = false;
     }
     if (els.composeClose) {
       els.composeClose.disabled = false;

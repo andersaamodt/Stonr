@@ -66,6 +66,7 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     let style_css = read_file(&format!("{}/../app/style.css", env!("CARGO_MANIFEST_DIR")));
 
     assert!(index_html.contains("id=\"rail-nav-listbox\" class=\"rail-listbox rail-nav-listbox\" role=\"listbox\" tabindex=\"0\""));
+    assert!(!index_html.contains("id=\"open-compose\""));
     assert!(!index_html.contains("id=\"primary-tabs\""));
     assert!(index_html.contains("id=\"following-listbox\" class=\"rail-listbox rail-content-listbox\" role=\"listbox\" tabindex=\"0\""));
     assert!(index_html.contains("id=\"library-listbox\" class=\"rail-listbox rail-content-listbox\" role=\"listbox\" tabindex=\"0\""));
@@ -83,6 +84,7 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("function renderProfileMenuList()"));
     assert!(app_js.contains("function renderActiveProfileButton()"));
     assert!(app_js.contains("button[data-profile-action=\"create\"]"));
+    assert!(app_js.contains("{ id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' }"));
     assert!(app_js.contains("scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' })"));
     assert!(app_js.contains("starBtn.className = 'feed-icon-btn';"));
     assert!(!app_js.contains("listBtn.textContent = 'Add To List';"));
