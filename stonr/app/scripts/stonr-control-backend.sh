@@ -477,8 +477,11 @@ service_autostart_status() {
           enabled=1
         fi
       fi
-      if launchctl print "$(launchd_domain)/$label" >/dev/null 2>&1; then
+      if launchd_print=$(launchctl print "$(launchd_domain)/$label" 2>/dev/null); then
         loaded=1
+        if printf '%s\n' "$launchd_print" | grep -F "state = running" >/dev/null 2>&1; then
+          active=1
+        fi
       fi
       ;;
     systemd)
@@ -516,14 +519,10 @@ service_autostart_enable() {
   label=$(service_label)
   case "$manager" in
     launchd)
+      ensure_runtime_dirs "$env_path"
       plist_path=$(launchd_plist_path)
       mkdir -p "$(dirname "$plist_path")"
       run_stonr --env "$env_path" print-service --manager launchd --label "$label" > "$plist_path"
-      if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
-        /usr/libexec/PlistBuddy -c 'Delete :WorkingDirectory' "$plist_path" >/dev/null 2>&1 || :
-        /usr/libexec/PlistBuddy -c 'Delete :StandardOutPath' "$plist_path" >/dev/null 2>&1 || :
-        /usr/libexec/PlistBuddy -c 'Delete :StandardErrorPath' "$plist_path" >/dev/null 2>&1 || :
-      fi
       launchctl enable "$(launchd_domain)/$label" >/dev/null 2>&1 || :
       launchctl bootout "$(launchd_domain)" "$plist_path" >/dev/null 2>&1 || :
       launchctl bootstrap "$(launchd_domain)" "$plist_path"

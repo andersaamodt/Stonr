@@ -1695,7 +1695,7 @@
     ));
 
     var startupField = renderDesktopToggleField(
-      'Auto-start relay when system starts',
+      'Auto-start relay when you log in',
       state.startupServiceEnabled,
       function () {
         return;
@@ -1704,7 +1704,7 @@
         ? 'Enable background runtime first.'
         : state.startupServiceManager === 'none'
         ? 'Startup service is unavailable on this host.'
-        : 'Install a user startup service so the relay starts automatically when your system starts.',
+        : 'Install a user startup service so the relay starts automatically after you log in.',
       state.startupServiceBusy || state.startupServiceManager === 'none' || !state.backgroundMode,
       function (checked) {
         return setStartupServiceEnabled(checked);

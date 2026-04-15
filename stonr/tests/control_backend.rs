@@ -400,3 +400,114 @@ fn relay_stop_boots_out_launchd_service_before_pid_check() {
     let bootout = fs::read_to_string(&bootout_log).unwrap();
     assert!(bootout.contains("bootout"));
 }
+
+#[test]
+fn service_autostart_enable_keeps_launchd_runtime_paths() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let home_dir = dir.path().join("home");
+    let launch_agents = home_dir.join("Library/LaunchAgents");
+    fs::create_dir_all(&launch_agents).unwrap();
+
+    let stub_dir = dir.path().join("bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+
+    fs::write(stub_dir.join("uname"), "#!/bin/sh\nprintf 'Darwin\\n'\n").unwrap();
+    fs::write(
+        stub_dir.join("launchctl"),
+        "#!/bin/sh\nset -eu\ncmd=${1-}\nshift || :\ncase \"$cmd\" in\n  print-disabled)\n    printf '{}\\n'\n    ;;\n  print)\n    exit 1\n    ;;\n  enable|disable|bootout|bootstrap|kickstart)\n    exit 0\n    ;;\n  *)\n    exit 0\n    ;;\nesac\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["uname", "launchctl"] {
+            let path = stub_dir.join(name);
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    let path_env = format!(
+        "{}:{}",
+        stub_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = run_backend_status_with_env(
+        &["service-autostart-enable", &env_path],
+        &[
+            ("HOME", home_dir.to_str().unwrap()),
+            ("PATH", path_env.as_str()),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "backend failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let plist_path = launch_agents.join("dev.stonr.relay.plist");
+    let plist = fs::read_to_string(plist_path).unwrap();
+    let store_root = dir.path().join("store");
+    assert!(store_root.join("runtime").is_dir());
+    assert!(plist.contains("<key>WorkingDirectory</key>"));
+    assert!(plist.contains(&format!("<string>{}</string>", store_root.display())));
+    assert!(plist.contains("<key>StandardOutPath</key>"));
+    assert!(plist.contains(&format!(
+        "<string>{}/runtime/launchd-stdout.log</string>",
+        store_root.display()
+    )));
+    assert!(plist.contains("<key>StandardErrorPath</key>"));
+    assert!(plist.contains(&format!(
+        "<string>{}/runtime/launchd-stderr.log</string>",
+        store_root.display()
+    )));
+}
+
+#[test]
+fn service_autostart_status_reports_active_for_running_launchd_job() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let home_dir = dir.path().join("home");
+    let launch_agents = home_dir.join("Library/LaunchAgents");
+    fs::create_dir_all(&launch_agents).unwrap();
+    fs::write(launch_agents.join("dev.stonr.relay.plist"), "<plist/>").unwrap();
+
+    let stub_dir = dir.path().join("bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+
+    fs::write(stub_dir.join("uname"), "#!/bin/sh\nprintf 'Darwin\\n'\n").unwrap();
+    fs::write(
+        stub_dir.join("launchctl"),
+        "#!/bin/sh\nset -eu\ncmd=${1-}\nshift || :\ncase \"$cmd\" in\n  print-disabled)\n    printf '{}\\n'\n    ;;\n  print)\n    printf 'state = running\\n'\n    exit 0\n    ;;\n  *)\n    exit 0\n    ;;\nesac\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["uname", "launchctl"] {
+            let path = stub_dir.join(name);
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    let path_env = format!(
+        "{}:{}",
+        stub_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = run_backend_with_env(
+        &["service-autostart-status", &env_path],
+        &[
+            ("HOME", home_dir.to_str().unwrap()),
+            ("PATH", path_env.as_str()),
+        ],
+    );
+
+    assert!(output.contains("loaded=1"));
+    assert!(output.contains("active=1"));
+}
