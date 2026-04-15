@@ -574,7 +574,8 @@ h5 {
 .stage {
   min-height: 0;
   min-width: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.9rem 1.14rem 1.18rem;
   background: color-mix(in srgb, var(--stage) 90%, transparent);
   display: grid;
@@ -896,6 +897,7 @@ label textarea {
   padding: 0.72rem 0.8rem;
   display: grid;
   gap: 0.52rem;
+  min-width: 0;
 }
 
 .feed-item.is-selected-event {
@@ -920,12 +922,16 @@ label textarea {
   font-size: 0.92rem;
   font-weight: 650;
   color: var(--text-main);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .feed-support {
   color: var(--text-muted);
   font-size: 0.74rem;
   line-height: 1.34;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .feed-meta {
@@ -935,14 +941,19 @@ label textarea {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .feed-body {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   line-height: 1.42;
   color: var(--text-main);
   font-size: 0.87rem;
+  min-width: 0;
 }
 
 .feed-actions {

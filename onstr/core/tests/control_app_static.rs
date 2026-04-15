@@ -39,6 +39,7 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(style_css.contains(".stage-head {"));
     assert!(style_css.contains(".tab-panel {"));
     assert!(style_css.contains(".stage-section {"));
+    assert!(style_css.contains("overflow-x: hidden;"));
     assert!(style_css.contains("min-width: min(9.8rem, 100%);"));
     assert!(style_css.contains(".form-row > *,"));
     assert!(style_css.contains("flex-wrap: wrap;"));
@@ -93,6 +94,8 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(style_css.contains(".footer-profile-anchor"));
     assert!(style_css.contains("grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);"));
     assert!(style_css.contains(".feed-icon-btn"));
+    assert!(style_css.contains("overflow-wrap: anywhere;"));
+    assert!(style_css.contains("word-break: break-word;"));
 }
 
 #[test]
