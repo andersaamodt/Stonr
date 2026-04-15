@@ -772,6 +772,7 @@
       els.app.setAttribute('aria-hidden', 'false');
     }
     if (els.splash) {
+      els.splash.classList.add('hidden');
       els.splash.hidden = true;
       els.splash.setAttribute('aria-hidden', 'true');
     }

@@ -54,8 +54,12 @@ body.onstr-booting .workspace {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--stage);
+  background: var(--bg, #161a22);
   z-index: 1000;
+}
+
+.boot-splash.hidden {
+  display: none !important;
 }
 
 #onstr-app.hidden {

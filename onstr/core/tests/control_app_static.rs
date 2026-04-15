@@ -34,6 +34,7 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(style_css.contains(".setup-status-list"));
     assert!(style_css.contains(".boot-splash"));
     assert!(style_css.contains(".boot-splash-icon"));
+    assert!(style_css.contains(".boot-splash.hidden"));
     assert!(style_css.contains(".stage {"));
     assert!(style_css.contains(".stage-head {"));
     assert!(style_css.contains(".tab-panel {"));
@@ -46,6 +47,7 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(app_js.contains("function startInitialRefresh()"));
     assert!(app_js.contains("renderHomeEmptyState('Loading timeline...');"));
     assert!(app_js.contains("runHomeFetch().catch(function () {"));
+    assert!(app_js.contains("els.splash.classList.add('hidden');"));
     assert!(app_js.contains("withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200)"));
 }
 
