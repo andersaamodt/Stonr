@@ -24,7 +24,7 @@ fn home_surface_has_first_run_setup_panel() {
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
     assert!(index_html.contains("id=\"setup-panel\""));
-    assert!(index_html.contains("id=\"setup-open-settings\""));
+    assert!(!index_html.contains("id=\"setup-open-settings\""));
     assert!(index_html.contains("class=\"rail-section rail-setup\""));
     assert!(index_html.contains("id=\"rail-resizer\""));
     assert!(index_html.contains("id=\"splash\" class=\"boot-splash\""));
@@ -34,6 +34,7 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(style_css.contains(".setup-panel"));
     assert!(style_css.contains(".rail-setup"));
     assert!(style_css.contains(".rail-setup-status-list"));
+    assert!(style_css.contains("margin: 0 -0.9rem;"));
     assert!(style_css.contains(".setup-status-list"));
     assert!(style_css.contains(".boot-splash"));
     assert!(style_css.contains(".boot-splash-icon"));
@@ -43,6 +44,7 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(style_css.contains(".tab-panel {"));
     assert!(style_css.contains(".stage-section {"));
     assert!(style_css.contains("overflow-x: hidden;"));
+    assert!(!style_css.contains("min-width: 64rem;"));
     assert!(style_css.contains("min-width: min(9.8rem, 100%);"));
     assert!(style_css.contains(".form-row > *,"));
     assert!(style_css.contains("flex-wrap: wrap;"));
