@@ -211,6 +211,25 @@ h5 {
   align-content: start;
 }
 
+.rail-setup {
+  gap: 0.52rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--line);
+}
+
+.rail-setup-head {
+  gap: 0.5rem;
+}
+
+.rail-setup-head h2 {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.rail-setup-status-list {
+  grid-template-columns: 1fr;
+}
+
 .rail-section-head,
 .section-head-row,
 .inline-head {

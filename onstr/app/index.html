@@ -34,6 +34,26 @@
         <div id="library-listbox" class="rail-listbox rail-content-listbox" role="listbox" tabindex="0" aria-label="Library events"></div>
       </section>
 
+      <section id="setup-panel" class="rail-section rail-setup">
+        <header class="inline-head setup-head rail-setup-head">
+          <div>
+            <h2>Finish Setup</h2>
+            <p id="setup-summary" class="support-copy">Create a profile and add a relay so Home and Discover can do real work.</p>
+          </div>
+          <button id="setup-open-settings" class="action" type="button">Open Settings</button>
+        </header>
+        <div id="setup-status-list" class="setup-status-list rail-setup-status-list" aria-live="polite">
+          <article class="setup-status-card">
+            <h4>Profile</h4>
+            <p id="setup-profile-status">No active profile yet.</p>
+          </article>
+          <article class="setup-status-card">
+            <h4>Relay</h4>
+            <p id="setup-relay-status">No relay configured yet.</p>
+          </article>
+        </div>
+      </section>
+
       <footer class="rail-footer">
         <div class="footer-bar">
           <button id="open-settings" class="footer-icon-btn" type="button" title="Open settings" aria-label="Open settings">
@@ -79,26 +99,6 @@
       </aside>
 
       <section id="tab-home" class="tab-panel" tabindex="0">
-        <section id="setup-panel" class="stage-section setup-panel">
-          <header class="inline-head setup-head">
-            <div>
-              <h3>Finish Setup</h3>
-              <p id="setup-summary" class="support-copy">Create a profile and add a relay so Home and Discover can do real work.</p>
-            </div>
-            <button id="setup-open-settings" class="action" type="button">Open Settings</button>
-          </header>
-          <div id="setup-status-list" class="setup-status-list" aria-live="polite">
-            <article class="setup-status-card">
-              <h4>Profile</h4>
-              <p id="setup-profile-status">No active profile yet.</p>
-            </article>
-            <article class="setup-status-card">
-              <h4>Relay</h4>
-              <p id="setup-relay-status">No relay configured yet.</p>
-            </article>
-          </div>
-        </section>
-
         <section class="stage-section">
           <header class="inline-head">
             <div>
