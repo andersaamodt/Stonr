@@ -46,6 +46,8 @@
     eventsStatsPromise: null,
     eventsError: '',
     events: [],
+    eventsAnimatedIds: new Set(),
+    eventsLastQuery: '',
     eventsTotal: 0,
     eventsBytes: 0,
     diagnosticsLoading: false,
@@ -1008,6 +1010,8 @@
     state.eventsLoading = false;
     state.eventsTotalLoading = false;
     state.eventsLoadedOnce = false;
+    state.eventsAnimatedIds = new Set();
+    state.eventsLastQuery = '';
     state.eventsStatsLoadedAt = 0;
     state.eventsStatsPromise = null;
     state.diagnosticsLoading = false;
@@ -2110,6 +2114,7 @@
       list.appendChild(renderEventRow(event));
     });
     browser.appendChild(list);
+    state.eventsAnimatedIds = new Set();
     wrap.appendChild(browser);
     return wrap;
   }
@@ -2280,6 +2285,9 @@
   function renderEventRow(event) {
     var row = document.createElement('article');
     row.className = 'event-row';
+    if (state.eventsAnimatedIds.has(String((event && event.id) || ''))) {
+      row.classList.add('event-row-enter');
+    }
 
     var meta = document.createElement('div');
     meta.className = 'event-meta';
@@ -2376,6 +2384,8 @@
   async function loadEvents() {
     if (!state.bridge) {
       state.events = [];
+      state.eventsAnimatedIds = new Set();
+      state.eventsLastQuery = '';
       state.eventsTotal = 0;
       state.eventsBytes = 0;
       state.eventsError = '';
@@ -2389,16 +2399,34 @@
     state.eventsLoading = true;
     var refreshStats = false;
     var hadSnapshot = state.eventsLoadedOnce || state.events.length > 0 || state.eventsTotal > 0 || state.eventsBytes > 0;
+    var query = state.eventsSearch.trim();
+    var previousIds = null;
+    if (hadSnapshot && query === state.eventsLastQuery) {
+      previousIds = new Set(state.events.map(function (event) {
+        return String((event && event.id) || '');
+      }));
+    }
     try {
-      var output = await backend('query-events', [state.envPath, state.eventsSearch.trim(), '60']);
+      var output = await backend('query-events', [state.envPath, query, '60']);
       var events = JSON.parse(output || '[]');
       events.sort(compareEventsByRecency);
+      if (previousIds) {
+        state.eventsAnimatedIds = new Set(events.map(function (event) {
+          return String((event && event.id) || '');
+        }).filter(function (id) {
+          return id && !previousIds.has(id);
+        }));
+      } else {
+        state.eventsAnimatedIds = new Set();
+      }
       state.events = events;
+      state.eventsLastQuery = query;
       refreshStats = true;
       state.eventsError = '';
       state.eventsLoadedOnce = true;
     } catch (error) {
       console.error(error);
+      state.eventsAnimatedIds = new Set();
       if (!hadSnapshot) {
         state.events = [];
         state.eventsTotal = 0;
@@ -2501,6 +2529,8 @@
     }
     await backend('purge-events', [state.envPath]);
     state.events = [];
+    state.eventsAnimatedIds = new Set();
+    state.eventsLastQuery = '';
     state.eventsTotal = 0;
     state.eventsBytes = 0;
     state.eventsTotalLoading = false;
