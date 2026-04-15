@@ -403,10 +403,9 @@ h4 {
   position: absolute;
   left: 0;
   right: 0;
-  top: 50%;
+  top: calc((var(--section-list-item-height) - 1px) / 2);
   height: 1px;
   background: var(--line-strong);
-  transform: translateY(-50%);
 }
 
 .section-head {
