@@ -37,7 +37,9 @@
     promptReturnFocus: null,
     promptResolver: null,
     railSelectionKind: 'nav',
-    railSelectionValue: 'home'
+    railSelectionValue: 'home',
+    bootFinished: false,
+    bootWatchdog: null
   };
 
   var TAB_IDS = ['home', 'discover'];
@@ -732,7 +734,57 @@
     feedEmpty(els.homeFeed, message);
   }
 
+  function clearBootWatchdog() {
+    if (!state.bootWatchdog) {
+      return;
+    }
+    clearTimeout(state.bootWatchdog);
+    state.bootWatchdog = null;
+  }
+
+  function armBootWatchdog() {
+    clearBootWatchdog();
+    state.bootWatchdog = setTimeout(function () {
+      revealUi();
+      toast('Startup took too long. Revealed UI before boot finished.', 'bad');
+    }, 5000);
+  }
+
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(new Error('operation timed out'));
+      }, ms);
+
+      Promise.resolve(promise).then(function (value) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      }).catch(function (error) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+  }
+
   function revealUi() {
+    if (state.bootFinished) {
+      return;
+    }
+    state.bootFinished = true;
+    clearBootWatchdog();
     if (els.app) {
       els.app.classList.remove('hidden');
       els.app.setAttribute('aria-hidden', 'false');
@@ -759,7 +811,7 @@
     state.hostBootReadySent = true;
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        execArgv(['__wizardry_host_boot_ready']).then(function () {
+        withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200).then(function () {
           revealUi();
         }).catch(function () {
           state.hostBootReadySent = false;
@@ -2999,6 +3051,7 @@
 
   async function init() {
     state.bridge = bridgeAvailable();
+    armBootWatchdog();
     bindTabSemantics();
     bindForms();
     bindDrawers();

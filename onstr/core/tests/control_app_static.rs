@@ -42,7 +42,10 @@ fn home_surface_has_first_run_setup_panel() {
     assert!(style_css.contains(".form-row > *,"));
     assert!(app_js.contains("function notifyHostBootReady(attempt)"));
     assert!(app_js.contains("function finishBoot()"));
+    assert!(app_js.contains("function armBootWatchdog()"));
+    assert!(app_js.contains("function withTimeout(promise, ms)"));
     assert!(app_js.contains("await runHomeFetch().catch(function () {"));
+    assert!(app_js.contains("withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200)"));
 }
 
 #[test]
