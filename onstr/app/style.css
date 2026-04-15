@@ -139,7 +139,7 @@ summary:focus-visible {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 0.7rem;
   min-height: 0;
-  padding: calc(0.9rem + env(safe-area-inset-top) + 0.7rem) 0.9rem 0.9rem;
+  padding: calc(0.9rem + env(safe-area-inset-top) + 1rem) 0.9rem 0.9rem;
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
@@ -373,19 +373,22 @@ h5 {
 
 .rail-footer {
   border-top: 1px solid var(--line);
-  padding-top: 0.48rem;
-  display: grid;
+  margin: 0 -0.9rem -0.9rem;
+  display: block;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
 
 .footer-bar {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 0.3rem;
+  min-height: 36px;
 }
 
 .footer-theme-anchor {
   position: relative;
-  display: inline-flex;
+  display: block;
+  min-width: 0;
 }
 
 .icon-btn,
@@ -405,7 +408,11 @@ h5 {
 }
 
 .footer-icon-btn {
-  border: 1px solid transparent;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
 }
 
 .icon-btn img,
@@ -420,24 +427,25 @@ h5 {
 .footer-icon-btn:focus-visible,
 .footer-icon-btn.active {
   background: color-mix(in srgb, var(--surface-soft) 66%, transparent);
-  border-color: color-mix(in srgb, var(--accent-main) 28%, var(--line));
+  border-color: var(--line);
   outline: none;
 }
 
 .footer-theme-btn {
-  min-height: 2rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
-  padding: 0 0.72rem;
+  padding: 0 0.64rem;
   font-size: 0.78rem;
+  text-align: left;
 }
 
 .footer-theme-btn:hover,
 .footer-theme-btn:focus-visible,
 .footer-theme-btn.active {
   background: color-mix(in srgb, var(--surface-soft) 66%, transparent);
-  border-color: color-mix(in srgb, var(--accent-main) 28%, var(--line));
   outline: none;
 }
 
