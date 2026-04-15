@@ -529,6 +529,7 @@
     runtimePanel: document.querySelector('.runtime-panel'),
     runtimeGrid: document.getElementById('runtime-grid'),
     relayPill: document.getElementById('relay-pill'),
+    sectionToolbarActions: document.getElementById('section-toolbar-actions'),
     activeTitle: document.getElementById('active-title'),
     activeSubtitle: document.getElementById('active-subtitle'),
     toast: document.getElementById('toast'),
@@ -1258,6 +1259,7 @@
       els.activeSubtitle.hidden = true;
       els.activeSubtitle.textContent = '';
     }
+    renderSectionToolbarActions(section);
     syncRuntimePanelVisibility();
     els.sectionContent.innerHTML = '';
     state.fieldNodes = {};
@@ -2063,64 +2065,9 @@
 
     searchWrap.appendChild(search);
     controls.appendChild(searchWrap);
-
-    var spacer = document.createElement('div');
-    spacer.className = 'events-toolbar-spacer';
-    controls.appendChild(spacer);
-
-    var count = document.createElement('span');
-    count.className = 'status-pill neutral';
-    var visibleEvents = filteredEvents();
-    if (state.eventsLoading) {
-      count.textContent = 'Loading events...';
-      count.title = 'Loading recent matching events.';
-    } else {
-      if (state.eventsViewMode === 'pinned') {
-        count.textContent = 'Showing ' + visibleEvents.length + ' pinned';
-        count.title = 'Showing pinned matches from recent stored events. Refreshes automatically while this tab is open.';
-      } else {
-        count.textContent = 'Showing ' + visibleEvents.length + ' most recent';
-        count.title = 'Showing recent matching events. Refreshes automatically while this tab is open.';
-      }
-    }
-    controls.appendChild(count);
-
-    var total = document.createElement('span');
-    total.className = 'status-pill neutral';
-    if (state.eventsTotalLoading) {
-      total.innerHTML = '<span>Loading...</span><span class="action-spinner" aria-hidden="true"></span>';
-      total.title = 'Loading the total number of stored events.';
-    } else {
-      total.textContent = state.eventsTotal + ' stored';
-      total.title = 'Total events currently stored on disk for this relay.';
-    }
-    controls.appendChild(total);
-
-    var purge = document.createElement('button');
-    purge.type = 'button';
-    purge.className = 'action mini';
-    purge.textContent = 'Purge...';
-    purge.disabled = !state.bridge || state.eventsLoading;
-    purge.title = 'Delete every stored event from this relay.';
-    purge.addEventListener('click', function () {
-      purgeEvents().catch(function (error) {
-        console.error(error);
-        toast(error.message || 'Failed to purge events', 'bad');
-      });
-    });
-    controls.appendChild(purge);
-
-    var size = document.createElement('span');
-    size.className = 'status-pill neutral events-size-pill';
-    if (state.eventsTotalLoading) {
-      size.innerHTML = '<span>Loading...</span><span class="action-spinner" aria-hidden="true"></span>';
-      size.title = 'Loading total stored event size.';
-    } else {
-      size.textContent = formatBytes(state.eventsBytes);
-      size.title = 'Total disk space used by stored event files.';
-    }
-    controls.appendChild(size);
     browser.appendChild(controls);
+
+    var visibleEvents = filteredEvents();
 
     if (state.eventsError) {
       var error = document.createElement('p');
@@ -2165,6 +2112,79 @@
     browser.appendChild(list);
     wrap.appendChild(browser);
     return wrap;
+  }
+
+  function renderSectionToolbarActions(section) {
+    if (!els.sectionToolbarActions) {
+      return;
+    }
+    els.sectionToolbarActions.innerHTML = '';
+    if (!section || section.id !== 'events') {
+      return;
+    }
+    var visibleEvents = filteredEvents();
+    els.sectionToolbarActions.appendChild(renderEventsCountPill(visibleEvents));
+    els.sectionToolbarActions.appendChild(renderEventsTotalPill());
+    els.sectionToolbarActions.appendChild(renderEventsPurgeButton());
+    els.sectionToolbarActions.appendChild(renderEventsSizePill());
+  }
+
+  function renderEventsCountPill(visibleEvents) {
+    var count = document.createElement('span');
+    count.className = 'status-pill neutral';
+    if (state.eventsLoading) {
+      count.textContent = 'Loading events...';
+      count.title = 'Loading recent matching events.';
+    } else if (state.eventsViewMode === 'pinned') {
+      count.textContent = 'Showing ' + visibleEvents.length + ' pinned';
+      count.title = 'Showing pinned matches from recent stored events. Refreshes automatically while this tab is open.';
+    } else {
+      count.textContent = 'Showing ' + visibleEvents.length + ' most recent';
+      count.title = 'Showing recent matching events. Refreshes automatically while this tab is open.';
+    }
+    return count;
+  }
+
+  function renderEventsTotalPill() {
+    var total = document.createElement('span');
+    total.className = 'status-pill neutral';
+    if (state.eventsTotalLoading) {
+      total.innerHTML = '<span>Loading...</span><span class="action-spinner" aria-hidden="true"></span>';
+      total.title = 'Loading the total number of stored events.';
+    } else {
+      total.textContent = state.eventsTotal + ' stored';
+      total.title = 'Total events currently stored on disk for this relay.';
+    }
+    return total;
+  }
+
+  function renderEventsPurgeButton() {
+    var purge = document.createElement('button');
+    purge.type = 'button';
+    purge.className = 'action mini';
+    purge.textContent = 'Purge...';
+    purge.disabled = !state.bridge || state.eventsLoading;
+    purge.title = 'Delete every stored event from this relay.';
+    purge.addEventListener('click', function () {
+      purgeEvents().catch(function (error) {
+        console.error(error);
+        toast(error.message || 'Failed to purge events', 'bad');
+      });
+    });
+    return purge;
+  }
+
+  function renderEventsSizePill() {
+    var size = document.createElement('span');
+    size.className = 'status-pill neutral events-size-pill';
+    if (state.eventsTotalLoading) {
+      size.innerHTML = '<span>Loading...</span><span class="action-spinner" aria-hidden="true"></span>';
+      size.title = 'Loading total stored event size.';
+    } else {
+      size.textContent = formatBytes(state.eventsBytes);
+      size.title = 'Total disk space used by stored event files.';
+    }
+    return size;
   }
 
   function renderEventsViewButton(mode, label) {

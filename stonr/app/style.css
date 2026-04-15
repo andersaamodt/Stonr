@@ -281,6 +281,13 @@ h4 {
   align-items: center;
 }
 
+.section-toolbar-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
 .status-pill,
 .scope-pill {
   display: inline-flex;
@@ -639,10 +646,6 @@ h4 {
   align-items: center;
   gap: 0.3rem;
   flex: 0 0 auto;
-}
-
-.events-toolbar-spacer {
-  flex: 1 1 auto;
 }
 
 .events-toolbar .action:last-child {
