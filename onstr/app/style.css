@@ -1014,6 +1014,10 @@ label {
   width: min(27rem, calc(100vw - 2rem));
 }
 
+.prompt-drawer {
+  width: min(26rem, calc(100vw - 2rem));
+}
+
 .drawer-head {
   display: flex;
   justify-content: space-between;
@@ -1114,7 +1118,8 @@ label {
   .drawer,
   .settings-drawer,
   .compose-drawer,
-  .delete-drawer {
+  .delete-drawer,
+  .prompt-drawer {
     width: min(100%, calc(100vw - 1rem));
     max-height: calc(100vh - 1rem);
   }

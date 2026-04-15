@@ -33,7 +33,9 @@
     theme: 'wizard',
     openMenu: null,
     refreshTimer: null,
-    settingsReturnFocus: null
+    settingsReturnFocus: null,
+    promptReturnFocus: null,
+    promptResolver: null
   };
 
   var TAB_IDS = ['home', 'discover'];
@@ -113,6 +115,14 @@
 
     deleteClose: document.getElementById('delete-close'),
     deleteBackdrop: document.getElementById('delete-backdrop'),
+    promptBackdrop: document.getElementById('prompt-backdrop'),
+    promptCancel: document.getElementById('prompt-cancel'),
+    promptForm: document.getElementById('prompt-form'),
+    promptTitle: document.getElementById('prompt-title'),
+    promptLabel: document.getElementById('prompt-label'),
+    promptLabelText: document.getElementById('prompt-label-text'),
+    promptInput: document.getElementById('prompt-input'),
+    promptSubmit: document.getElementById('prompt-submit'),
 
     homeForm: document.getElementById('home-form'),
     homeAuthors: document.getElementById('home-authors'),
@@ -826,6 +836,51 @@
     els.deleteBackdrop.setAttribute('aria-hidden', 'true');
   }
 
+  function closePrompt(value) {
+    if (els.promptBackdrop) {
+      els.promptBackdrop.classList.add('hidden');
+      els.promptBackdrop.setAttribute('aria-hidden', 'true');
+    }
+    var resolver = state.promptResolver;
+    var returnFocus = state.promptReturnFocus;
+    state.promptResolver = null;
+    state.promptReturnFocus = null;
+    if (returnFocus && typeof returnFocus.focus === 'function') {
+      returnFocus.focus();
+    }
+    if (resolver) {
+      resolver(value);
+    }
+  }
+
+  function openTextPrompt(options) {
+    options = options || {};
+    if (!els.promptBackdrop || !els.promptInput) {
+      return Promise.resolve(null);
+    }
+    if (state.promptResolver) {
+      closePrompt(null);
+    }
+    state.promptReturnFocus = document.activeElement;
+    if (els.promptTitle) {
+      els.promptTitle.textContent = String(options.title || 'Input');
+    }
+    if (els.promptLabelText) {
+      els.promptLabelText.textContent = String(options.label || 'Value');
+    }
+    els.promptInput.value = String(options.value || '');
+    els.promptInput.placeholder = String(options.placeholder || '');
+    els.promptBackdrop.classList.remove('hidden');
+    els.promptBackdrop.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(function () {
+      els.promptInput.focus();
+      els.promptInput.select();
+    });
+    return new Promise(function (resolve) {
+      state.promptResolver = resolve;
+    });
+  }
+
   function listThemeNamesFromBlob(blob) {
     return String(blob || '')
       .split('\n')
@@ -1434,7 +1489,11 @@
   }
 
   async function createLibraryList() {
-    var raw = window.prompt('List name');
+    var raw = await openTextPrompt({
+      title: 'Create List',
+      label: 'List name',
+      placeholder: 'List name'
+    });
     if (raw === null) {
       return;
     }
@@ -2019,7 +2078,11 @@
   }
 
   async function addFollowingPubkey() {
-    var input = window.prompt('Pubkey (hex)');
+    var input = await openTextPrompt({
+      title: 'Add Follow',
+      label: 'Pubkey (hex)',
+      placeholder: '64-character hex pubkey'
+    });
     if (input === null) {
       return;
     }
@@ -2461,6 +2524,13 @@
       });
     });
 
+    if (els.promptForm) {
+      els.promptForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        closePrompt(String(els.promptInput.value || ''));
+      });
+    }
+
     els.libraryIngestForm.addEventListener('submit', function (event) {
       event.preventDefault();
       runLibraryIngest().catch(function () {
@@ -2598,8 +2668,13 @@
     els.composeClose.addEventListener('click', closeCompose);
 
     els.deleteClose.addEventListener('click', closeDelete);
+    if (els.promptCancel) {
+      els.promptCancel.addEventListener('click', function () {
+        closePrompt(null);
+      });
+    }
 
-    [els.settingsBackdrop, els.composeBackdrop, els.deleteBackdrop].forEach(function (backdrop) {
+    [els.settingsBackdrop, els.composeBackdrop, els.deleteBackdrop, els.promptBackdrop].forEach(function (backdrop) {
       backdrop.addEventListener('click', function (event) {
         if (event.target !== backdrop) {
           return;
@@ -2612,6 +2687,9 @@
         }
         if (backdrop === els.deleteBackdrop) {
           closeDelete();
+        }
+        if (backdrop === els.promptBackdrop) {
+          closePrompt(null);
         }
       });
     });
@@ -2627,6 +2705,10 @@
       closeOpenMenu();
       if (!els.deleteBackdrop.classList.contains('hidden')) {
         closeDelete();
+        return;
+      }
+      if (!els.promptBackdrop.classList.contains('hidden')) {
+        closePrompt(null);
         return;
       }
       if (!els.composeBackdrop.classList.contains('hidden')) {
@@ -2655,6 +2737,9 @@
         node === els.composeOpen ||
         node === els.composeClose ||
         node === els.deleteClose ||
+        node === els.promptCancel ||
+        node === els.promptInput ||
+        node === els.promptSubmit ||
         node === els.themePickerBtn ||
         node === els.themeSelect
       ) {
@@ -2691,6 +2776,15 @@
     }
     if (els.deleteClose) {
       els.deleteClose.disabled = false;
+    }
+    if (els.promptCancel) {
+      els.promptCancel.disabled = false;
+    }
+    if (els.promptInput) {
+      els.promptInput.disabled = false;
+    }
+    if (els.promptSubmit) {
+      els.promptSubmit.disabled = false;
     }
     if (els.themePickerBtn) {
       els.themePickerBtn.disabled = false;
@@ -2740,6 +2834,9 @@
         return;
       }
       if (!els.deleteBackdrop.classList.contains('hidden')) {
+        return;
+      }
+      if (!els.promptBackdrop.classList.contains('hidden')) {
         return;
       }
       if (!els.settingsBackdrop.classList.contains('hidden')) {

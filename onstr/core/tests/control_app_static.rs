@@ -94,5 +94,6 @@ fn note_compose_does_not_inject_title_shorthand_tags() {
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
     assert!(!app_js.contains("composeTagsWithName"));
-    assert!(!app_js.contains("title:"));
+    assert!(app_js.contains("return ['compose-note', [content, String(els.composeTags.value || '').trim(), draft]];"));
+    assert!(app_js.contains("return ['compose-longform', [name, identifier, longformContent, String(els.composeSummary.value || '').trim(), draft]];"));
 }

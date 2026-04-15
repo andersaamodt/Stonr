@@ -394,6 +394,26 @@
     </aside>
   </div>
 
+  <div id="prompt-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
+    <aside id="prompt-drawer" class="drawer prompt-drawer" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+      <header class="drawer-head">
+        <h3 id="prompt-title">Input</h3>
+        <button id="prompt-cancel" class="action" type="button">Cancel</button>
+      </header>
+
+      <section class="drawer-body">
+        <form id="prompt-form" class="compose-form" autocomplete="off">
+          <label id="prompt-label"><span id="prompt-label-text">Value</span>
+            <input id="prompt-input" type="text" placeholder="">
+          </label>
+          <div class="flow-row">
+            <button id="prompt-submit" class="action primary" type="submit">Save</button>
+          </div>
+        </form>
+      </section>
+    </aside>
+  </div>
+
   <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
     <aside id="settings-drawer" class="drawer settings-drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="drawer-head">
