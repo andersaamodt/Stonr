@@ -1083,10 +1083,10 @@ label textarea {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(76, 81, 92, 0.34);
+  background: rgba(98, 103, 114, 0.42);
   display: grid;
   place-items: center;
-  padding: 1.5rem;
+  padding: 2rem;
   z-index: 1300;
 }
 
@@ -1188,6 +1188,21 @@ label textarea {
 .settings-drawer {
   width: min(40rem, calc(100vw - 4rem));
   max-height: calc(100vh - 4rem);
+}
+
+.settings-drawer.profile-create-only {
+  width: min(34rem, calc(100vw - 6rem));
+  max-height: calc(100vh - 6rem);
+}
+
+.settings-drawer.profile-create-only .drawer-section:not(.profile-settings-section) {
+  display: none;
+}
+
+.settings-drawer.profile-create-only #profile-listbox,
+.settings-drawer.profile-create-only #profile-use,
+.settings-drawer.profile-create-only #profile-log {
+  display: none;
 }
 
 .hidden {

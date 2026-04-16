@@ -119,6 +119,8 @@
     settingsOpen: document.getElementById('open-settings'),
     settingsClose: document.getElementById('close-settings'),
     settingsBackdrop: document.getElementById('drawer-backdrop'),
+    settingsDrawer: document.getElementById('settings-drawer'),
+    settingsTitle: document.getElementById('settings-title'),
 
     deleteClose: document.getElementById('delete-close'),
     deleteBackdrop: document.getElementById('delete-backdrop'),
@@ -915,9 +917,20 @@
     return;
   }
 
-  function openSettings(trigger) {
+  function setSettingsMode(mode) {
+    var nextMode = String(mode || 'full').trim() || 'full';
+    if (els.settingsDrawer) {
+      els.settingsDrawer.classList.toggle('profile-create-only', nextMode === 'profile-create');
+    }
+    if (els.settingsTitle) {
+      els.settingsTitle.textContent = nextMode === 'profile-create' ? 'Create Nostr Profile' : 'Onstr Settings';
+    }
+  }
+
+  function openSettings(trigger, options) {
     closeThemeMenu(false);
     closeProfileMenu(false);
+    setSettingsMode(options && options.profileCreateOnly ? 'profile-create' : 'full');
     state.settingsReturnFocus = trigger || els.settingsOpen;
     els.settingsBackdrop.classList.remove('hidden');
     els.settingsBackdrop.setAttribute('aria-hidden', 'false');
@@ -937,6 +950,7 @@
     els.settingsBackdrop.classList.add('hidden');
     els.settingsBackdrop.setAttribute('aria-hidden', 'true');
     els.settingsOpen.classList.remove('active');
+    setSettingsMode('full');
     if (state.settingsReturnFocus && typeof state.settingsReturnFocus.focus === 'function') {
       state.settingsReturnFocus.focus();
       return;
@@ -1319,7 +1333,7 @@
       els.profilePickerBtn.addEventListener('click', function (event) {
         event.preventDefault();
         if (!state.profiles.length) {
-          openSettings(els.profilePickerBtn);
+          openSettings(els.profilePickerBtn, { profileCreateOnly: true });
           return;
         }
         toggleProfileMenu();
@@ -1330,7 +1344,7 @@
         var createItem = event.target.closest('button[data-profile-action="create"]');
         if (createItem) {
           closeProfileMenu(false);
-          openSettings(els.profilePickerBtn);
+          openSettings(els.profilePickerBtn, { profileCreateOnly: true });
           requestAnimationFrame(function () {
             if (els.profileCreateName) {
               els.profileCreateName.focus();
