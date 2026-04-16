@@ -378,7 +378,8 @@
       { id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' },
       { id: 'home', label: 'Home', icon: 'assets/home-outline.svg' },
       { id: 'feed', label: 'Feed', icon: 'assets/feed-outline.svg' },
-      { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' }
+      { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' },
+      { id: 'inbox', label: 'Inbox', icon: 'assets/folder-open.svg' }
     ];
     els.railNavListbox.innerHTML = '';
     items.forEach(function (item) {
@@ -473,7 +474,7 @@
 
   function setActiveRailNav(viewId, userInitiated) {
     var view = String(viewId || '').trim();
-    if (['home', 'feed', 'discover', 'compose'].indexOf(view) < 0) {
+    if (['home', 'feed', 'discover', 'compose', 'inbox'].indexOf(view) < 0) {
       view = 'home';
     }
     state.activeRailNav = view;
@@ -490,6 +491,13 @@
       return;
     }
     setActiveTab('home', false);
+    if (view === 'inbox') {
+      state.selectedListName = 'inbox';
+      runLibraryListView('inbox').catch(function () {
+        return;
+      });
+      return;
+    }
     if (view === 'feed' && els.homeFeed && typeof els.homeFeed.scrollIntoView === 'function') {
       els.homeFeed.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' });
     }
@@ -1708,7 +1716,9 @@
   }
 
   function renderLibraryList(payload) {
-    var rows = payload && Array.isArray(payload.lists) ? payload.lists : [];
+    var rows = payload && Array.isArray(payload.lists) ? payload.lists.filter(function (row) {
+      return String(row && row.name ? row.name : '').trim() !== 'inbox';
+    }) : [];
     state.libraryRows = rows.slice(0, 250);
     els.libraryListbox.innerHTML = '';
     if (!state.libraryRows.length) {

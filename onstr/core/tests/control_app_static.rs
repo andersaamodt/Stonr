@@ -84,7 +84,9 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("button[data-profile-action=\"create\"]"));
     assert!(app_js.contains("var TAB_IDS = ['home', 'discover', 'compose'];"));
     assert!(app_js.contains("{ id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' }"));
+    assert!(app_js.contains("{ id: 'inbox', label: 'Inbox', icon: 'assets/folder-open.svg' }"));
     assert!(app_js.contains("setActiveTab('compose', false);"));
+    assert!(app_js.contains("runLibraryListView('inbox').catch(function () {"));
     assert!(app_js.contains("scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' })"));
     assert!(app_js.contains("starBtn.className = 'feed-icon-btn';"));
     assert!(!app_js.contains("listBtn.textContent = 'Add To List';"));
@@ -94,6 +96,7 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("safeBackend('library-list-folder-events', [name], 'Failed to load list')"));
     assert!(app_js.contains("setRailSelection('following', state.activeFollowingPubkey);"));
     assert!(app_js.contains("setRailSelection('list', state.selectedListName);"));
+    assert!(app_js.contains("String(row && row.name ? row.name : '').trim() !== 'inbox'"));
     assert!(style_css.contains("-webkit-mask-image: var(--icon-url);"));
     assert!(style_css.contains("mask-image: var(--icon-url);"));
     assert!(style_css.contains(".footer-profile-anchor"));
