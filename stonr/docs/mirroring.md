@@ -29,7 +29,7 @@ variables restrict which events are requested:
 Start mirroring with:
 
 ```bash
-stonr serve --env .env
+stonr --env .env serve
 ```
 
 ## Mirroring through Tor

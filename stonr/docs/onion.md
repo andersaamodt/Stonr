@@ -38,7 +38,7 @@ TOR_SOCKS=127.0.0.1:9050
 Start the relay using this configuration:
 
 ```bash
-stonr serve --env .env
+stonr --env .env serve
 ```
 
 stonr will now accept connections from Tor via the hidden service.

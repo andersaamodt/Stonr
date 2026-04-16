@@ -26,13 +26,13 @@ the entire tree. The pieces fit together like this:
 
 ```bash
 # 1. Create the storage directory structure
-stonr init --env .env
+stonr --env .env init
 
 # 2. Ingest a sample event into the store
 stonr ingest sample.json
 
 # 3. Start the HTTP and WebSocket servers
-stonr serve --env .env
+stonr --env .env serve
 
 # 4. Query events over HTTP
 curl "http://localhost:7777/query?authors=npub1&kinds=1"
@@ -81,14 +81,14 @@ FILTER_SINCE_MODE=cursor
 ## CLI
 
 ```
-stonr init --env .env
+stonr --env .env init
 stonr ingest events/*.json
-stonr reindex --env .env
-stonr retention-status --env .env
+stonr --env .env reindex
+stonr --env .env retention-status
 stonr backup --env .env --destination /tmp/stonr-backup
 stonr restore --env .env --source /tmp/stonr-backup
-stonr print-proxy --env .env --manager caddy --domain relay.example.com
-stonr serve --env .env
+stonr --env .env print-proxy --manager caddy --domain relay.example.com
+stonr --env .env serve
 stonr verify --env .env --sample 1000
 ```
 
