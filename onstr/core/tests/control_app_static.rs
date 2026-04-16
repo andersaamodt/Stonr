@@ -82,6 +82,9 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("function renderProfileMenuList()"));
     assert!(app_js.contains("function renderActiveProfileButton()"));
     assert!(app_js.contains("button[data-profile-action=\"create\"]"));
+    assert!(app_js.contains("function cycleTheme(delta)"));
+    assert!(app_js.contains("els.themePickerBtn.addEventListener('keydown'"));
+    assert!(app_js.contains("cycleTheme(event.key === 'ArrowDown' ? 1 : -1);"));
     assert!(app_js.contains("var TAB_IDS = ['home', 'discover', 'compose'];"));
     assert!(app_js.contains("{ id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' }"));
     assert!(app_js.contains("{ id: 'inbox', label: 'Inbox', icon: 'assets/folder-open.svg' }"));

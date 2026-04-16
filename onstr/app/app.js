@@ -1297,6 +1297,19 @@
       });
     }
 
+    function cycleTheme(delta) {
+      var names = Array.isArray(state.themes) ? state.themes.slice() : [];
+      if (!names.length) {
+        return;
+      }
+      var current = names.indexOf(String(state.theme || '').trim());
+      if (current < 0) {
+        current = 0;
+      }
+      var next = (current + delta + names.length) % names.length;
+      onThemeSelect(names[next]);
+    }
+
     if (els.themeSelect) {
       els.themeSelect.addEventListener('change', function () {
         onThemeSelect(String(els.themeSelect.value || '').trim());
@@ -1317,6 +1330,16 @@
       els.themePickerBtn.addEventListener('click', function (event) {
         event.preventDefault();
         toggleThemeMenu();
+      });
+      els.themePickerBtn.addEventListener('keydown', function (event) {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+          return;
+        }
+        event.preventDefault();
+        if (themeMenuOpen()) {
+          closeThemeMenu(false);
+        }
+        cycleTheme(event.key === 'ArrowDown' ? 1 : -1);
       });
     }
     if (els.themePickerList) {
