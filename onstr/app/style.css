@@ -295,7 +295,7 @@ h5 {
   color: var(--text-muted);
   align-items: center;
   justify-items: start;
-  padding: 0.24rem 0.5rem;
+  padding: 0.22rem 0.5rem;
 }
 
 .rail-list-option.is-empty:hover,
@@ -318,6 +318,7 @@ h5 {
   white-space: nowrap;
   font-size: 0.83rem;
   font-weight: 600;
+  line-height: 1.2;
 }
 
 .rail-nav-icon {

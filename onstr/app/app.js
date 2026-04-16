@@ -374,10 +374,10 @@
       return;
     }
     var items = [
+      { id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' },
       { id: 'home', label: 'Home', icon: 'assets/home-outline.svg' },
       { id: 'feed', label: 'Feed', icon: 'assets/feed-outline.svg' },
-      { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' },
-      { id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' }
+      { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' }
     ];
     els.railNavListbox.innerHTML = '';
     items.forEach(function (item) {
@@ -588,6 +588,14 @@
     empty.className = 'feed-empty';
     empty.textContent = message;
     node.appendChild(empty);
+  }
+
+  function makeRailIcon(assetPath) {
+    var icon = document.createElement('span');
+    icon.className = 'rail-nav-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.style.setProperty('--icon-url', 'url("' + assetPath + '")');
+    return icon;
   }
 
   function relayConfigured(relays) {
@@ -1699,7 +1707,14 @@
     if (!state.libraryRows.length) {
       var empty = document.createElement('div');
       empty.className = 'rail-list-option is-empty';
-      empty.textContent = 'No lists yet.';
+      var emptyCopy = document.createElement('span');
+      emptyCopy.className = 'rail-option-copy';
+      emptyCopy.appendChild(makeRailIcon('assets/folder-open.svg'));
+      var emptyLabel = document.createElement('span');
+      emptyLabel.className = 'rail-option-label';
+      emptyLabel.textContent = 'No lists yet.';
+      emptyCopy.appendChild(emptyLabel);
+      empty.appendChild(emptyCopy);
       els.libraryListbox.appendChild(empty);
       state.selectedListName = '';
       if (state.railSelectionKind === 'list') {
@@ -1726,6 +1741,7 @@
 
       var copy = document.createElement('span');
       copy.className = 'rail-option-copy';
+      copy.appendChild(makeRailIcon('assets/folder-open.svg'));
 
       var label = document.createElement('span');
       label.className = 'rail-option-label';
@@ -2289,7 +2305,14 @@
     if (!state.followingRows.length) {
       var empty = document.createElement('div');
       empty.className = 'rail-list-option is-empty';
-      empty.textContent = 'No follows.';
+      var emptyCopy = document.createElement('span');
+      emptyCopy.className = 'rail-option-copy';
+      emptyCopy.appendChild(makeRailIcon('assets/person-outline.svg'));
+      var emptyLabel = document.createElement('span');
+      emptyLabel.className = 'rail-option-label';
+      emptyLabel.textContent = 'No follows.';
+      emptyCopy.appendChild(emptyLabel);
+      empty.appendChild(emptyCopy);
       els.followingListbox.appendChild(empty);
       state.activeFollowingPubkey = '';
       if (state.railSelectionKind === 'following') {
@@ -2312,6 +2335,7 @@
 
       var copy = document.createElement('span');
       copy.className = 'rail-option-copy';
+      copy.appendChild(makeRailIcon('assets/person-outline.svg'));
 
       var label = document.createElement('span');
       label.className = 'rail-option-label';
