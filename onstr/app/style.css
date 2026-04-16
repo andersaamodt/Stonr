@@ -1148,6 +1148,30 @@ label textarea {
   padding: 0.78rem 0.82rem;
 }
 
+.drawer-close-btn {
+  width: 1.95rem;
+  height: 1.95rem;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+}
+
+.drawer-close-btn img {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: block;
+}
+
+.drawer-close-btn:hover,
+.drawer-close-btn:focus-visible {
+  background: color-mix(in srgb, var(--surface-soft) 58%, transparent);
+  color: var(--text-main);
+}
+
 .drawer-body {
   overflow: auto;
   min-height: 0;
