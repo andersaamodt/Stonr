@@ -209,7 +209,15 @@ h5 {
 }
 
 .rail-section-head,
-.section-head-row,
+.section-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
 .inline-head {
   display: flex;
   align-items: start;
