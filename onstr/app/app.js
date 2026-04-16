@@ -381,7 +381,7 @@
       { id: 'home', label: 'Home', icon: 'assets/home-outline.svg' },
       { id: 'feed', label: 'Feed', icon: 'assets/feed-outline.svg' },
       { id: 'discover', label: 'Discover', icon: 'assets/discover-outline.svg' },
-      { id: 'inbox', label: 'Inbox', icon: 'assets/folder-open.svg' }
+      { id: 'inbox', label: 'Inbox', icon: 'assets/inbox-outline.svg' }
     ];
     els.railNavListbox.innerHTML = '';
     items.forEach(function (item) {
@@ -396,16 +396,11 @@
       var copy = document.createElement('span');
       copy.className = 'rail-option-copy';
 
-      var icon = document.createElement('span');
-      icon.className = 'rail-nav-icon';
-      icon.setAttribute('aria-hidden', 'true');
-      icon.style.setProperty('--icon-url', 'url("' + item.icon + '")');
-
       var label = document.createElement('span');
       label.className = 'rail-option-label';
       label.textContent = item.label;
 
-      copy.appendChild(icon);
+      copy.appendChild(makeRailIcon(item.icon));
       copy.appendChild(label);
       row.appendChild(copy);
       row.addEventListener('click', function () {
@@ -602,10 +597,11 @@
   }
 
   function makeRailIcon(assetPath) {
-    var icon = document.createElement('span');
-    icon.className = 'rail-nav-icon';
+    var icon = document.createElement('img');
+    icon.className = 'rail-row-icon';
     icon.setAttribute('aria-hidden', 'true');
-    icon.style.setProperty('--icon-url', 'url("' + assetPath + '")');
+    icon.alt = '';
+    icon.src = assetPath;
     return icon;
   }
 

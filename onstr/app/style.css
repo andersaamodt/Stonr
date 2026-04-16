@@ -330,21 +330,12 @@ h5 {
   line-height: 1.2;
 }
 
-.rail-nav-icon {
+.rail-row-icon {
   display: block;
   width: 0.95rem;
   height: 0.95rem;
   flex: 0 0 auto;
-  opacity: 0.84;
-  background: currentColor;
-  -webkit-mask-image: var(--icon-url);
-  mask-image: var(--icon-url);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  mask-size: contain;
+  opacity: 0.92;
 }
 
 .rail-option-meta {
