@@ -1105,6 +1105,16 @@ label textarea {
   width: min(26rem, calc(100vw - 2rem));
 }
 
+#prompt-form {
+  width: 100%;
+}
+
+#prompt-label,
+#prompt-input {
+  width: 100%;
+  min-width: 0;
+}
+
 .drawer-head {
   display: flex;
   justify-content: space-between;
