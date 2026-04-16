@@ -1096,10 +1096,6 @@ label textarea {
   overflow: hidden;
 }
 
-.compose-drawer {
-  width: min(40rem, calc(100vw - 2rem));
-}
-
 .delete-drawer {
   width: min(27rem, calc(100vw - 2rem));
 }
@@ -1200,7 +1196,6 @@ label textarea {
 
   .drawer,
   .settings-drawer,
-  .compose-drawer,
   .delete-drawer,
   .prompt-drawer {
     width: min(100%, calc(100vw - 1rem));

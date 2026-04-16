@@ -42,7 +42,7 @@
     profiles: []
   };
 
-  var TAB_IDS = ['home', 'discover'];
+  var TAB_IDS = ['home', 'discover', 'compose'];
 
   var COMMAND_ALLOWLIST = Object.freeze({
     'get-ui-prefs': true,
@@ -119,9 +119,6 @@
     settingsOpen: document.getElementById('open-settings'),
     settingsClose: document.getElementById('close-settings'),
     settingsBackdrop: document.getElementById('drawer-backdrop'),
-
-    composeClose: document.getElementById('close-compose'),
-    composeBackdrop: document.getElementById('compose-backdrop'),
 
     deleteClose: document.getElementById('delete-close'),
     deleteBackdrop: document.getElementById('delete-backdrop'),
@@ -478,15 +475,6 @@
     if (['home', 'feed', 'discover', 'compose'].indexOf(view) < 0) {
       view = 'home';
     }
-    if (view === 'compose') {
-      if (userInitiated) {
-        setRailSelection('nav', 'compose');
-        openCompose();
-      } else {
-        syncRailSelection();
-      }
-      return;
-    }
     state.activeRailNav = view;
     if (userInitiated || state.railSelectionKind === 'nav' || !state.railSelectionKind) {
       setRailSelection('nav', view);
@@ -496,8 +484,8 @@
     if (!userInitiated) {
       return;
     }
-    if (view === 'discover') {
-      setActiveTab('discover', false);
+    if (view === 'discover' || view === 'compose') {
+      setActiveTab(view, false);
       return;
     }
     setActiveTab('home', false);
@@ -895,9 +883,9 @@
         panel.focus();
       }
     });
-    if (tabId === 'discover') {
-      setActiveRailNav('discover', false);
-    } else if (state.activeRailNav === 'discover') {
+    if (tabId === 'discover' || tabId === 'compose') {
+      setActiveRailNav(tabId, false);
+    } else if (state.activeRailNav === 'discover' || state.activeRailNav === 'compose') {
       setActiveRailNav('home', false);
     }
 
@@ -935,21 +923,14 @@
     els.settingsOpen.focus();
   }
 
-  function openCompose() {
-    els.composeBackdrop.classList.remove('hidden');
-    els.composeBackdrop.setAttribute('aria-hidden', 'false');
+  function openCompose(focusNode) {
+    setActiveTab('compose', false);
+    setRailSelection('nav', 'compose');
+    if (focusNode && typeof focusNode.focus === 'function') {
+      focusNode.focus();
+      return;
+    }
     els.composeDraft.focus();
-  }
-
-  function closeCompose() {
-    els.composeBackdrop.classList.add('hidden');
-    els.composeBackdrop.setAttribute('aria-hidden', 'true');
-    if (state.railSelectionKind === 'nav' && state.railSelectionValue === 'compose') {
-      setRailSelection('nav', state.activeRailNav || 'home');
-    }
-    if (els.railNavListbox && typeof els.railNavListbox.focus === 'function') {
-      els.railNavListbox.focus();
-    }
   }
 
   function openDelete(eventId) {
@@ -2034,7 +2015,7 @@
       setComposeType('reply');
       els.composeReplyEvent.value = String(event.id || '');
       els.composeContent.value = '';
-      openCompose();
+      openCompose(els.composeContent);
     });
 
     wrap.appendChild(reply);
@@ -3024,8 +3005,6 @@
     });
     els.settingsClose.addEventListener('click', closeSettings);
 
-    els.composeClose.addEventListener('click', closeCompose);
-
     els.deleteClose.addEventListener('click', closeDelete);
     if (els.promptCancel) {
       els.promptCancel.addEventListener('click', function () {
@@ -3033,16 +3012,13 @@
       });
     }
 
-    [els.settingsBackdrop, els.composeBackdrop, els.deleteBackdrop, els.promptBackdrop].forEach(function (backdrop) {
+    [els.settingsBackdrop, els.deleteBackdrop, els.promptBackdrop].forEach(function (backdrop) {
       backdrop.addEventListener('click', function (event) {
         if (event.target !== backdrop) {
           return;
         }
         if (backdrop === els.settingsBackdrop) {
           closeSettings();
-        }
-        if (backdrop === els.composeBackdrop) {
-          closeCompose();
         }
         if (backdrop === els.deleteBackdrop) {
           closeDelete();
@@ -3074,10 +3050,6 @@
         closePrompt(null);
         return;
       }
-      if (!els.composeBackdrop.classList.contains('hidden')) {
-        closeCompose();
-        return;
-      }
       if (!els.settingsBackdrop.classList.contains('hidden')) {
         closeSettings();
       }
@@ -3096,7 +3068,6 @@
       if (
         node === els.settingsOpen ||
         node === els.settingsClose ||
-        node === els.composeClose ||
         node === els.deleteClose ||
         node === els.promptCancel ||
         node === els.promptInput ||
@@ -3126,9 +3097,6 @@
     els.settingsOpen.disabled = false;
     if (els.settingsClose) {
       els.settingsClose.disabled = false;
-    }
-    if (els.composeClose) {
-      els.composeClose.disabled = false;
     }
     if (els.deleteClose) {
       els.deleteClose.disabled = false;
@@ -3189,9 +3157,6 @@
       if (document.hidden) {
         return;
       }
-      if (!els.composeBackdrop.classList.contains('hidden')) {
-        return;
-      }
       if (!els.deleteBackdrop.classList.contains('hidden')) {
         return;
       }
@@ -3206,7 +3171,7 @@
         await runHomeFetch().catch(function () {
           return;
         });
-      } else {
+      } else if (state.activeTab === 'discover') {
         if (String(els.discoverTerm.value || '').trim()) {
           await runDiscoverSearch().catch(function () {
             return;

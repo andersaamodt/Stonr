@@ -209,24 +209,16 @@
           </div>
         </details>
       </section>
-    </main>
-  </div>
 
-  <div id="compose-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
-    <aside id="compose-drawer" class="drawer compose-drawer" aria-label="Compose">
-      <header class="drawer-head">
-        <h3>Compose</h3>
-        <button id="close-compose" class="action" type="button">Close</button>
-      </header>
-
-      <section class="drawer-body">
-        <section class="drawer-section">
-          <div class="section-head-row">
+      <section id="tab-compose" class="tab-panel hidden" tabindex="0">
+        <section class="stage-section">
+          <header class="inline-head">
             <div>
-              <h4>Draft Builder</h4>
+              <h3>Compose</h3>
               <p id="compose-type-hint" class="support-copy">Write a standard note, save a draft, then sign and publish when you're ready.</p>
             </div>
-          </div>
+          </header>
+
           <form id="compose-form" class="compose-form" autocomplete="off">
             <div class="form-row">
               <label>Draft Name
@@ -330,11 +322,16 @@
               </div>
             </div>
           </form>
-
-          <pre id="compose-output" class="log">No compose actions yet.</pre>
         </section>
+
+        <details class="stage-section inline-details" open>
+          <summary>Compose output</summary>
+          <div class="details-body">
+            <pre id="compose-output" class="log">No compose actions yet.</pre>
+          </div>
+        </details>
       </section>
-    </aside>
+    </main>
   </div>
 
   <div id="delete-backdrop" class="drawer-backdrop hidden" aria-hidden="true">
