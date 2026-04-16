@@ -1386,9 +1386,6 @@
       dragging = true;
       dragPointerId = event.pointerId;
       event.preventDefault();
-      if (els.railResizer.setPointerCapture) {
-        els.railResizer.setPointerCapture(event.pointerId);
-      }
       setDragCursor(true);
       updateWidth(event.clientX);
       return true;
@@ -1401,23 +1398,35 @@
       dragging = false;
       dragPointerId = null;
       setDragCursor(false);
+      if (workspace) {
+        workspace.style.cursor = '';
+      }
       persistRailWidth(state.railWidth);
     }
 
-    if (workspace) {
-      workspace.addEventListener('pointermove', function (event) {
-        if (dragging && event.pointerId === dragPointerId) {
-          event.preventDefault();
-          updateWidth(event.clientX);
+    function onPointerMove(event) {
+      if (dragging) {
+        if (event.pointerId !== dragPointerId) {
           return;
         }
-        if (nearDivider(event.clientX)) {
-          workspace.style.cursor = 'col-resize';
-          return;
-        }
+        event.preventDefault();
+        updateWidth(event.clientX);
+        return;
+      }
+      if (!workspace) {
+        return;
+      }
+      var rect = workspaceRect();
+      if (!rect) {
         workspace.style.cursor = '';
-      });
+        return;
+      }
+      var insideX = event.clientX >= rect.left && event.clientX <= rect.right;
+      var insideY = event.clientY >= rect.top && event.clientY <= rect.bottom;
+      workspace.style.cursor = insideX && insideY && nearDivider(event.clientX) ? 'col-resize' : '';
+    }
 
+    if (workspace) {
       workspace.addEventListener('pointerleave', function () {
         if (!dragging) {
           workspace.style.cursor = '';
@@ -1436,28 +1445,9 @@
       startDrag(event);
     });
 
-    els.railResizer.addEventListener('pointermove', function (event) {
-      if (!dragging || event.pointerId !== dragPointerId) {
-        return;
-      }
-      event.preventDefault();
-      updateWidth(event.clientX);
-    });
-
-    els.railResizer.addEventListener('pointerup', endDrag);
-    els.railResizer.addEventListener('pointercancel', endDrag);
-    els.railResizer.addEventListener('lostpointercapture', function () {
-      if (!dragging) {
-        return;
-      }
-      dragging = false;
-      dragPointerId = null;
-      setDragCursor(false);
-      if (workspace) {
-        workspace.style.cursor = '';
-      }
-      persistRailWidth(state.railWidth);
-    });
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
   }
 
   function setComposeTypeUi() {
