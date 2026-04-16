@@ -1102,17 +1102,32 @@ label textarea {
 }
 
 .prompt-drawer {
+  width: min(18rem, calc(100vw - 2rem));
+}
+
+.prompt-drawer.prompt-drawer-wide {
   width: min(26rem, calc(100vw - 2rem));
 }
 
 #prompt-form {
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
 }
 
 #prompt-label,
 #prompt-input {
-  width: 100%;
+  width: 14rem;
   min-width: 0;
+  max-width: 100%;
+}
+
+.prompt-drawer.prompt-drawer-wide #prompt-form {
+  width: 100%;
+}
+
+.prompt-drawer.prompt-drawer-wide #prompt-label,
+.prompt-drawer.prompt-drawer-wide #prompt-input {
+  width: 100%;
 }
 
 .drawer-head {

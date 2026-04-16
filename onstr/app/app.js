@@ -123,6 +123,7 @@
     deleteClose: document.getElementById('delete-close'),
     deleteBackdrop: document.getElementById('delete-backdrop'),
     promptBackdrop: document.getElementById('prompt-backdrop'),
+    promptDrawer: document.getElementById('prompt-drawer'),
     promptCancel: document.getElementById('prompt-cancel'),
     promptForm: document.getElementById('prompt-form'),
     promptTitle: document.getElementById('prompt-title'),
@@ -987,6 +988,12 @@
     }
     if (els.promptLabelText) {
       els.promptLabelText.textContent = String(options.label || 'Value');
+    }
+    if (els.promptDrawer) {
+      els.promptDrawer.classList.toggle('prompt-drawer-wide', !!options.wide);
+    }
+    if (els.promptLabel) {
+      els.promptLabel.classList.toggle('wide-label', !!options.wide);
     }
     els.promptInput.value = String(options.value || '');
     els.promptInput.placeholder = String(options.placeholder || '');
@@ -2444,7 +2451,8 @@
     var input = await openTextPrompt({
       title: 'Add Follow',
       label: 'Pubkey (hex)',
-      placeholder: '64-character hex pubkey'
+      placeholder: '64-character hex pubkey',
+      wide: true
     });
     if (input === null) {
       return;
