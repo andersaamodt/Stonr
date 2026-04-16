@@ -1099,7 +1099,7 @@ label textarea {
   max-height: calc(100vh - 3rem);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--surface-raised-strong, var(--surface-raised, var(--admin-surface, var(--light-bg, #ffffff))));
   box-shadow: 0 24px 50px color-mix(in srgb, black 30%, transparent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
