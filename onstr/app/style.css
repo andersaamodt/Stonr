@@ -1083,10 +1083,10 @@ label textarea {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(9, 11, 16, 0.42);
+  background: rgba(76, 81, 92, 0.34);
   display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: 1.5rem;
   z-index: 1300;
 }
 
@@ -1095,11 +1095,11 @@ label textarea {
 }
 
 .drawer {
-  width: min(36rem, calc(100vw - 2rem));
-  max-height: calc(100vh - 2rem);
+  width: min(36rem, calc(100vw - 3rem));
+  max-height: calc(100vh - 3rem);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  background: var(--surface);
   box-shadow: 0 24px 50px color-mix(in srgb, black 30%, transparent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1186,7 +1186,8 @@ label textarea {
 }
 
 .settings-drawer {
-  width: min(44rem, calc(100vw - 2rem));
+  width: min(40rem, calc(100vw - 4rem));
+  max-height: calc(100vh - 4rem);
 }
 
 .hidden {

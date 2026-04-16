@@ -922,11 +922,15 @@
     els.settingsBackdrop.classList.remove('hidden');
     els.settingsBackdrop.setAttribute('aria-hidden', 'false');
     els.settingsOpen.classList.add('active');
-    if (!state.activeProfileId && els.profileCreateName) {
-      els.profileCreateName.focus();
-    } else {
-      els.themeSelect.focus();
-    }
+    requestAnimationFrame(function () {
+      if (!state.activeProfileId && els.profileCreateName) {
+        els.profileCreateName.focus();
+        return;
+      }
+      if (els.themeSelect) {
+        els.themeSelect.focus();
+      }
+    });
   }
 
   function closeSettings() {
@@ -1227,6 +1231,14 @@
       return;
     }
     els.profilePickerBtn.textContent = activeProfileFooterLabel();
+    if (!state.profiles.length) {
+      els.profilePickerBtn.removeAttribute('aria-haspopup');
+      els.profilePickerBtn.setAttribute('aria-expanded', 'false');
+      els.profilePickerBtn.removeAttribute('aria-controls');
+      return;
+    }
+    els.profilePickerBtn.setAttribute('aria-haspopup', 'menu');
+    els.profilePickerBtn.setAttribute('aria-controls', 'profile-picker-menu');
   }
 
   async function saveUiPref(key, value) {
@@ -1306,6 +1318,10 @@
     if (els.profilePickerBtn) {
       els.profilePickerBtn.addEventListener('click', function (event) {
         event.preventDefault();
+        if (!state.profiles.length) {
+          openSettings(els.profilePickerBtn);
+          return;
+        }
         toggleProfileMenu();
       });
     }
