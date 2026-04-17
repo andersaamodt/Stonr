@@ -10,3 +10,5 @@ settings:
   ENABLE_TAG_QUERIES: true
   SUPPORT_NIP12: true
   FILTER_SINCE_MODE: cursor
+  ENABLE_MIRRORING: false
+  RELAYS_UPSTREAM: []
