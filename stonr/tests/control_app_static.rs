@@ -1,7 +1,23 @@
 use std::fs;
+use std::process::Command;
 
 fn read_file(path: &str) -> String {
     fs::read_to_string(path).unwrap_or_else(|error| panic!("failed to read {path}: {error}"))
+}
+
+fn run_node(script: &str) -> String {
+    let output = Command::new("node")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run node: {error}"));
+    assert!(
+        output.status.success(),
+        "node script failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
 }
 
 #[test]
@@ -76,4 +92,167 @@ fn app_support_section_and_locks_exist() {
     assert!(app_js.contains("function renderAppSupportSection()"));
     assert!(style_css.contains(".app-support-listbox"));
     assert!(style_css.contains(".app-support-option.selected"));
+}
+
+#[test]
+fn app_support_helpers_remain_top_level_functions() {
+    let app_js_path = format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR"));
+    let script_template = r#"
+const fs = require('fs');
+let src = fs.readFileSync('__APP_JS_PATH__', 'utf8');
+src = src.replace(/\n\s*init\(\);\n/, '\n');
+src = src.replace(
+  /\}\)\(\);\s*$/,
+  "window.__stonr_test_scope = {"
+    + "syncFieldDependencies: typeof syncFieldDependencies,"
+    + "appSupportLockByEnvKey: typeof appSupportLockByEnvKey,"
+    + "appSupportLockedFieldValue: typeof appSupportLockedFieldValue,"
+    + "appSupportLockReason: typeof appSupportLockReason"
+    + "};})();"
+);
+function el() {
+  return {
+    disabled: false,
+    hidden: false,
+    value: '',
+    textContent: '',
+    innerHTML: '',
+    dataset: {},
+    style: { setProperty() {} },
+    className: '',
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    appendChild() {},
+    setAttribute() {},
+    addEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    getBoundingClientRect() { return { left: 0 }; },
+    focus() {},
+    releasePointerCapture() {},
+    setPointerCapture() {}
+  };
+}
+global.window = {
+  location: { pathname: '/Users/test/stonr/app/index.html' },
+  addEventListener() {},
+  removeEventListener() {},
+  wizardry: null
+};
+global.document = {
+  querySelector() { return el(); },
+  getElementById() { return el(); },
+  createElement() { return el(); },
+  createTextNode() { return {}; },
+  createDocumentFragment() { return { appendChild() {} }; },
+  addEventListener() {},
+  body: { classList: { add() {}, remove() {}, contains() { return false; } } },
+  documentElement: { style: { setProperty() {} } },
+  visibilityState: 'visible'
+};
+global.requestAnimationFrame = function () { return 1; };
+global.setTimeout = function () { return 1; };
+global.clearTimeout = function () {};
+global.setInterval = function () { return 1; };
+global.clearInterval = function () {};
+Function(src)();
+console.log(JSON.stringify(window.__stonr_test_scope));
+"#;
+    let script = script_template.replace("__APP_JS_PATH__", &app_js_path);
+    let output = run_node(&script);
+    assert_eq!(
+        output.trim(),
+        r#"{"syncFieldDependencies":"function","appSupportLockByEnvKey":"function","appSupportLockedFieldValue":"function","appSupportLockReason":"function"}"#
+    );
+}
+
+#[test]
+fn relay_section_render_smoke_does_not_blank_main_pane() {
+    let app_js_path = format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR"));
+    let script_template = r#"
+const fs = require('fs');
+let src = fs.readFileSync('__APP_JS_PATH__', 'utf8');
+src = src.replace(/\n\s*init\(\);\n/, '\n');
+src = src.replace(
+  /\}\)\(\);\s*$/,
+  "window.__stonr_render_test = { state: state, renderActiveSection: renderActiveSection, els: els };})();"
+);
+const elements = new Map();
+function classList() {
+  return { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+}
+function makeElement(tagName, id) {
+  const node = {
+    id: id || '',
+    tagName: String(tagName || 'div').toUpperCase(),
+    children: [],
+    disabled: false,
+    hidden: false,
+    value: '',
+    checked: false,
+    textContent: '',
+    innerHTML: '',
+    dataset: {},
+    style: { setProperty() {} },
+    className: '',
+    classList: classList(),
+    appendChild(child) { this.children.push(child); return child; },
+    setAttribute() {},
+    addEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    getBoundingClientRect() { return { left: 0 }; },
+    focus() {},
+    releasePointerCapture() {},
+    setPointerCapture() {}
+  };
+  return node;
+}
+function getElement(id) {
+  if (!elements.has(id)) {
+    elements.set(id, makeElement('div', id));
+  }
+  return elements.get(id);
+}
+global.window = {
+  location: { pathname: '/Users/test/stonr/app/index.html' },
+  addEventListener() {},
+  removeEventListener() {},
+  wizardry: null
+};
+global.document = {
+  querySelector(selector) {
+    if (selector === '.shell') return getElement('shell');
+    if (selector === '.stage') return getElement('stage');
+    if (selector === '.runtime-panel') return getElement('runtime-panel');
+    return makeElement('div');
+  },
+  getElementById(id) { return getElement(id); },
+  createElement(tagName) { return makeElement(tagName); },
+  createTextNode(text) { return { textContent: text || '' }; },
+  createDocumentFragment() { return { children: [], appendChild(child) { this.children.push(child); } }; },
+  addEventListener() {},
+  body: { classList: classList() },
+  documentElement: { style: { setProperty() {} } },
+  visibilityState: 'visible'
+};
+global.requestAnimationFrame = function () { return 1; };
+global.setTimeout = function () { return 1; };
+global.clearTimeout = function () {};
+global.setInterval = function () { return 1; };
+global.clearInterval = function () {};
+Function(src)();
+window.__stonr_render_test.state.bridge = false;
+window.__stonr_render_test.state.activeSection = 'relay';
+window.__stonr_render_test.renderActiveSection();
+console.log(JSON.stringify({
+  title: getElement('active-title').textContent,
+  childCount: getElement('section-content').children.length
+}));
+"#;
+    let script = script_template.replace("__APP_JS_PATH__", &app_js_path);
+    let output = run_node(&script);
+    assert_eq!(
+        output.trim(),
+        r#"{"title":"Relay Behavior","childCount":1}"#
+    );
 }

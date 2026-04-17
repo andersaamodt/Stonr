@@ -3621,8 +3621,9 @@
           if (node && node.field && node.field.collapseWhenUnavailable) {
             node.wrap.classList.remove('field-no-transition');
           }
+        });
       });
-    });
+    }
   }
 
   function appSupportLockByEnvKey(envKey) {
@@ -3833,7 +3834,6 @@
       syncFieldDependencies();
       renderActiveSection(false);
     }
-  }
   }
 
   function formatList(value) {
