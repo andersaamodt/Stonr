@@ -63,6 +63,16 @@ pub struct BackupManifest {
     pub included_paths: Vec<String>,
 }
 
+/// Outcome of a cooperative background retention pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetentionPassOutcome {
+    Disabled,
+    WithinLimits,
+    Busy,
+    Changed,
+    Applied(usize),
+}
+
 impl Store {
     /// Create a new store rooted at `root`.
     #[allow(dead_code)]
@@ -265,45 +275,64 @@ impl Store {
         self.enforce_retention_locked()
     }
 
+    /// Apply retention without waiting on the mutation lock when the store is busy.
+    pub fn enforce_retention_background(&self) -> Result<RetentionPassOutcome> {
+        if self.max_stored_events.is_none() && self.max_stored_event_bytes.is_none() {
+            let (current_events, current_bytes) = self.read_stats_cache()?.unwrap_or((0, 0));
+            self.write_retention_status_from_counts(current_events, current_bytes, None, None)?;
+            return Ok(RetentionPassOutcome::Disabled);
+        }
+
+        let records = self.sorted_event_records()?;
+        let total_events = records.len();
+        let total_bytes: u64 = records.iter().map(|record| record.size_bytes).sum();
+        if !self.retention_limits_exceeded(total_events, total_bytes) {
+            self.write_retention_status_from_counts(total_events, total_bytes, None, None)?;
+            return Ok(RetentionPassOutcome::WithinLimits);
+        }
+
+        let Some(_lock) = self.try_mutation_lock()? else {
+            return Ok(RetentionPassOutcome::Busy);
+        };
+        if let Some((current_events, current_bytes)) = self.read_stats_cache()? {
+            if current_events != total_events || current_bytes != total_bytes {
+                return Ok(RetentionPassOutcome::Changed);
+            }
+        }
+
+        let removed = self.enforce_retention_from_records(records)?;
+        Ok(RetentionPassOutcome::Applied(removed))
+    }
+
     fn enforce_retention_locked(&self) -> Result<usize> {
         if self.max_stored_events.is_none() && self.max_stored_event_bytes.is_none() {
             let (current_events, current_bytes) = self.read_stats_cache()?.unwrap_or((0, 0));
             self.write_retention_status_from_counts(current_events, current_bytes, None, None)?;
             return Ok(0);
         }
-        let mut records = self.load_event_records()?;
+        self.enforce_retention_from_records(self.sorted_event_records()?)
+    }
+
+    fn enforce_retention_from_records(&self, records: Vec<StoredEventRecord>) -> Result<usize> {
         let mut total_bytes: u64 = records.iter().map(|record| record.size_bytes).sum();
         let mut total_events = records.len();
         let mut removed = 0usize;
-        records.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        let mut kept = Vec::with_capacity(records.len());
 
-        for record in &records {
-            let over_events = self
-                .max_stored_events
-                .map(|limit| total_events > limit)
-                .unwrap_or(false);
-            let over_bytes = self
-                .max_stored_event_bytes
-                .map(|limit| total_bytes > limit)
-                .unwrap_or(false);
-            if !over_events && !over_bytes {
-                break;
-            }
-            if self.event_is_retention_protected(&record.event) {
+        for record in records {
+            if self.retention_limits_exceeded(total_events, total_bytes)
+                && !self.event_is_retention_protected(&record.event)
+            {
+                fs::remove_file(&record.path)?;
+                total_events = total_events.saturating_sub(1);
+                total_bytes = total_bytes.saturating_sub(record.size_bytes);
+                removed += 1;
                 continue;
             }
-            fs::remove_file(&record.path)?;
-            total_events = total_events.saturating_sub(1);
-            total_bytes = total_bytes.saturating_sub(record.size_bytes);
-            removed += 1;
+            kept.push(record);
         }
         if removed > 0 {
-            self.rewrite_event_log(records.into_iter().skip(removed))?;
-            self.rebuild_metadata()?;
+            self.rebuild_metadata_from_records(&kept)?;
         } else {
             self.write_stats_cache(total_events, total_bytes)?;
         }
@@ -440,6 +469,11 @@ impl Store {
     }
 
     fn rebuild_metadata(&self) -> Result<()> {
+        let records = self.sorted_event_records()?;
+        self.rebuild_metadata_from_records(&records)
+    }
+
+    fn rebuild_metadata_from_records(&self, records: &[StoredEventRecord]) -> Result<()> {
         let index_dir = self.root.join("index");
         if index_dir.exists() {
             fs::remove_dir_all(&index_dir)?;
@@ -472,12 +506,6 @@ impl Store {
         fs::create_dir_all(self.root.join("mirror/kinds"))?;
         fs::create_dir_all(self.root.join("log"))?;
 
-        let mut records = self.load_event_records()?;
-        records.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then_with(|| left.id.cmp(&right.id))
-        });
         let log_path = self.root.join("log/events.ndjson");
         let mut log_file = fs::OpenOptions::new()
             .create(true)
@@ -496,26 +524,6 @@ impl Store {
             log_file.write_all(b"\n")?;
         }
         self.write_stats_cache(total_events, total_bytes)?;
-        Ok(())
-    }
-
-    fn rewrite_event_log<I>(&self, records: I) -> Result<()>
-    where
-        I: IntoIterator<Item = StoredEventRecord>,
-    {
-        let log_path = self.root.join("log/events.ndjson");
-        if let Some(parent) = log_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let mut log_file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(log_path)?;
-        for record in records {
-            serde_json::to_writer(&mut log_file, &record.event)?;
-            log_file.write_all(b"\n")?;
-        }
         Ok(())
     }
 
@@ -664,25 +672,45 @@ impl Store {
         fs::create_dir_all(&runtime_dir)?;
         let lock_path = runtime_dir.join("store.lock");
         for _ in 0..400 {
-            match fs::create_dir(&lock_path) {
+            match self.acquire_mutation_lock_once(&lock_path)? {
+                Some(lock) => return Ok(lock),
+                None => {
+                    thread::sleep(Duration::from_millis(25));
+                }
+            }
+        }
+        Err(anyhow!("timed out waiting for storage lock"))
+    }
+
+    fn try_mutation_lock(&self) -> Result<Option<MutationLock>> {
+        let runtime_dir = self.root.join("runtime");
+        fs::create_dir_all(&runtime_dir)?;
+        let lock_path = runtime_dir.join("store.lock");
+        self.acquire_mutation_lock_once(&lock_path)
+    }
+
+    fn acquire_mutation_lock_once(&self, lock_path: &Path) -> Result<Option<MutationLock>> {
+        loop {
+            match fs::create_dir(lock_path) {
                 Ok(()) => {
-                    if let Err(error) = write_lock_owner_pid(&lock_path) {
-                        let _ = fs::remove_dir_all(&lock_path);
+                    if let Err(error) = write_lock_owner_pid(lock_path) {
+                        let _ = fs::remove_dir_all(lock_path);
                         return Err(error);
                     }
-                    return Ok(MutationLock { path: lock_path });
+                    return Ok(Some(MutationLock {
+                        path: lock_path.to_path_buf(),
+                    }));
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     if lock_dir_should_break(&lock_path, MUTATION_LOCK_STALE_AFTER) {
-                        let _ = fs::remove_dir_all(&lock_path);
+                        let _ = fs::remove_dir_all(lock_path);
                         continue;
                     }
-                    thread::sleep(Duration::from_millis(25));
+                    return Ok(None);
                 }
                 Err(error) => return Err(error.into()),
             }
         }
-        Err(anyhow!("timed out waiting for storage lock"))
     }
 
     fn load_event_records(&self) -> Result<Vec<StoredEventRecord>> {
@@ -733,6 +761,26 @@ impl Store {
             }
         }
         Ok(records)
+    }
+
+    fn sorted_event_records(&self) -> Result<Vec<StoredEventRecord>> {
+        let mut records = self.load_event_records()?;
+        records.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(records)
+    }
+
+    fn retention_limits_exceeded(&self, total_events: usize, total_bytes: u64) -> bool {
+        self.max_stored_events
+            .map(|limit| total_events > limit)
+            .unwrap_or(false)
+            || self
+                .max_stored_event_bytes
+                .map(|limit| total_bytes > limit)
+                .unwrap_or(false)
     }
 
     /// Update text-file indexes and latest pointers for an event.
@@ -1389,7 +1437,10 @@ pub(crate) fn verify_signed_event(ev: &Event) -> Result<()> {
 mod tests {
     use super::*;
     use secp256k1::{Keypair, Message, Secp256k1};
-    use std::{fs, time::Instant};
+    use std::{
+        fs,
+        time::{Duration, Instant},
+    };
     use tempfile::TempDir;
 
     fn sample_event(id: &str, pubkey: &str, kind: u32, dtag: Option<&str>, created: u64) -> Event {
@@ -1826,6 +1877,76 @@ mod tests {
             .unwrap();
         let ids: Vec<String> = res.into_iter().map(|event| event.id).collect();
         assert_eq!(ids, vec!["cc33".to_string(), "bb22".to_string()]);
+        assert!(!store.event_path("aa11").exists());
+        assert!(store.event_path("bb22").exists());
+        assert!(store.event_path("cc33").exists());
+    }
+
+    #[test]
+    fn background_retention_skips_when_store_is_busy() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(dir.path().to_path_buf(), false, Some(2), None);
+        store.init().unwrap();
+        store
+            .ingest(&sample_event("aa11", "p1", 1, None, 10))
+            .unwrap();
+        store
+            .ingest(&sample_event("bb22", "p1", 1, None, 20))
+            .unwrap();
+        store
+            .ingest(&sample_event("cc33", "p1", 1, None, 30))
+            .unwrap();
+
+        let _lock = store.mutation_lock().unwrap();
+        let started = Instant::now();
+        let outcome = store.enforce_retention_background().unwrap();
+
+        assert_eq!(outcome, RetentionPassOutcome::Busy);
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert!(store.event_path("aa11").exists());
+    }
+
+    #[test]
+    fn background_retention_skips_stale_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(dir.path().to_path_buf(), false, Some(2), None);
+        store.init().unwrap();
+        store
+            .ingest(&sample_event("aa11", "p1", 1, None, 10))
+            .unwrap();
+        store
+            .ingest(&sample_event("bb22", "p1", 1, None, 20))
+            .unwrap();
+        store
+            .ingest(&sample_event("cc33", "p1", 1, None, 30))
+            .unwrap();
+        fs::write(dir.path().join("runtime/events-count.cache"), "999").unwrap();
+        fs::write(dir.path().join("runtime/events-bytes.cache"), "999").unwrap();
+
+        let outcome = store.enforce_retention_background().unwrap();
+
+        assert_eq!(outcome, RetentionPassOutcome::Changed);
+        assert!(store.event_path("aa11").exists());
+    }
+
+    #[test]
+    fn background_retention_applies_oldest_first() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::with_limits(dir.path().to_path_buf(), false, Some(2), None);
+        store.init().unwrap();
+        store
+            .ingest(&sample_event("aa11", "p1", 1, None, 10))
+            .unwrap();
+        store
+            .ingest(&sample_event("bb22", "p1", 1, None, 20))
+            .unwrap();
+        store
+            .ingest(&sample_event("cc33", "p1", 1, None, 30))
+            .unwrap();
+
+        let outcome = store.enforce_retention_background().unwrap();
+
+        assert_eq!(outcome, RetentionPassOutcome::Applied(1));
         assert!(!store.event_path("aa11").exists());
         assert!(store.event_path("bb22").exists());
         assert!(store.event_path("cc33").exists());

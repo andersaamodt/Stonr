@@ -147,8 +147,12 @@ fn load_list_file(path: &Path) -> Result<AppSupportListFile> {
             dedup_strings(&mut list.paths);
             Ok(list)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(AppSupportListFile::default()),
-        Err(error) => Err(error).with_context(|| format!("reading app support list {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(AppSupportListFile::default())
+        }
+        Err(error) => {
+            Err(error).with_context(|| format!("reading app support list {}", path.display()))
+        }
     }
 }
 
@@ -193,7 +197,10 @@ fn parse_support_file(path: &Path) -> Result<AppSupportProfile> {
         name,
         path: path.to_path_buf(),
         description,
-        locked_keys: settings.into_iter().map(|setting| setting.env_key).collect(),
+        locked_keys: settings
+            .into_iter()
+            .map(|setting| setting.env_key)
+            .collect(),
     })
 }
 
@@ -248,7 +255,10 @@ fn normalize_setting(env_key: &str, value: &Value) -> Result<NormalizedSetting> 
             if parse_bool_value(value)? { "1" } else { "0" }.to_string(),
         )
     } else if is_csv_string_key(&key) {
-        (MergeKind::CsvStrings, parse_string_list_value(value)?.join(","))
+        (
+            MergeKind::CsvStrings,
+            parse_string_list_value(value)?.join(","),
+        )
     } else if is_csv_u32_key(&key) {
         (
             MergeKind::CsvU32,
@@ -379,7 +389,11 @@ fn parse_u32_list_value(value: &Value) -> Result<Vec<u32>> {
                 if let Some(number) = item.as_u64() {
                     values.push(number as u32);
                 } else if let Some(text) = item.as_str() {
-                    values.push(text.trim().parse::<u32>().context("expected u32 list item")?);
+                    values.push(
+                        text.trim()
+                            .parse::<u32>()
+                            .context("expected u32 list item")?,
+                    );
                 } else {
                     bail!("expected a u32 or string u32 in array");
                 }
@@ -598,10 +612,7 @@ mod tests {
         fs::write(
             &list_path,
             serde_json::to_string(&AppSupportListFile {
-                paths: vec![
-                    binder.display().to_string(),
-                    blossom.display().to_string(),
-                ],
+                paths: vec![binder.display().to_string(), blossom.display().to_string()],
             })
             .unwrap(),
         )

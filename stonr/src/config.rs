@@ -1,6 +1,10 @@
 //! Configuration loading from `.env` files.
 
-use std::{collections::HashMap, fs, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use serde::Serialize;

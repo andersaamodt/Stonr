@@ -450,7 +450,10 @@ fn params_to_query(params: QueryParams) -> Query {
     use serde_json::Value;
     let mut obj = serde_json::Map::new();
     if let Some(ids) = params.ids {
-        let arr = ids.split(',').map(|s| Value::String(s.to_string())).collect();
+        let arr = ids
+            .split(',')
+            .map(|s| Value::String(s.to_string()))
+            .collect();
         obj.insert("ids".into(), Value::Array(arr));
     }
     if let Some(a) = params.authors {

@@ -86,17 +86,22 @@ fn rail_listboxes_stay_focusable_without_nested_selection_cards() {
     assert!(app_js.contains("els.themePickerBtn.addEventListener('keydown'"));
     assert!(app_js.contains("cycleTheme(event.key === 'ArrowDown' ? 1 : -1);"));
     assert!(app_js.contains("var TAB_IDS = ['home', 'discover', 'compose'];"));
-    assert!(app_js.contains("{ id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' }"));
+    assert!(
+        app_js.contains("{ id: 'compose', label: 'Compose', icon: 'assets/compose-outline.svg' }")
+    );
     assert!(app_js.contains("{ id: 'inbox', label: 'Inbox', icon: 'assets/inbox-outline.svg' }"));
     assert!(app_js.contains("setActiveTab('compose', false);"));
     assert!(app_js.contains("runLibraryListView('inbox').catch(function () {"));
-    assert!(app_js.contains("scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' })"));
+    assert!(app_js
+        .contains("scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' })"));
     assert!(app_js.contains("starBtn.className = 'feed-icon-btn';"));
     assert!(!app_js.contains("listBtn.textContent = 'Add To List';"));
     assert!(app_js.contains("function nearDivider(clientX)"));
     assert!(app_js.contains("workspace.addEventListener('pointerdown'"));
     assert!(app_js.contains("function runLibraryListView(listName)"));
-    assert!(app_js.contains("safeBackend('library-list-folder-events', [name], 'Failed to load list')"));
+    assert!(
+        app_js.contains("safeBackend('library-list-folder-events', [name], 'Failed to load list')")
+    );
     assert!(app_js.contains("setRailSelection('following', state.activeFollowingPubkey);"));
     assert!(app_js.contains("setRailSelection('list', state.selectedListName);"));
     assert!(app_js.contains("String(row && row.name ? row.name : '').trim() !== 'inbox'"));
@@ -136,7 +141,10 @@ fn first_run_surface_offers_recommended_relays_notice() {
 
 #[test]
 fn backend_prefs_expose_recommended_relays_notice_state() {
-    let backend_sh = read_file(&format!("{}/../app/scripts/onstr-backend.sh", env!("CARGO_MANIFEST_DIR")));
+    let backend_sh = read_file(&format!(
+        "{}/../app/scripts/onstr-backend.sh",
+        env!("CARGO_MANIFEST_DIR")
+    ));
 
     assert!(backend_sh.contains("rail_width=$(pref_get rail_width"));
     assert!(backend_sh.contains("printf 'rail_width=%s\\n'"));
@@ -156,6 +164,8 @@ fn note_compose_does_not_inject_title_shorthand_tags() {
     let app_js = read_file(&format!("{}/../app/app.js", env!("CARGO_MANIFEST_DIR")));
 
     assert!(!app_js.contains("composeTagsWithName"));
-    assert!(app_js.contains("return ['compose-note', [content, String(els.composeTags.value || '').trim(), draft]];"));
+    assert!(app_js.contains(
+        "return ['compose-note', [content, String(els.composeTags.value || '').trim(), draft]];"
+    ));
     assert!(app_js.contains("return ['compose-longform', [name, identifier, longformContent, String(els.composeSummary.value || '').trim(), draft]];"));
 }

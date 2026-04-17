@@ -528,11 +528,7 @@ fn app_support_add_validates_and_persists_profile() {
     )
     .unwrap();
 
-    let output = run_backend(&[
-        "app-support-add",
-        &env_path,
-        support_path.to_str().unwrap(),
-    ]);
+    let output = run_backend(&["app-support-add", &env_path, support_path.to_str().unwrap()]);
     let body: Value = serde_json::from_str(&output).unwrap();
     assert_eq!(body["profiles"].as_array().unwrap().len(), 1);
     let list_path = dir.path().join("relay.app-support.json");
@@ -552,11 +548,7 @@ fn app_support_add_rejects_invalid_profile() {
     fs::write(&support_path, "name: Bad\nsettings:\n  NOPE: true\n").unwrap();
 
     let output = run_backend_status_with_env(
-        &[
-            "app-support-add",
-            &env_path,
-            support_path.to_str().unwrap(),
-        ],
+        &["app-support-add", &env_path, support_path.to_str().unwrap()],
         &[],
     );
     assert!(!output.status.success());

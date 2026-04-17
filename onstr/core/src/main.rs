@@ -783,8 +783,15 @@ async fn handle_discover(cmd: DiscoverCommand, paths: &Paths) -> Result<()> {
                 print_json(&json!({"ok": true, "needs_relay": true, "events": []}));
                 return Ok(());
             }
-            let filter =
-                build_filter(None, None, Some(args.term.as_str()), None, None, args.limit, None);
+            let filter = build_filter(
+                None,
+                None,
+                Some(args.term.as_str()),
+                None,
+                None,
+                args.limit,
+                None,
+            );
             let events = fetch_events_ws(&relays.home, &filter, 10)
                 .await
                 .unwrap_or_default();

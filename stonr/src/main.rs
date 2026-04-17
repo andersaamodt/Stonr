@@ -2,8 +2,8 @@
 //! ingesting events, serving HTTP/WebSocket endpoints, mirroring from upstream
 //! relays, and signature verification.
 
-mod autoconfig;
 mod auth;
+mod autoconfig;
 mod blossom;
 mod config;
 mod deploy;
@@ -485,27 +485,33 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 let retention_cfg = cfg.clone();
                 tokio::spawn(async move {
                     loop {
-                        let result = retention_store.enforce_retention().and_then(|_| {
-                            let visible = retention_store.query_with_policy(
-                                storage::Query {
-                                    ids: None,
-                                    authors: None,
-                                    kinds: None,
-                                    d: None,
-                                    t: None,
-                                    tags: vec![],
-                                    search: None,
-                                    since: None,
-                                    until: None,
-                                    limit: None,
-                                },
-                                retention_cfg.delete_enabled(),
-                                retention_cfg.expiration_enabled(),
-                            )?;
-                            retention_store.files().rebuild_references(&visible)?;
-                            retention_store.files().prune(&retention_cfg, false)?;
-                            Ok(())
-                        });
+                        let result =
+                            retention_store
+                                .enforce_retention_background()
+                                .and_then(|outcome| match outcome {
+                                    storage::RetentionPassOutcome::Applied(_) => {
+                                        let visible = retention_store.query_with_policy(
+                                            storage::Query {
+                                                ids: None,
+                                                authors: None,
+                                                kinds: None,
+                                                d: None,
+                                                t: None,
+                                                tags: vec![],
+                                                search: None,
+                                                since: None,
+                                                until: None,
+                                                limit: None,
+                                            },
+                                            retention_cfg.delete_enabled(),
+                                            retention_cfg.expiration_enabled(),
+                                        )?;
+                                        retention_store.files().rebuild_references(&visible)?;
+                                        retention_store.files().prune(&retention_cfg, false)?;
+                                        Ok(())
+                                    }
+                                    _ => Ok(()),
+                                });
                         if let Err(error) = result {
                             crate::log::warn(
                                 "retention",
