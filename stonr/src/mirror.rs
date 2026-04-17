@@ -445,6 +445,7 @@ async fn mirror_site_comments_once(
     write_mirror_connecting(&cfg.store_root, &cursor_key, &relay, "site-comments")?;
     let post_events = store.query_with_policy(
         Query {
+            ids: None,
             authors: Some(authors),
             kinds: Some(vec![30023]),
             d: None,
@@ -1998,6 +1999,7 @@ mod tests {
         let ingested = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: None,
                     kinds: Some(vec![1]),
                     d: None,

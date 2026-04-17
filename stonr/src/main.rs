@@ -54,6 +54,9 @@ enum Commands {
     Reindex,
     /// Query stored events from the local file-backed store.
     Query {
+        /// Comma-separated event ids.
+        #[arg(long)]
+        ids: Option<String>,
         /// Comma-separated author pubkeys.
         #[arg(long)]
         authors: Option<String>,
@@ -169,6 +172,7 @@ enum MirrorCursorCommand {
 }
 
 struct QueryArgs {
+    ids: Option<String>,
     authors: Option<String>,
     kinds: Option<String>,
     d: Option<String>,
@@ -181,6 +185,17 @@ struct QueryArgs {
 
 fn cli_query(args: QueryArgs) -> storage::Query {
     let mut obj = serde_json::Map::new();
+    if let Some(ids) = args.ids {
+        obj.insert(
+            "ids".into(),
+            Value::Array(
+                ids.split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(|value| Value::String(value.to_string()))
+                    .collect(),
+            ),
+        );
+    }
     if let Some(authors) = args.authors {
         obj.insert(
             "authors".into(),
@@ -264,6 +279,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             store.reindex()?;
             let visible = store.query_with_policy(
                 storage::Query {
+                    ids: None,
                     authors: None,
                     kinds: None,
                     d: None,
@@ -281,6 +297,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             store.files().prune(&cfg, false)?;
         }
         Commands::Query {
+            ids,
             authors,
             kinds,
             d,
@@ -294,6 +311,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let q = apply_query_policy(
                 &cfg,
                 cli_query(QueryArgs {
+                    ids,
                     authors,
                     kinds,
                     d,
@@ -425,6 +443,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             store.enforce_retention()?;
             let visible = store.query_with_policy(
                 storage::Query {
+                    ids: None,
                     authors: None,
                     kinds: None,
                     d: None,
@@ -469,6 +488,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                         let result = retention_store.enforce_retention().and_then(|_| {
                             let visible = retention_store.query_with_policy(
                                 storage::Query {
+                                    ids: None,
                                     authors: None,
                                     kinds: None,
                                     d: None,

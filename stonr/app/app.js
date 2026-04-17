@@ -781,6 +781,10 @@
   }
 
   function revealBootUi() {
+    if (window.__stonrBootFallbackTimer) {
+      clearTimeout(window.__stonrBootFallbackTimer);
+      window.__stonrBootFallbackTimer = null;
+    }
     if (state.bootWatchdogTimer) {
       clearTimeout(state.bootWatchdogTimer);
       state.bootWatchdogTimer = null;

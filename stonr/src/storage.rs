@@ -889,6 +889,9 @@ impl Store {
         let search = q.search.clone();
         // Collect ID sets for each filter category and intersect them below.
         let mut sets: Vec<std::collections::HashSet<String>> = vec![];
+        if let Some(ids) = &q.ids {
+            sets.push(ids.iter().cloned().collect());
+        }
         if let Some(authors) = &q.authors {
             sets.push(self.load_ids("index/by-author", authors)?);
         }
@@ -1228,6 +1231,7 @@ fn read_ids(path: &Path) -> Result<std::collections::HashSet<String>> {
 /// Query parameters accepted by both HTTP and WebSocket interfaces.
 #[derive(Clone, Debug)]
 pub struct Query {
+    pub ids: Option<Vec<String>>,
     pub authors: Option<Vec<String>>,
     pub kinds: Option<Vec<u32>>,
     pub d: Option<String>,
@@ -1244,6 +1248,7 @@ impl Query {
     pub fn from_value(val: &Value) -> Self {
         let filter = Filter::from_value(val);
         Query {
+            ids: filter.ids,
             authors: filter.authors,
             kinds: filter.kinds,
             d: filter.d,
@@ -1471,6 +1476,7 @@ mod tests {
         store.ingest(&e2).unwrap();
         let res = store
             .query(Query {
+                ids: None,
                 authors: Some(vec!["p1".into()]),
                 kinds: Some(vec![30023]),
                 d: Some("s2".into()),
@@ -1549,6 +1555,7 @@ mod tests {
         assert_eq!(latest, "bb22");
         let res = store
             .query(Query {
+                ids: None,
                 authors: Some(vec!["p1".into()]),
                 kinds: Some(vec![30023]),
                 d: Some("slug".into()),
@@ -1621,6 +1628,7 @@ mod tests {
         store.ingest(&e3).unwrap();
         let res = store
             .query(Query {
+                ids: None,
                 authors: Some(vec!["p1".into()]),
                 kinds: Some(vec![1]),
                 d: None,
@@ -1647,6 +1655,7 @@ mod tests {
         store.ingest(&e2).unwrap();
         let res = store
             .query(Query {
+                ids: None,
                 authors: None,
                 kinds: None,
                 d: None,
@@ -1660,6 +1669,33 @@ mod tests {
             .unwrap();
         let ids: Vec<String> = res.into_iter().map(|event| event.id).collect();
         assert_eq!(ids, vec!["bb22".to_string(), "aa11".to_string()]);
+    }
+
+    #[test]
+    fn query_by_ids_returns_only_requested_events() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let e1 = sample_event("aa11", "p1", 1, None, 10);
+        let e2 = sample_event("bb22", "p2", 1, None, 20);
+        store.ingest(&e1).unwrap();
+        store.ingest(&e2).unwrap();
+        let res = store
+            .query(Query {
+                ids: Some(vec!["aa11".into()]),
+                authors: None,
+                kinds: None,
+                d: None,
+                t: None,
+                tags: vec![],
+                search: None,
+                since: None,
+                until: None,
+                limit: None,
+            })
+            .unwrap();
+        let ids: Vec<String> = res.into_iter().map(|event| event.id).collect();
+        assert_eq!(ids, vec!["aa11".to_string()]);
     }
 
     #[test]
@@ -1776,6 +1812,7 @@ mod tests {
 
         let res = store
             .query(Query {
+                ids: None,
                 authors: Some(vec!["p1".into()]),
                 kinds: Some(vec![1]),
                 d: None,
@@ -1822,6 +1859,7 @@ mod tests {
         let events = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: None,
                     kinds: Some(vec![1]),
                     d: None,
@@ -1959,6 +1997,7 @@ mod tests {
         restored.restore_from(&backup_root).unwrap();
         let events = restored
             .query(Query {
+                ids: None,
                 authors: Some(vec!["p1".into()]),
                 kinds: Some(vec![1]),
                 d: None,
@@ -2010,6 +2049,7 @@ mod tests {
         let visible = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: Some(vec!["p1".into()]),
                     kinds: Some(vec![1]),
                     d: None,
@@ -2058,6 +2098,7 @@ mod tests {
         let visible = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: Some(vec!["p1".into()]),
                     kinds: Some(vec![1, 5]),
                     d: None,
@@ -2101,6 +2142,7 @@ mod tests {
         let visible = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: Some(vec!["p1".into()]),
                     kinds: Some(vec![30023]),
                     d: Some("slug".into()),
@@ -2139,6 +2181,7 @@ mod tests {
         let visible = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: Some(vec!["p1".into()]),
                     kinds: Some(vec![1]),
                     d: None,
@@ -2220,6 +2263,7 @@ mod tests {
         let recent = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: None,
                     kinds: None,
                     d: None,
@@ -2240,6 +2284,7 @@ mod tests {
         let searched = store
             .query_with_policy(
                 Query {
+                    ids: None,
                     authors: None,
                     kinds: None,
                     d: None,

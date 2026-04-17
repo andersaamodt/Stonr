@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stonr Control</title>
-  <link rel="stylesheet" href="style.css?v=stonr-control-20260322i">
+  <link rel="stylesheet" href="style.css?v=stonr-control-20260416a">
 </head>
 <body class="stonr-booting">
   <div class="boot-splash" aria-hidden="true">
     <div class="boot-mark">
-      <img src="assets/icons/web/icon-192.png" alt="Stonr logo">
+      <img src="assets/forge-icon.png?v=stonr-control-20260416a" alt="Stonr logo">
     </div>
   </div>
   <div class="shell">
@@ -84,6 +84,19 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="save-status" class="save-status" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="app.js?v=stonr-control-20260322l"></script>
+  <script>
+    window.__stonrBootFallbackTimer = setTimeout(function () {
+      if (!document.body.classList.contains('stonr-booting')) {
+        return;
+      }
+      document.body.classList.remove('stonr-booting');
+      var toast = document.getElementById('toast');
+      if (toast) {
+        toast.textContent = 'Startup stalled. Showing the UI in fallback mode.';
+        toast.className = 'toast show bad';
+      }
+    }, 3200);
+  </script>
+  <script src="app.js?v=stonr-control-20260416a"></script>
 </body>
 </html>

@@ -415,6 +415,8 @@ fn nip_capability_enabled(settings: &Settings, id: &str) -> bool {
 /// URL query parameters accepted by the `/query` endpoint.
 #[derive(Deserialize)]
 struct QueryParams {
+    /// Comma-separated event ids.
+    ids: Option<String>,
     /// Comma-separated hex public keys.
     authors: Option<String>,
     /// Comma-separated kind numbers (e.g. `1,30023`).
@@ -436,6 +438,7 @@ struct QueryParams {
 /// Convert query string parameters into a [`Query`] understood by the store.
 ///
 /// Supported URL parameters mirror Nostr filter fields:
+/// - `ids` – comma-separated event ids
 /// - `authors` – comma-separated list of public keys
 /// - `kinds` – comma-separated list of kind numbers
 /// - `d` / `t` – single `#d` or `#t` tag value
@@ -446,6 +449,10 @@ struct QueryParams {
 fn params_to_query(params: QueryParams) -> Query {
     use serde_json::Value;
     let mut obj = serde_json::Map::new();
+    if let Some(ids) = params.ids {
+        let arr = ids.split(',').map(|s| Value::String(s.to_string())).collect();
+        obj.insert("ids".into(), Value::Array(arr));
+    }
     if let Some(a) = params.authors {
         let arr = a.split(',').map(|s| Value::String(s.to_string())).collect();
         obj.insert("authors".into(), Value::Array(arr));

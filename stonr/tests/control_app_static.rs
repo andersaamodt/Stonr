@@ -54,9 +54,12 @@ fn splash_uses_stonr_logo_asset() {
     let index_html = read_file(&format!("{}/app/index.html", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR")));
     assert!(index_html.contains("class=\"boot-splash\""));
-    assert!(index_html.contains("assets/icons/web/icon-192.png"));
-    assert!(!index_html.contains("<div class=\"boot-mark\">\n      <svg"));
+    assert!(index_html.contains("assets/forge-icon.png?v=stonr-control-20260416a"));
+    assert!(index_html.contains("style.css?v=stonr-control-20260416a"));
+    assert!(index_html.contains("app.js?v=stonr-control-20260416a"));
+    assert!(index_html.contains("window.__stonrBootFallbackTimer = setTimeout(function () {"));
     assert!(app_js.contains("function withTimeout(promise, ms)"));
+    assert!(app_js.contains("if (window.__stonrBootFallbackTimer) {"));
     assert!(app_js.contains("state.bootWatchdogTimer = setTimeout(function () {"));
     assert!(app_js.contains("var prefs = await withTimeout(loadUiPrefs(), 1200).catch(function (error) {"));
     assert!(app_js.contains("loadAll().catch(function (error) {"));

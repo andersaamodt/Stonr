@@ -3,6 +3,7 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Filter {
+    pub ids: Option<Vec<String>>,
     pub authors: Option<Vec<String>>,
     pub kinds: Option<Vec<u32>>,
     pub d: Option<String>,
@@ -16,6 +17,11 @@ pub struct Filter {
 
 impl Filter {
     pub fn from_value(val: &Value) -> Self {
+        let ids = val.get("ids").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        });
         let authors = val.get("authors").and_then(|v| v.as_array()).map(|arr| {
             arr.iter()
                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -76,6 +82,7 @@ impl Filter {
             .and_then(|v| v.as_u64())
             .map(|value| value as usize);
         Self {
+            ids,
             authors,
             kinds,
             d,
@@ -100,6 +107,7 @@ mod tests {
     #[test]
     fn parses_filter_with_tags_and_bounds() {
         let value = serde_json::json!({
+            "ids": ["event-1"],
             "authors": ["a"],
             "kinds": [1, 30023],
             "#d": ["slug"],
@@ -110,6 +118,7 @@ mod tests {
             "limit": 30
         });
         let filter = Filter::from_value(&value);
+        assert_eq!(filter.ids.as_deref(), Some(&["event-1".to_string()][..]));
         assert_eq!(filter.authors.as_deref(), Some(&["a".to_string()][..]));
         assert_eq!(filter.kinds.as_deref(), Some(&[1, 30023][..]));
         assert_eq!(filter.d.as_deref(), Some("slug"));
