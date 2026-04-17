@@ -48,6 +48,9 @@
     events: [],
     eventsAnimatedIds: new Set(),
     eventsLastQuery: '',
+    appSupportStatus: { list_path: '', profiles: [], locks: [] },
+    appSupportLoading: false,
+    appSupportSelectedPath: '',
     eventsTotal: 0,
     eventsBytes: 0,
     diagnosticsLoading: false,
@@ -381,6 +384,15 @@
         textareaField('DENY_PUBKEYS', 'policy.blocked_pubkeys', 'Blocked authors', 'One pubkey per line', formatLineList, null, 'These pubkeys are always rejected, even if they would otherwise be allowed.')
       ],
       custom: 'moderation'
+    },
+    {
+      id: 'app-support',
+      label: 'App Support',
+      eyebrow: 'Clients',
+      title: 'App Support',
+      detail: 'Load support profiles that lock relay settings required by specific client apps.',
+      fields: [],
+      custom: 'app-support'
     },
     {
       id: 'diagnostics',
@@ -1014,6 +1026,9 @@
     state.eventsLastQuery = '';
     state.eventsStatsLoadedAt = 0;
     state.eventsStatsPromise = null;
+    state.appSupportStatus = { list_path: '', profiles: [], locks: [] };
+    state.appSupportLoading = false;
+    state.appSupportSelectedPath = '';
     state.diagnosticsLoading = false;
     state.diagnosticsLoadedOnce = false;
     state.diagnosticsMirror = [];
@@ -1273,6 +1288,9 @@
     if (section.id === 'general') {
       els.sectionContent.appendChild(renderDesktopSection());
       els.sectionContent.appendChild(renderGeneralRuntimeSection());
+    }
+    if (section.custom === 'app-support') {
+      els.sectionContent.appendChild(renderAppSupportSection());
     }
     if (section.custom === 'moderation') {
       els.sectionContent.appendChild(renderModerationSection());
@@ -1868,6 +1886,10 @@
   }
 
   function rawEnvValue(field) {
+    var lockedValue = appSupportLockedFieldValue(field);
+    if (typeof lockedValue !== 'undefined') {
+      return lockedValue;
+    }
     var value = rawEnvValueByKey(field.envKey);
     if (typeof value === 'undefined') {
       return undefined;
@@ -1897,6 +1919,10 @@
   }
 
   function resolvedFieldValue(field) {
+    var lockedValue = appSupportLockedFieldValue(field);
+    if (typeof lockedValue !== 'undefined') {
+      return lockedValue;
+    }
     var rawValue = rawEnvValue(field);
     if (typeof rawValue !== 'undefined') {
       return rawValue;
@@ -2601,6 +2627,117 @@
       moderationTextarea('file-hashes-deny', 'Denied file hashes', 'Reject exact blob hashes. Stored in the configured hash denylist file.')
     ].join('');
     bindModerationInputs(card);
+    return card;
+  }
+
+  function renderAppSupportSection() {
+    var card = document.createElement('section');
+    card.className = 'section-panel autosave-panel';
+    card.appendChild(renderCardHead('App Support', 'Load one or more YAML or JSON support files. Required settings are merged and locked automatically.'));
+
+    var stack = document.createElement('div');
+    stack.className = 'app-support-stack';
+
+    var listbox = document.createElement('div');
+    listbox.className = 'app-support-listbox';
+    listbox.setAttribute('role', 'listbox');
+    listbox.setAttribute('tabindex', state.bridge ? '0' : '-1');
+    listbox.setAttribute('aria-label', 'App support files');
+    bindAppSupportDropTarget(listbox);
+
+    if (state.appSupportLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'app-support-empty';
+      loading.innerHTML = '<span>Loading app support...</span><span class="action-spinner" aria-hidden="true"></span>';
+      listbox.appendChild(loading);
+    } else if (!state.appSupportStatus.profiles.length) {
+      var empty = document.createElement('p');
+      empty.className = 'app-support-empty';
+      empty.textContent = 'No app support files loaded. Add one below or drop a YAML/JSON file onto this list.';
+      listbox.appendChild(empty);
+    } else {
+      state.appSupportStatus.profiles.forEach(function (profile) {
+        var option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'app-support-option' + (state.appSupportSelectedPath === profile.path ? ' selected' : '');
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', state.appSupportSelectedPath === profile.path ? 'true' : 'false');
+        option.title = profile.path;
+        option.addEventListener('click', function () {
+          state.appSupportSelectedPath = profile.path;
+          renderActiveSection(false);
+        });
+
+        var name = document.createElement('strong');
+        name.textContent = profile.name;
+        option.appendChild(name);
+
+        var meta = document.createElement('span');
+        meta.className = 'app-support-option-meta';
+        meta.textContent = (profile.description || fileNameFromPath(profile.path)) + ' · ' + profile.locked_keys.length + ' locked setting' + (profile.locked_keys.length === 1 ? '' : 's');
+        option.appendChild(meta);
+
+        var path = document.createElement('span');
+        path.className = 'app-support-option-path';
+        path.textContent = profile.path;
+        option.appendChild(path);
+
+        listbox.appendChild(option);
+      });
+    }
+
+    stack.appendChild(listbox);
+
+    var actions = document.createElement('div');
+    actions.className = 'app-support-actions';
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'action mini';
+    add.textContent = '+';
+    add.title = 'Add an app support file';
+    add.disabled = !state.bridge || state.appSupportLoading;
+    add.addEventListener('click', function () {
+      browseAppSupportFile().catch(function (error) {
+        console.error(error);
+        toast(summarizeBackendError(error, 'Failed to add app support'), 'bad');
+      });
+    });
+    actions.appendChild(add);
+
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'action mini';
+    remove.textContent = '-';
+    remove.title = 'Remove the selected app support file';
+    remove.disabled = !state.bridge || state.appSupportLoading || !state.appSupportSelectedPath;
+    remove.addEventListener('click', function () {
+      removeSelectedAppSupportFile().catch(function (error) {
+        console.error(error);
+        toast(summarizeBackendError(error, 'Failed to remove app support'), 'bad');
+      });
+    });
+    actions.appendChild(remove);
+    stack.appendChild(actions);
+
+    var note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = state.appSupportStatus.locks.length
+      ? state.appSupportStatus.locks.length + ' settings are currently locked by active app support.'
+      : 'Drop only YAML or JSON text files here. Invalid files are rejected and show an error toast.';
+    stack.appendChild(note);
+
+    if (state.appSupportSelectedPath) {
+      var selected = findAppSupportProfile(state.appSupportSelectedPath);
+      if (selected) {
+        var detail = document.createElement('p');
+        detail.className = 'section-note';
+        detail.textContent = (selected.description || selected.name) + '. Unlock any required settings by removing this file from App Support.';
+        stack.appendChild(detail);
+      }
+    }
+
+    card.appendChild(stack);
     return card;
   }
 
@@ -3355,7 +3492,8 @@
       var node = state.fieldNodes[envKey];
       var unmetDependency = unmetFieldDependency(node.field);
       var disabledNip = disabledNipSupportKey(node.field);
-      var enabled = state.bridge && !unmetDependency && !disabledNip;
+      var appSupportLock = appSupportLockByEnvKey(node.field.envKey);
+      var enabled = state.bridge && !unmetDependency && !disabledNip && !appSupportLock;
       var collapsedByDependency = !!(node.field.collapseWhenUnavailable && unmetDependency);
       if (node.field.collapseWhenUnavailable) {
         node.wrap.classList.toggle('field-no-transition', suppressCollapseAnimation);
@@ -3375,46 +3513,46 @@
         node.button.disabled = !enabled || node.button.dataset.baseDisabled === '1';
       }
       node.wrap.classList.toggle('field-disabled', !enabled);
-      node.wrap.classList.toggle('field-dependency-disabled', !!unmetDependency);
+      node.wrap.classList.toggle('field-dependency-disabled', !!(unmetDependency || appSupportLock));
       node.wrap.classList.toggle('field-collapsed', collapsedByDependency);
       node.wrap.setAttribute('aria-disabled', enabled ? 'false' : 'true');
       node.wrap.setAttribute('aria-hidden', collapsedByDependency ? 'true' : 'false');
       if (node.nipPill) {
         var pillTitle = '';
-        if (disabledNip) {
+        if (appSupportLock) {
+          pillTitle = nipSummaries[node.nipPill.dataset.nipToken] || node.nipPill.dataset.nipToken;
+          node.nipPill.textContent = node.nipPill.dataset.nipToken;
+          node.nipPill.classList.remove('nip-disabled');
+          node.nipPill.title = pillTitle;
+          applyFieldHelpTitle(node, combinedHelpText(node.helpText, appSupportLockReason(appSupportLock)));
+        } else if (disabledNip) {
           var nipToken = nipTokenForSupportKey(disabledNip);
           var reason = nipToken + ' is disabled in NIP policies.';
           pillTitle = (nipSummaries[nipToken] ? nipSummaries[nipToken] + ' ' : '') + reason;
           node.nipPill.textContent = nipToken + ' disabled';
           node.nipPill.classList.add('nip-disabled');
           node.nipPill.title = pillTitle;
-          node.label.title = (node.helpText ? node.helpText + ' ' : '') + reason;
-          node.input.title = (node.helpText ? node.helpText + ' ' : '') + reason;
-          if (node.hint) {
-            node.hint.title = (node.helpText ? node.helpText + ' ' : '') + reason;
-          }
+          applyFieldHelpTitle(node, combinedHelpText(node.helpText, reason));
         } else if (unmetDependency) {
           var dependencyReason = dependencyReasonForKey(unmetDependency);
           pillTitle = (nipSummaries[node.nipPill.dataset.nipToken] ? nipSummaries[node.nipPill.dataset.nipToken] + ' ' : '') + dependencyReason;
           node.nipPill.textContent = node.nipPill.dataset.nipToken;
           node.nipPill.classList.remove('nip-disabled');
           node.nipPill.title = pillTitle;
-          node.label.title = (node.helpText ? node.helpText + ' ' : '') + dependencyReason;
-          node.input.title = (node.helpText ? node.helpText + ' ' : '') + dependencyReason;
-          if (node.hint) {
-            node.hint.title = (node.helpText ? node.helpText + ' ' : '') + dependencyReason;
-          }
+          applyFieldHelpTitle(node, combinedHelpText(node.helpText, dependencyReason));
         } else {
           pillTitle = nipSummaries[node.nipPill.dataset.nipToken] || node.nipPill.dataset.nipToken;
           node.nipPill.textContent = node.nipPill.dataset.nipToken;
           node.nipPill.classList.remove('nip-disabled');
           node.nipPill.title = pillTitle;
-          node.label.title = node.helpText;
-          node.input.title = node.helpText;
-          if (node.hint) {
-            node.hint.title = node.helpText;
-          }
+          applyFieldHelpTitle(node, node.helpText);
         }
+      } else if (appSupportLock) {
+        applyFieldHelpTitle(node, combinedHelpText(node.helpText, appSupportLockReason(appSupportLock)));
+      } else if (unmetDependency) {
+        applyFieldHelpTitle(node, combinedHelpText(node.helpText, dependencyReasonForKey(unmetDependency)));
+      } else {
+        applyFieldHelpTitle(node, node.helpText);
       }
     });
     if (suppressCollapseAnimation) {
@@ -3426,9 +3564,219 @@
           if (node && node.field && node.field.collapseWhenUnavailable) {
             node.wrap.classList.remove('field-no-transition');
           }
-        });
       });
+    });
+  }
+
+  function appSupportLockByEnvKey(envKey) {
+    var locks = (((state.appSupportStatus || {}).locks) || []);
+    for (var index = 0; index < locks.length; index += 1) {
+      if (locks[index].env_key === envKey) {
+        return locks[index];
+      }
     }
+    return null;
+  }
+
+  function appSupportLockedFieldValue(field) {
+    var lock = appSupportLockByEnvKey(field.envKey);
+    if (!lock) {
+      return undefined;
+    }
+    if (field.type === 'bool') {
+      return matchesBool(lock.value);
+    }
+    if (field.type === 'number') {
+      return lock.value === '' ? undefined : Number(lock.value);
+    }
+    return String(lock.value || '');
+  }
+
+  function appSupportLockReason(lock) {
+    var sources = (lock && lock.sources) || [];
+    var names = sources.length ? formatHumanList(sources) : 'an active app support profile';
+    return 'This feature is required by ' + names + '. Turn off support in App Support to unlock it.';
+  }
+
+  function combinedHelpText(base, extra) {
+    return base ? (base + ' ' + extra) : extra;
+  }
+
+  function applyFieldHelpTitle(node, text) {
+    var title = text || '';
+    if (node.label) {
+      node.label.title = title;
+    }
+    if (node.input) {
+      node.input.title = title;
+      node.input.setAttribute('aria-description', title);
+      if (node.field.type === 'radio') {
+        Array.prototype.slice.call(node.input.querySelectorAll('input[type="radio"]')).forEach(function (radio) {
+          radio.title = title;
+          radio.setAttribute('aria-description', title);
+        });
+      }
+    }
+    if (node.button) {
+      node.button.title = title;
+    }
+    if (node.hint) {
+      node.hint.title = title;
+    }
+  }
+
+  function formatHumanList(values) {
+    var items = (values || []).filter(Boolean);
+    if (!items.length) {
+      return '';
+    }
+    if (items.length === 1) {
+      return items[0];
+    }
+    if (items.length === 2) {
+      return items[0] + ' and ' + items[1];
+    }
+    return items.slice(0, -1).join(', ') + ', and ' + items[items.length - 1];
+  }
+
+  function findAppSupportProfile(path) {
+    var profiles = (((state.appSupportStatus || {}).profiles) || []);
+    for (var index = 0; index < profiles.length; index += 1) {
+      if (profiles[index].path === path) {
+        return profiles[index];
+      }
+    }
+    return null;
+  }
+
+  function fileNameFromPath(path) {
+    return String(path || '').split(/[\\/]/).filter(Boolean).pop() || String(path || '');
+  }
+
+  function isLikelyAppSupportFile(file) {
+    var type = String((file && file.type) || '').toLowerCase();
+    var name = String((file && file.name) || '').toLowerCase();
+    if (/\.ya?ml$|\.json$/.test(name)) {
+      return true;
+    }
+    if (!type) {
+      return false;
+    }
+    return type.indexOf('text/') === 0
+      || type === 'application/json'
+      || type === 'application/x-yaml'
+      || type === 'application/yaml'
+      || type === 'text/yaml'
+      || type === 'text/x-yaml';
+  }
+
+  function bindAppSupportDropTarget(node) {
+    if (!node) {
+      return;
+    }
+    node.addEventListener('dragenter', function (event) {
+      if (!state.bridge) {
+        return;
+      }
+      event.preventDefault();
+      node.classList.add('drop-active');
+    });
+    node.addEventListener('dragover', function (event) {
+      if (!state.bridge) {
+        return;
+      }
+      event.preventDefault();
+      node.classList.add('drop-active');
+    });
+    node.addEventListener('dragleave', function (event) {
+      if (!node.contains(event.relatedTarget)) {
+        node.classList.remove('drop-active');
+      }
+    });
+    node.addEventListener('drop', function (event) {
+      event.preventDefault();
+      node.classList.remove('drop-active');
+      handleAppSupportDrop(event).catch(function (error) {
+        console.error(error);
+        toast(summarizeBackendError(error, 'Failed to add dropped app support'), 'bad');
+      });
+    });
+  }
+
+  async function handleAppSupportDrop(event) {
+    if (!state.bridge) {
+      return;
+    }
+    var files = Array.prototype.slice.call((event.dataTransfer && event.dataTransfer.files) || []);
+    if (!files.length) {
+      toast('Drop a YAML or JSON app support file.', 'bad');
+      return;
+    }
+    var added = 0;
+    var rejected = 0;
+    for (var index = 0; index < files.length; index += 1) {
+      var file = files[index];
+      if (!isLikelyAppSupportFile(file)) {
+        rejected += 1;
+        continue;
+      }
+      var path = file.path || '';
+      if (!path) {
+        rejected += 1;
+        continue;
+      }
+      await addAppSupportFile(path, true);
+      added += 1;
+    }
+    if (!added) {
+      toast('Only YAML or JSON text files can be dropped here.', 'bad');
+    } else if (rejected) {
+      toast('Added ' + added + ' app support file' + (added === 1 ? '' : 's') + '. Skipped ' + rejected + ' invalid drop item' + (rejected === 1 ? '' : 's') + '.', 'good');
+    }
+  }
+
+  async function browseAppSupportFile() {
+    var initial = state.appSupportSelectedPath || state.envPath || '';
+    var chosen = String(await backend('choose-file', [initial])).trim();
+    if (!chosen) {
+      return;
+    }
+    await addAppSupportFile(chosen, false);
+  }
+
+  async function addAppSupportFile(path, silentSuccess) {
+    state.appSupportLoading = true;
+    renderActiveSection(false);
+    try {
+      await backend('app-support-add', [state.envPath, path]);
+      await loadConfigForBootFrame(state.configEditSeq);
+      if (!silentSuccess) {
+        toast('App support added.', 'good');
+      }
+    } finally {
+      state.appSupportLoading = false;
+      syncFieldDependencies();
+      renderActiveSection(false);
+    }
+  }
+
+  async function removeSelectedAppSupportFile() {
+    if (!state.appSupportSelectedPath) {
+      return;
+    }
+    state.appSupportLoading = true;
+    renderActiveSection(false);
+    try {
+      await backend('app-support-remove', [state.envPath, state.appSupportSelectedPath]);
+      state.appSupportSelectedPath = '';
+      await loadConfigForBootFrame(state.configEditSeq);
+      toast('App support removed.', 'good');
+    } finally {
+      state.appSupportLoading = false;
+      syncFieldDependencies();
+      renderActiveSection(false);
+    }
+  }
   }
 
   function formatList(value) {
@@ -3949,11 +4297,20 @@
   }
 
   async function loadConfigForBootFrame(editSeq) {
-    var loadedConfig = JSON.parse(await backend('load-config', [state.envPath]));
+    var results = await Promise.all([
+      backend('load-config', [state.envPath]),
+      backend('app-support-status', [state.envPath])
+    ]);
+    var loadedConfig = JSON.parse(results[0] || '{}');
+    var appSupportStatus = JSON.parse(results[1] || '{"list_path":"","profiles":[],"locks":[]}');
     if (editSeq !== state.configEditSeq) {
       return false;
     }
     state.config = loadedConfig;
+    state.appSupportStatus = appSupportStatus;
+    if (!findAppSupportProfile(state.appSupportSelectedPath)) {
+      state.appSupportSelectedPath = appSupportStatus.profiles.length ? appSupportStatus.profiles[0].path : '';
+    }
     return true;
   }
 

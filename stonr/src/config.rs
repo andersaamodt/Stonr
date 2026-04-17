@@ -1,6 +1,6 @@
 //! Configuration loading from `.env` files.
 
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::{Path, PathBuf}};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -187,7 +187,9 @@ pub enum MirrorMode {
 impl Settings {
     /// Load settings from the specified `.env` file.
     pub fn from_env(path: &str) -> Result<Self> {
-        let env = parse_env_file(path).context("reading env file")?;
+        let mut env = parse_env_file(path).context("reading env file")?;
+        crate::autoconfig::apply_env_overrides(Path::new(path), &mut env)
+            .context("applying app support overrides")?;
         let store_root = PathBuf::from(required_env(&env, "STORE_ROOT")?);
         let bind_http = required_env(&env, "BIND_HTTP")?;
         let bind_ws = required_env(&env, "BIND_WS")?;

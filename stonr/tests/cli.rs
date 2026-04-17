@@ -171,6 +171,8 @@ fn cli_help_lists_commands() {
         "serve",
         "reindex",
         "query",
+        "print-app-support",
+        "print-autoconfig",
         "mirror-status",
         "retention-status",
         "mirror-cursor",
@@ -207,6 +209,99 @@ fn retention_status_cli_reports_json() {
     let body: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(body["state"], "disabled");
     assert_eq!(body["current_events"], 0);
+}
+
+#[test]
+fn print_autoconfig_cli_parses_yaml_file() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let support_path = dir.path().join("binder.yaml");
+    fs::write(
+        &support_path,
+        concat!(
+            "name: Binder\n",
+            "description: Support Binder\n",
+            "settings:\n",
+            "  ENABLE_QUERY: true\n",
+            "  ENABLE_SEARCH: true\n",
+        ),
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args([
+            "--env",
+            &env_path,
+            "print-autoconfig",
+            "--file",
+            support_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(body["name"], "Binder");
+    assert_eq!(body["description"], "Support Binder");
+    assert!(body["locked_keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "ENABLE_QUERY"));
+}
+
+#[test]
+fn print_app_support_cli_merges_active_profiles() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let support_one = dir.path().join("binder.json");
+    let support_two = dir.path().join("blossom.yaml");
+    fs::write(
+        &support_one,
+        r#"{"name":"Binder","settings":{"ENABLE_QUERY":true,"ENABLE_SEARCH":true}}"#,
+    )
+    .unwrap();
+    fs::write(
+        &support_two,
+        concat!(
+            "name: Blossom\n",
+            "settings:\n",
+            "  ENABLE_BLOSSOM: true\n",
+            "  ENABLE_QUERY: false\n",
+        ),
+    )
+    .unwrap();
+    let list_path = dir.path().join("env.app-support.json");
+    fs::write(
+        &list_path,
+        serde_json::json!({
+            "paths": [
+                support_one.to_str().unwrap(),
+                support_two.to_str().unwrap()
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("stonr")
+        .unwrap()
+        .args(["--env", &env_path, "print-app-support"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(body["profiles"].as_array().unwrap().len(), 2);
+    let locks = body["locks"].as_array().unwrap();
+    let query = locks
+        .iter()
+        .find(|lock| lock["env_key"] == "ENABLE_QUERY")
+        .unwrap();
+    assert_eq!(query["value"], "1");
 }
 
 #[test]

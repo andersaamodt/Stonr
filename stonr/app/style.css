@@ -847,6 +847,67 @@ h4 {
   line-height: 1.35;
 }
 
+.app-support-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.app-support-listbox {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 12rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.56);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.app-support-listbox.drop-active {
+  border-color: color-mix(in srgb, var(--accent) 44%, white);
+  background: color-mix(in srgb, var(--accent) 10%, white);
+}
+
+.app-support-option {
+  display: grid;
+  gap: 0.18rem;
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.74);
+  text-align: left;
+}
+
+.app-support-option:hover,
+.app-support-option:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 30%, white);
+  background: #fff;
+}
+
+.app-support-option.selected {
+  border-color: color-mix(in srgb, var(--accent) 45%, white);
+  background: color-mix(in srgb, var(--accent) 10%, white);
+}
+
+.app-support-option-meta,
+.app-support-option-path,
+.app-support-empty {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.app-support-option-path {
+  overflow-wrap: anywhere;
+}
+
+.app-support-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
 .retention-apply-field {
   margin-top: -0.15rem;
 }

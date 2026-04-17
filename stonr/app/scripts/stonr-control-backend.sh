@@ -23,9 +23,13 @@ Usage: stonr-control-backend.sh COMMAND [ARGS...]
 
 Commands:
   choose-dir [INITIAL_PATH]
+  choose-file [INITIAL_PATH]
   doctor [ENV_PATH]
   get-ui-prefs
   set-ui-pref KEY VALUE
+  app-support-status [ENV_PATH]
+  app-support-add [ENV_PATH] FILE_PATH
+  app-support-remove [ENV_PATH] FILE_PATH
   service-autostart-status [ENV_PATH]
   service-autostart-enable [ENV_PATH]
   service-autostart-disable [ENV_PATH]
@@ -416,6 +420,39 @@ EOF
     return 0
   fi
   printf '%s\n' "stonr-control-backend: no directory picker available" >&2
+  exit 1
+}
+
+choose_file() {
+  initial=${1-}
+  if [ -n "$initial" ] && [ -f "$initial" ]; then
+    start_dir=$(dirname "$initial")
+  elif [ -n "$initial" ] && [ -d "$initial" ]; then
+    start_dir=$initial
+  else
+    start_dir=$(dirname "${initial:-$STONR_CONFIG_DIR}")
+    [ -d "$start_dir" ] || start_dir=$HOME
+  fi
+  if command -v osascript >/dev/null 2>&1; then
+    osascript <<EOF
+set startDir to POSIX file "$(printf '%s' "$start_dir" | sed "s/\"/\\\\\"/g")"
+tell application "System Events"
+  activate
+end tell
+set chosenFile to choose file with prompt "Choose app support file" default location startDir
+POSIX path of chosenFile
+EOF
+    return 0
+  fi
+  if command -v zenity >/dev/null 2>&1; then
+    zenity --file-selection --filename "$start_dir/"
+    return 0
+  fi
+  if command -v kdialog >/dev/null 2>&1; then
+    kdialog --getopenfilename "$start_dir"
+    return 0
+  fi
+  printf '%s\n' "stonr-control-backend: no file picker available" >&2
   exit 1
 }
 
@@ -972,6 +1009,56 @@ list_path() {
   esac
 }
 
+app_support_list_path() {
+  env_path=${1-}
+  dir=$(dirname "$env_path")
+  base=$(basename "$env_path")
+  stem=${base%.*}
+  if [ -z "$stem" ]; then
+    stem=relay
+  fi
+  printf '%s\n' "$dir/$stem.app-support.json"
+}
+
+normalize_absolute_path() {
+  path=${1-}
+  python3 - "$path" <<'PY'
+import os, sys
+path = sys.argv[1]
+if not path:
+    raise SystemExit(1)
+print(os.path.realpath(path))
+PY
+}
+
+update_app_support_list() {
+  list_path=${1-}
+  action=${2-}
+  candidate=${3-}
+  python3 - "$list_path" "$action" "$candidate" <<'PY'
+import json, os, sys
+list_path, action, candidate = sys.argv[1:4]
+paths = []
+if os.path.exists(list_path):
+    with open(list_path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if isinstance(payload, dict) and isinstance(payload.get("paths"), list):
+        paths = [str(item) for item in payload["paths"] if str(item).strip()]
+if action == "add":
+    if candidate not in paths:
+        paths.append(candidate)
+elif action == "remove":
+    paths = [item for item in paths if item != candidate]
+else:
+    raise SystemExit("unknown action")
+paths = sorted(dict.fromkeys(paths))
+os.makedirs(os.path.dirname(list_path) or ".", exist_ok=True)
+with open(list_path, "w", encoding="utf-8") as handle:
+    json.dump({"paths": paths}, handle, indent=2)
+    handle.write("\n")
+PY
+}
+
 maybe_bind_hash_denylist_path() {
   env_path=${1-}
   name=${2-}
@@ -998,6 +1085,9 @@ shift
 case "$cmd" in
   choose-dir)
     choose_dir "${1-}"
+    ;;
+  choose-file)
+    choose_file "${1-}"
     ;;
   get-ui-prefs)
     ensure_pref_dir
@@ -1038,6 +1128,42 @@ case "$cmd" in
     printf '%s\n' "store_root=$(store_root_from_env "$env_path")"
     printf '%s\n' "stonr_bin=$(resolve_stonr_bin)"
     status_kv "$env_path"
+    ;;
+  app-support-status)
+    env_path=$(resolve_env_path "${1-}")
+    normalize_env_file "$env_path"
+    run_stonr --env "$env_path" print-app-support
+    ;;
+  app-support-add)
+    env_path=$(resolve_env_path "${1-}")
+    candidate=${2-}
+    [ -n "$candidate" ] || {
+      printf '%s\n' "stonr-control-backend: app-support-add requires FILE_PATH" >&2
+      exit 2
+    }
+    normalize_env_file "$env_path"
+    candidate=$(normalize_absolute_path "$candidate")
+    [ -f "$candidate" ] || {
+      printf '%s\n' "stonr-control-backend: app support file not found: $candidate" >&2
+      exit 1
+    }
+    run_stonr --env "$env_path" print-autoconfig --file "$candidate" >/dev/null
+    list_path=$(app_support_list_path "$env_path")
+    update_app_support_list "$list_path" add "$candidate"
+    run_stonr --env "$env_path" print-app-support
+    ;;
+  app-support-remove)
+    env_path=$(resolve_env_path "${1-}")
+    candidate=${2-}
+    [ -n "$candidate" ] || {
+      printf '%s\n' "stonr-control-backend: app-support-remove requires FILE_PATH" >&2
+      exit 2
+    }
+    normalize_env_file "$env_path"
+    candidate=$(normalize_absolute_path "$candidate")
+    list_path=$(app_support_list_path "$env_path")
+    update_app_support_list "$list_path" remove "$candidate"
+    run_stonr --env "$env_path" print-app-support
     ;;
   load-config)
     env_path=$(resolve_env_path "${1-}")

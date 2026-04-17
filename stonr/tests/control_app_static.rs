@@ -56,3 +56,14 @@ fn splash_uses_stonr_logo_asset() {
     assert!(index_html.contains("assets/icons/web/icon-192.png"));
     assert!(!index_html.contains("<div class=\"boot-mark\">\n      <svg"));
 }
+
+#[test]
+fn app_support_section_and_locks_exist() {
+    let app_js = read_file(&format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR")));
+    let style_css = read_file(&format!("{}/app/style.css", env!("CARGO_MANIFEST_DIR")));
+    assert!(app_js.contains("id: 'app-support'"));
+    assert!(app_js.contains("Turn off support in App Support to unlock it."));
+    assert!(app_js.contains("function renderAppSupportSection()"));
+    assert!(style_css.contains(".app-support-listbox"));
+    assert!(style_css.contains(".app-support-option.selected"));
+}

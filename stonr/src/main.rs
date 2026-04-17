@@ -2,6 +2,7 @@
 //! ingesting events, serving HTTP/WebSocket endpoints, mirroring from upstream
 //! relays, and signature verification.
 
+mod autoconfig;
 mod auth;
 mod blossom;
 mod config;
@@ -83,6 +84,13 @@ enum Commands {
     },
     /// Print the effective parsed configuration as JSON.
     PrintConfig,
+    /// Print active app support profiles and merged field locks as JSON.
+    PrintAppSupport,
+    /// Validate and print one app support file as JSON.
+    PrintAutoconfig {
+        #[arg(long)]
+        file: String,
+    },
     /// Print per-upstream mirror health/status as JSON.
     MirrorStatus,
     /// Print structured retention/cap status as JSON.
@@ -308,6 +316,22 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::PrintConfig => {
             println!("{}", serde_json::to_string(&cfg)?);
+        }
+        Commands::PrintAppSupport => {
+            println!(
+                "{}",
+                serde_json::to_string(&crate::autoconfig::load_app_support_status(
+                    std::path::Path::new(&cli.env),
+                )?)?
+            );
+        }
+        Commands::PrintAutoconfig { file } => {
+            println!(
+                "{}",
+                serde_json::to_string(&crate::autoconfig::validate_support_file(
+                    std::path::Path::new(&file),
+                )?)?
+            );
         }
         Commands::MirrorStatus => {
             println!(

@@ -511,3 +511,55 @@ fn service_autostart_status_reports_active_for_running_launchd_job() {
     assert!(output.contains("loaded=1"));
     assert!(output.contains("active=1"));
 }
+
+#[test]
+fn app_support_add_validates_and_persists_profile() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let support_path = dir.path().join("binder.yaml");
+    fs::write(
+        &support_path,
+        concat!(
+            "name: Binder\n",
+            "settings:\n",
+            "  ENABLE_QUERY: true\n",
+            "  ENABLE_SEARCH: true\n",
+        ),
+    )
+    .unwrap();
+
+    let output = run_backend(&[
+        "app-support-add",
+        &env_path,
+        support_path.to_str().unwrap(),
+    ]);
+    let body: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(body["profiles"].as_array().unwrap().len(), 1);
+    let list_path = dir.path().join("relay.app-support.json");
+    let saved: Value = serde_json::from_str(&fs::read_to_string(list_path).unwrap()).unwrap();
+    let expected = fs::canonicalize(&support_path).unwrap();
+    assert_eq!(
+        saved["paths"].as_array().unwrap()[0].as_str().unwrap(),
+        expected.to_str().unwrap()
+    );
+}
+
+#[test]
+fn app_support_add_rejects_invalid_profile() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let support_path = dir.path().join("bad.yaml");
+    fs::write(&support_path, "name: Bad\nsettings:\n  NOPE: true\n").unwrap();
+
+    let output = run_backend_status_with_env(
+        &[
+            "app-support-add",
+            &env_path,
+            support_path.to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unsupported app support setting"));
+}
