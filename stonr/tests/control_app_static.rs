@@ -57,6 +57,9 @@ fn splash_uses_stonr_logo_asset() {
     assert!(index_html.contains("assets/icons/web/icon-192.png"));
     assert!(!index_html.contains("<div class=\"boot-mark\">\n      <svg"));
     assert!(app_js.contains("function withTimeout(promise, ms)"));
+    assert!(app_js.contains("state.bootWatchdogTimer = setTimeout(function () {"));
+    assert!(app_js.contains("var prefs = await withTimeout(loadUiPrefs(), 1200).catch(function (error) {"));
+    assert!(app_js.contains("loadAll().catch(function (error) {"));
     assert!(app_js.contains("withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200)"));
     assert!(app_js.contains("await Promise.race(["));
 }

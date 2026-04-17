@@ -68,6 +68,7 @@
     startupServicePendingAction: '',
     autoStartRelayOnOpen: false,
     autoStartRelayChecked: false,
+    bootWatchdogTimer: null,
     suppressDependencyAnimationOnce: false,
     moderationLists: {
       'pubkeys-allow': '',
@@ -632,7 +633,19 @@
     document.addEventListener('keydown', handleGlobalKeydown, true);
     renderSectionList();
     startRefreshLoop();
-    loadAll();
+    state.bootWatchdogTimer = setTimeout(function () {
+      renderRuntimeFallback();
+      renderActiveSection();
+      revealBootUi();
+      toast('Startup is taking too long. Showing the UI with fallback state.', 'bad');
+    }, 2500);
+    loadAll().catch(function (error) {
+      console.error(error);
+      renderRuntimeFallback();
+      renderActiveSection();
+      revealBootUi();
+      toast(summarizeBackendError(error, 'Failed to load relay state'), 'bad');
+    });
   }
 
   function handleHostAction(actionName) {
@@ -768,6 +781,10 @@
   }
 
   function revealBootUi() {
+    if (state.bootWatchdogTimer) {
+      clearTimeout(state.bootWatchdogTimer);
+      state.bootWatchdogTimer = null;
+    }
     document.body.classList.remove('stonr-booting');
     if (state.hostBootReadySent || !state.bridge) {
       return;
@@ -1028,51 +1045,54 @@
   }
 
   async function loadAll() {
-    var prefs = await loadUiPrefs();
-    state.envPath = prefs.env_path || state.envPath || '';
-    state.backgroundMode = matchesBool(prefs.background_mode || '');
-    state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
-    state.autoStartRelayOnOpen = matchesBool(prefs.auto_start_relay_on_open || '');
-    state.hostStatusItemRelayRunning = null;
-    state.refreshInFlight = false;
-    state.refreshQueued = false;
-    state.startupServiceEnabled = false;
-    state.startupServiceManager = 'none';
-    state.startupServiceBusy = false;
-    state.startupServicePendingAction = '';
-    state.envValues = {};
-    state.activeSection = 'relay';
-    state.events = [];
-    state.eventsViewMode = prefs.events_view_mode === 'pinned' ? 'pinned' : 'all';
-    state.eventsTotal = 0;
-    state.eventsBytes = 0;
-    state.eventsError = '';
-    state.eventsLoading = false;
-    state.eventsTotalLoading = false;
-    state.eventsLoadedOnce = false;
-    state.eventsAnimatedIds = new Set();
-    state.eventsLastQuery = '';
-    state.eventsStatsLoadedAt = 0;
-    state.eventsStatsPromise = null;
-    state.appSupportStatus = { list_path: '', profiles: [], locks: [] };
-    state.appSupportLoading = false;
-    state.appSupportSelectedPath = '';
-    state.diagnosticsLoading = false;
-    state.diagnosticsLoadedOnce = false;
-    state.diagnosticsMirror = [];
-    state.diagnosticsRetention = null;
-    state.diagnosticsError = '';
-    state.railWidth = parseRailWidth(prefs.rail_width) || state.railWidth;
-    els.envPath.value = state.envPath;
-    applyRailWidth(state.railWidth);
-    renderSectionList();
-    if (!state.bridge) {
-      renderRuntimeFallback();
-      renderActiveSection();
-      revealBootUi();
-      return;
-    }
     try {
+      var prefs = await withTimeout(loadUiPrefs(), 1200).catch(function (error) {
+        console.error(error);
+        return {};
+      });
+      state.envPath = prefs.env_path || state.envPath || '';
+      state.backgroundMode = matchesBool(prefs.background_mode || '');
+      state.menuBarIcon = matchesBool(prefs.menu_bar_icon || '');
+      state.autoStartRelayOnOpen = matchesBool(prefs.auto_start_relay_on_open || '');
+      state.hostStatusItemRelayRunning = null;
+      state.refreshInFlight = false;
+      state.refreshQueued = false;
+      state.startupServiceEnabled = false;
+      state.startupServiceManager = 'none';
+      state.startupServiceBusy = false;
+      state.startupServicePendingAction = '';
+      state.envValues = {};
+      state.activeSection = 'relay';
+      state.events = [];
+      state.eventsViewMode = prefs.events_view_mode === 'pinned' ? 'pinned' : 'all';
+      state.eventsTotal = 0;
+      state.eventsBytes = 0;
+      state.eventsError = '';
+      state.eventsLoading = false;
+      state.eventsTotalLoading = false;
+      state.eventsLoadedOnce = false;
+      state.eventsAnimatedIds = new Set();
+      state.eventsLastQuery = '';
+      state.eventsStatsLoadedAt = 0;
+      state.eventsStatsPromise = null;
+      state.appSupportStatus = { list_path: '', profiles: [], locks: [] };
+      state.appSupportLoading = false;
+      state.appSupportSelectedPath = '';
+      state.diagnosticsLoading = false;
+      state.diagnosticsLoadedOnce = false;
+      state.diagnosticsMirror = [];
+      state.diagnosticsRetention = null;
+      state.diagnosticsError = '';
+      state.railWidth = parseRailWidth(prefs.rail_width) || state.railWidth;
+      els.envPath.value = state.envPath;
+      applyRailWidth(state.railWidth);
+      renderSectionList();
+      if (!state.bridge) {
+        renderRuntimeFallback();
+        renderActiveSection();
+        revealBootUi();
+        return;
+      }
       state.doctor = await backend('doctor', [state.envPath]);
       state.doctorRefreshedAt = Date.now();
       state.doctorKv = parseKv(state.doctor);
