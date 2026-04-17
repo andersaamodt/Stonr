@@ -1,0 +1,12 @@
+name: Binder
+description: Lock the relay features Binder needs for constitution publishing, query, and live sync.
+settings:
+  VERIFY_SIG: true
+  ENABLE_NIP11: true
+  SUPPORT_NIP11: true
+  ENABLE_QUERY: true
+  ENABLE_PUBLISH: true
+  ENABLE_LIVE_SUBSCRIPTIONS: true
+  ENABLE_TAG_QUERIES: true
+  SUPPORT_NIP12: true
+  FILTER_SINCE_MODE: cursor

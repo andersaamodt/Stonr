@@ -699,6 +699,7 @@ mod tests {
     #[test]
     fn from_value_fields() {
         let val = serde_json::json!({
+            "ids": ["ev1", "ev2"],
             "authors": ["a1", "a2"],
             "kinds": [1, 2],
             "#d": ["slug"],
@@ -709,6 +710,7 @@ mod tests {
             "limit": 3
         });
         let q = Query::from_value(&val);
+        assert_eq!(q.ids.unwrap(), vec!["ev1".to_string(), "ev2".to_string()]);
         assert_eq!(q.authors.unwrap(), vec!["a1".to_string(), "a2".to_string()]);
         assert_eq!(q.kinds.unwrap(), vec![1, 2]);
         assert_eq!(q.d.unwrap(), "slug");
@@ -722,6 +724,7 @@ mod tests {
     #[test]
     fn from_value_defaults() {
         let q = Query::from_value(&serde_json::json!({}));
+        assert!(q.ids.is_none());
         assert!(q.authors.is_none());
         assert!(q.kinds.is_none());
         assert!(q.d.is_none());
@@ -789,6 +792,52 @@ mod tests {
             }
         }
         assert!(got_event);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_req_by_ids_returns_event_and_eose() {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf(), false);
+        store.init().unwrap();
+        let ev = hashed_event("p1", 1, 1, vec![], "hello");
+        let expected_id = ev.id.clone();
+        store.ingest(&ev).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(test_state(store));
+        let server = axum::serve(listener, app.into_make_service());
+        let handle = tokio::spawn(async move {
+            server.await.unwrap();
+        });
+
+        let url = format!("ws://{}/", addr);
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let req = serde_json::json!(["REQ", "sub", {"ids": [expected_id]}]);
+        ws_stream
+            .send(TungMessage::Text(req.to_string()))
+            .await
+            .unwrap();
+
+        let mut saw_event = false;
+        let mut saw_eose = false;
+        for _ in 0..3 {
+            let text = next_text(&mut ws_stream).await;
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            if value[0] == "EVENT" {
+                saw_event = true;
+                assert_eq!(value[2]["id"].as_str().unwrap(), ev.id);
+            }
+            if value[0] == "EOSE" {
+                saw_eose = true;
+                break;
+            }
+        }
+        assert!(saw_event);
+        assert!(saw_eose);
         handle.abort();
     }
 

@@ -317,6 +317,7 @@ mod tests {
         let capped = apply_query_policy(
             &settings,
             Query {
+                ids: None,
                 authors: None,
                 kinds: None,
                 d: None,
