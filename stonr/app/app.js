@@ -775,9 +775,37 @@
     state.hostBootReadySent = true;
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        execArgv(['__wizardry_host_boot_ready']).catch(function () {
+        withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200).catch(function () {
           return;
         });
+      });
+    });
+  }
+
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(new Error('Timed out after ' + ms + 'ms'));
+      }, ms);
+      promise.then(function (value) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      }).catch(function (error) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
       });
     });
   }
@@ -917,12 +945,12 @@
     if (!state.bridge) {
       return;
     }
-    await setHostBackgroundModeWithRelayState(relayRunningNow());
+    await withTimeout(setHostBackgroundModeWithRelayState(relayRunningNow()), 1200);
     if (!state.menuBarIcon) {
       state.hostStatusItemRelayRunning = null;
       return;
     }
-    var hostState = await readHostStatusItemState();
+    var hostState = await withTimeout(readHostStatusItemState(), 1200);
     if (hostStatusItemHealthy(hostState)) {
       state.hostStatusItemRelayRunning = relayRunningNow();
       return;
@@ -930,8 +958,8 @@
     await new Promise(function (resolve) {
       setTimeout(resolve, 120);
     });
-    await setHostBackgroundModeWithRelayState(relayRunningNow());
-    hostState = await readHostStatusItemState();
+    await withTimeout(setHostBackgroundModeWithRelayState(relayRunningNow()), 1200);
+    hostState = await withTimeout(readHostStatusItemState(), 1200);
     if (!hostStatusItemHealthy(hostState)) {
       toast('Menu bar icon did not activate in host.', 'bad');
       return;
@@ -1059,7 +1087,12 @@
       state.envValues = parseKv(await backend('load-env', [state.envPath]));
       state.status = parseKv(await backend('relay-status', [state.envPath]));
       await loadStartupServiceStatus();
-      await syncDesktopHostSettings();
+      await Promise.race([
+        syncDesktopHostSettings(),
+        new Promise(function (resolve) {
+          setTimeout(resolve, 1500);
+        })
+      ]);
       await loadConfigForBootFrame(state.configEditSeq);
       syncFieldDependencies();
       renderRuntime();

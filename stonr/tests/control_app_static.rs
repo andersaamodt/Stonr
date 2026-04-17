@@ -52,9 +52,13 @@ fn events_refresh_uses_single_flight_and_non_blocking_stats() {
 #[test]
 fn splash_uses_stonr_logo_asset() {
     let index_html = read_file(&format!("{}/app/index.html", env!("CARGO_MANIFEST_DIR")));
+    let app_js = read_file(&format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR")));
     assert!(index_html.contains("class=\"boot-splash\""));
     assert!(index_html.contains("assets/icons/web/icon-192.png"));
     assert!(!index_html.contains("<div class=\"boot-mark\">\n      <svg"));
+    assert!(app_js.contains("function withTimeout(promise, ms)"));
+    assert!(app_js.contains("withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200)"));
+    assert!(app_js.contains("await Promise.race(["));
 }
 
 #[test]
