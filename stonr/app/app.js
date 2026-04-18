@@ -2725,14 +2725,28 @@
           renderActiveSection(false);
         });
 
-        var name = document.createElement('strong');
-        name.textContent = profile.name;
-        option.appendChild(name);
+        var head = document.createElement('span');
+        head.className = 'app-support-option-head';
 
-        var meta = document.createElement('span');
-        meta.className = 'app-support-option-meta';
-        meta.textContent = (profile.description || fileNameFromPath(profile.path)) + ' · ' + profile.locked_keys.length + ' locked setting' + (profile.locked_keys.length === 1 ? '' : 's');
-        option.appendChild(meta);
+        var name = document.createElement('strong');
+        name.className = 'app-support-option-name';
+        name.textContent = profile.name;
+        head.appendChild(name);
+
+        var locks = document.createElement('span');
+        locks.className = 'app-support-option-locks scope-pill';
+        locks.textContent = profile.locked_keys.length + ' locked';
+        head.appendChild(locks);
+
+        option.appendChild(head);
+
+        var description = profile.description || '';
+        if (description) {
+          var meta = document.createElement('span');
+          meta.className = 'app-support-option-meta';
+          meta.textContent = description;
+          option.appendChild(meta);
+        }
 
         var path = document.createElement('span');
         path.className = 'app-support-option-path';

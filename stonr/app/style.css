@@ -849,17 +849,20 @@ h4 {
 
 .app-support-stack {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.7rem;
+  justify-items: start;
 }
 
 .app-support-listbox {
-  display: grid;
-  gap: 0.45rem;
-  min-height: 12rem;
-  padding: 0.7rem;
+  width: min(100%, 34rem);
+  min-height: 8.75rem;
+  max-height: 15rem;
+  overflow-y: auto;
+  padding: 0.18rem;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.56);
+  border-radius: 0.78rem;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
   transition: border-color var(--transition), background var(--transition);
 }
 
@@ -870,37 +873,68 @@ h4 {
 
 .app-support-option {
   display: grid;
-  gap: 0.18rem;
+  gap: 0.14rem;
   width: 100%;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.74);
+  padding: 0.52rem 0.68rem;
+  border: 0;
+  border-radius: calc(0.78rem - 0.18rem);
+  background: transparent;
   text-align: left;
+}
+
+.app-support-option + .app-support-option {
+  border-top: 1px solid rgba(70, 84, 73, 0.1);
 }
 
 .app-support-option:hover,
 .app-support-option:focus-visible {
   outline: none;
-  border-color: color-mix(in srgb, var(--accent) 30%, white);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .app-support-option.selected {
-  border-color: color-mix(in srgb, var(--accent) 45%, white);
-  background: color-mix(in srgb, var(--accent) 10%, white);
+  background: color-mix(in srgb, var(--accent) 11%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, white);
+}
+
+.app-support-option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.app-support-option-name {
+  min-width: 0;
+  font-size: 0.94rem;
+}
+
+.app-support-option-locks {
+  flex: 0 0 auto;
+  min-height: 1.35rem;
+  padding-inline: 0.45rem;
+  font-size: 0.72rem;
 }
 
 .app-support-option-meta,
 .app-support-option-path,
 .app-support-empty {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1.35;
 }
 
+.app-support-option-meta {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .app-support-option-path {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-support-actions {

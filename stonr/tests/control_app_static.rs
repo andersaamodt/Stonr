@@ -100,7 +100,10 @@ fn app_support_section_and_locks_exist() {
     assert!(app_js.contains("id: 'app-support'"));
     assert!(app_js.contains("Turn off support in App Support to unlock it."));
     assert!(app_js.contains("function renderAppSupportSection()"));
+    assert!(app_js.contains("app-support-option-head"));
+    assert!(app_js.contains("app-support-option-locks scope-pill"));
     assert!(style_css.contains(".app-support-listbox"));
+    assert!(style_css.contains(".app-support-option-head"));
     assert!(style_css.contains(".app-support-option.selected"));
 }
 
