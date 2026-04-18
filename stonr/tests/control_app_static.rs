@@ -68,12 +68,17 @@ fn events_refresh_uses_single_flight_and_non_blocking_stats() {
 #[test]
 fn splash_uses_stonr_logo_asset() {
     let index_html = read_file(&format!("{}/app/index.html", env!("CARGO_MANIFEST_DIR")));
+    let style_css = read_file(&format!("{}/app/style.css", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR")));
     assert!(index_html.contains("class=\"boot-splash\""));
-    assert!(index_html.contains("assets/forge-icon.png?v=stonr-control-20260417b"));
+    assert!(index_html.contains("assets/icons/meta/plain-master.png?v=stonr-control-20260417c"));
+    assert!(!index_html.contains("assets/forge-icon.png?v=stonr-control-20260417b"));
     assert!(!index_html.contains("assets/icons/meta/splash-mark.svg"));
-    assert!(index_html.contains("style.css?v=stonr-control-20260416a"));
-    assert!(index_html.contains("app.js?v=stonr-control-20260417b"));
+    assert!(index_html.contains("style.css?v=stonr-control-20260417c"));
+    assert!(index_html.contains("app.js?v=stonr-control-20260417c"));
+    assert!(style_css.contains(".boot-mark {"));
+    assert!(style_css.contains("overflow: hidden;"));
+    assert!(style_css.contains("object-fit: cover;"));
     assert!(index_html.contains("window.__stonrBootFallbackTimer = setTimeout(function () {"));
     assert!(app_js.contains("function withTimeout(promise, ms)"));
     assert!(app_js.contains("if (window.__stonrBootFallbackTimer) {"));
