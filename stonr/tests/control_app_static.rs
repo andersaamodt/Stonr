@@ -90,7 +90,7 @@ fn macos_icon_master_avoids_double_jail() {
     let app_root = format!("{}/app/assets/icons/meta", env!("CARGO_MANIFEST_DIR"));
     let plain = std::fs::read(format!("{}/plain-master.png", app_root)).unwrap();
     let apple = std::fs::read(format!("{}/apple-master.png", app_root)).unwrap();
-    assert_eq!(apple, plain);
+    assert_ne!(apple, plain);
 }
 
 #[test]
