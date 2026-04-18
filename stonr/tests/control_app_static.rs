@@ -70,10 +70,10 @@ fn splash_uses_stonr_logo_asset() {
     let index_html = read_file(&format!("{}/app/index.html", env!("CARGO_MANIFEST_DIR")));
     let app_js = read_file(&format!("{}/app/app.js", env!("CARGO_MANIFEST_DIR")));
     assert!(index_html.contains("class=\"boot-splash\""));
-    assert!(index_html.contains("assets/icons/meta/splash-mark.svg?v=stonr-control-20260417a"));
-    assert!(!index_html.contains("assets/icons/meta/original-source.png"));
+    assert!(index_html.contains("assets/forge-icon.png?v=stonr-control-20260417b"));
+    assert!(!index_html.contains("assets/icons/meta/splash-mark.svg"));
     assert!(index_html.contains("style.css?v=stonr-control-20260416a"));
-    assert!(index_html.contains("app.js?v=stonr-control-20260417a"));
+    assert!(index_html.contains("app.js?v=stonr-control-20260417b"));
     assert!(index_html.contains("window.__stonrBootFallbackTimer = setTimeout(function () {"));
     assert!(app_js.contains("function withTimeout(promise, ms)"));
     assert!(app_js.contains("if (window.__stonrBootFallbackTimer) {"));
@@ -83,6 +83,14 @@ fn splash_uses_stonr_logo_asset() {
     assert!(app_js.contains("loadAll().catch(function (error) {"));
     assert!(app_js.contains("withTimeout(execArgv(['__wizardry_host_boot_ready']), 1200)"));
     assert!(app_js.contains("await Promise.race(["));
+}
+
+#[test]
+fn macos_icon_master_avoids_double_jail() {
+    let app_root = format!("{}/app/assets/icons/meta", env!("CARGO_MANIFEST_DIR"));
+    let plain = std::fs::read(format!("{}/plain-master.png", app_root)).unwrap();
+    let apple = std::fs::read(format!("{}/apple-master.png", app_root)).unwrap();
+    assert_eq!(apple, plain);
 }
 
 #[test]
