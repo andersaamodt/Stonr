@@ -449,21 +449,11 @@ struct ProfileIndex {
     profiles: Vec<ProfileRecord>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct RelayConfig {
     home: String,
     read: Vec<String>,
     write: Vec<String>,
-}
-
-impl Default for RelayConfig {
-    fn default() -> Self {
-        Self {
-            home: String::new(),
-            read: Vec::new(),
-            write: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

@@ -702,7 +702,7 @@ impl Store {
                     }));
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if lock_dir_should_break(&lock_path, MUTATION_LOCK_STALE_AFTER) {
+                    if lock_dir_should_break(lock_path, MUTATION_LOCK_STALE_AFTER) {
                         let _ = fs::remove_dir_all(lock_path);
                         continue;
                     }
@@ -1427,10 +1427,6 @@ pub(crate) fn event_hash(ev: &Event) -> Result<[u8; 32]> {
 /// Verify an event's ID and Schnorr signature.
 pub fn verify_event(ev: &Event) -> Result<()> {
     nostr_shared::crypto::verify_event(ev)
-}
-
-pub(crate) fn verify_signed_event(ev: &Event) -> Result<()> {
-    verify_event(ev)
 }
 
 #[cfg(test)]

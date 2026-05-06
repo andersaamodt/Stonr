@@ -486,6 +486,27 @@ launchd_label_disabled() {
   launchctl print-disabled "$(launchd_domain)" 2>/dev/null | grep -F "\"$label\" => disabled" >/dev/null 2>&1
 }
 
+launchd_plist_program_path() {
+  plist_path=${1-}
+  [ -f "$plist_path" ] || return 1
+  awk '
+    /<key>ProgramArguments<\/key>/ { in_args = 1; next }
+    in_args && /<\/array>/ { exit }
+    in_args && /<string>/ { print; exit }
+  ' "$plist_path" | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p'
+}
+
+launchd_plist_env_path() {
+  plist_path=${1-}
+  [ -f "$plist_path" ] || return 1
+  awk '
+    /<key>ProgramArguments<\/key>/ { in_args = 1; next }
+    in_args && /<\/array>/ { exit }
+    in_args && /<string>--env<\/string>/ { after_env = 1; next }
+    in_args && after_env && /<string>/ { print; exit }
+  ' "$plist_path" | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p'
+}
+
 systemd_unit_name() {
   printf 'stonr-relay.service\n'
 }
@@ -501,6 +522,7 @@ service_autostart_status() {
   installed=0
   loaded=0
   active=0
+  stale=0
   label=$(service_label)
   path=
   case "$manager" in
@@ -508,7 +530,15 @@ service_autostart_status() {
       path=$(launchd_plist_path)
       if [ -f "$path" ]; then
         installed=1
-        if launchd_label_disabled "$label"; then
+        program_path=$(launchd_plist_program_path "$path" 2>/dev/null || printf '')
+        plist_env_path=$(launchd_plist_env_path "$path" 2>/dev/null || printf '')
+        if [ -z "$program_path" ] || [ ! -x "$program_path" ]; then
+          stale=1
+        fi
+        if [ -n "${env_path:-}" ] && [ -n "$plist_env_path" ] && [ "$plist_env_path" != "$env_path" ]; then
+          stale=1
+        fi
+        if launchd_label_disabled "$label" || [ "$stale" -eq 1 ]; then
           enabled=0
         else
           enabled=1
@@ -545,6 +575,7 @@ service_autostart_status() {
   printf '%s\n' "installed=$installed"
   printf '%s\n' "loaded=$loaded"
   printf '%s\n' "active=$active"
+  printf '%s\n' "stale=$stale"
   if [ -n "${env_path:-}" ]; then
     printf '%s\n' "env_path=$env_path"
   fi
@@ -749,6 +780,10 @@ resolve_repo_root() {
 
 resolve_stonr_bin() {
   repo_root=$(resolve_repo_root)
+  if [ -f "$PROJECT_ROOT/stonr" ] && [ -x "$PROJECT_ROOT/stonr" ]; then
+    printf '%s\n' "$PROJECT_ROOT/stonr"
+    return 0
+  fi
   if [ -x "$repo_root/target/debug/stonr" ]; then
     printf '%s\n' "$repo_root/target/debug/stonr"
     return 0

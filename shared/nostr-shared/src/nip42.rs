@@ -42,6 +42,12 @@ impl SessionAuth {
     }
 }
 
+impl Default for SessionAuth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn generate_challenge() -> String {
     let mut bytes = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut bytes);

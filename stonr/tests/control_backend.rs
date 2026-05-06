@@ -56,6 +56,19 @@ fn run_backend_status_with_env(args: &[&str], envs: &[(&str, &str)]) -> std::pro
     output
 }
 
+fn run_backend_script_status_with_env(
+    script_path: &std::path::Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> std::process::Output {
+    Command::new("sh")
+        .arg(script_path)
+        .args(args)
+        .envs(envs.iter().copied())
+        .output()
+        .unwrap()
+}
+
 #[test]
 fn count_events_uses_event_log() {
     let dir = TempDir::new().unwrap();
@@ -510,6 +523,136 @@ fn service_autostart_status_reports_active_for_running_launchd_job() {
 
     assert!(output.contains("loaded=1"));
     assert!(output.contains("active=1"));
+}
+
+#[test]
+fn service_autostart_status_marks_missing_launchd_program_stale() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let home_dir = dir.path().join("home");
+    let launch_agents = home_dir.join("Library/LaunchAgents");
+    fs::create_dir_all(&launch_agents).unwrap();
+    fs::write(
+        launch_agents.join("dev.stonr.relay.plist"),
+        format!(
+            concat!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+                "<plist version=\"1.0\"><dict>\n",
+                "<key>Label</key><string>dev.stonr.relay</string>\n",
+                "<key>ProgramArguments</key><array>\n",
+                "<string>{}</string><string>--env</string><string>{}</string><string>serve</string>\n",
+                "</array><key>RunAtLoad</key><true/>\n",
+                "</dict></plist>\n"
+            ),
+            dir.path().join("missing-stonr").display(),
+            env_path
+        ),
+    )
+    .unwrap();
+
+    let stub_dir = dir.path().join("bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+    fs::write(stub_dir.join("uname"), "#!/bin/sh\nprintf 'Darwin\\n'\n").unwrap();
+    fs::write(
+        stub_dir.join("launchctl"),
+        "#!/bin/sh\nset -eu\ncmd=${1-}\ncase \"$cmd\" in\n  print-disabled)\n    printf '{}\\n'\n    ;;\n  print)\n    exit 1\n    ;;\n  *)\n    exit 0\n    ;;\nesac\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["uname", "launchctl"] {
+            let path = stub_dir.join(name);
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    let path_env = format!(
+        "{}:{}",
+        stub_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = run_backend_with_env(
+        &["service-autostart-status", &env_path],
+        &[
+            ("HOME", home_dir.to_str().unwrap()),
+            ("PATH", path_env.as_str()),
+        ],
+    );
+
+    assert!(output.contains("installed=1"));
+    assert!(output.contains("enabled=0"));
+    assert!(output.contains("stale=1"));
+}
+
+#[test]
+fn service_autostart_enable_uses_bundled_sibling_binary() {
+    let dir = TempDir::new().unwrap();
+    let env_path = write_env(&dir);
+    let bundle_dir = dir.path().join("bundle");
+    let script_dir = bundle_dir.join("app/scripts");
+    fs::create_dir_all(&script_dir).unwrap();
+    let script_path = script_dir.join("stonr-control-backend.sh");
+    fs::copy(backend_script(), &script_path).unwrap();
+    let bundled_stonr = bundle_dir.join("stonr");
+    fs::write(
+        &bundled_stonr,
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' '<?xml version=\"1.0\" encoding=\"UTF-8\"?>'\nprintf '%s\\n' '<plist version=\"1.0\"><dict><key>ProgramArguments</key><array>'\nprintf '<string>%s</string><string>--env</string><string>%s</string><string>serve</string>\\n' \"$0\" \"$2\"\nprintf '%s\\n' '</array></dict></plist>'\n",
+    )
+    .unwrap();
+
+    let home_dir = dir.path().join("home");
+    let stub_dir = dir.path().join("bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+    fs::write(stub_dir.join("uname"), "#!/bin/sh\nprintf 'Darwin\\n'\n").unwrap();
+    fs::write(
+        stub_dir.join("launchctl"),
+        "#!/bin/sh\nset -eu\ncmd=${1-}\ncase \"$cmd\" in\n  print-disabled)\n    printf '{}\\n'\n    ;;\n  print)\n    exit 1\n    ;;\n  enable|disable|bootout|bootstrap|kickstart)\n    exit 0\n    ;;\n  *)\n    exit 0\n    ;;\nesac\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for path in [
+            &script_path,
+            &bundled_stonr,
+            &stub_dir.join("uname"),
+            &stub_dir.join("launchctl"),
+        ] {
+            let mut perms = fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    let path_env = format!(
+        "{}:{}",
+        stub_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = run_backend_script_status_with_env(
+        &script_path,
+        &["service-autostart-enable", &env_path],
+        &[
+            ("HOME", home_dir.to_str().unwrap()),
+            ("PATH", path_env.as_str()),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "backend failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let plist =
+        fs::read_to_string(home_dir.join("Library/LaunchAgents/dev.stonr.relay.plist")).unwrap();
+    let expected_bin = fs::canonicalize(&bundled_stonr).unwrap();
+    assert!(
+        plist.contains(&format!("<string>{}</string>", expected_bin.display())),
+        "{plist}"
+    );
 }
 
 #[test]
