@@ -1,0 +1,9 @@
+{
+  "id": "abcd1234",
+  "kind": 1,
+  "content": "hello stonr",
+  "created_at": 1725916800,
+  "pubkey": "deadbeef",
+  "sig": "fakesig",
+  "tags": []
+}
