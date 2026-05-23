@@ -8,7 +8,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-license = "MIT"
+license-file = "LICENSE"
 
 [workspace.dependencies]
 anyhow = "1"
