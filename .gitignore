@@ -1,6 +1,8 @@
 /target
 .env
 .log
+.sync-conflict-*
+*.sync-conflict-*
 apps/stonr-control/.log
 /dist
 /.DS_Store
