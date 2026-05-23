@@ -2,6 +2,8 @@
 name = "stonr"
 version = "0.1.0"
 edition = "2021"
+license-file = "../LICENSE"
+readme = "../README.md"
 
 [dependencies]
 nostr-shared = { path = "../shared/nostr-shared" }
