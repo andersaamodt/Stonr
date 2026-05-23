@@ -179,4 +179,4 @@ the repository.
 
 ## License
 
-Stonr is licensed under the Open Wizardry License 3.0. See [LICENSE](LICENSE).
+Stonr is licensed under the Open Wizardry License 3.1. See [LICENSE](LICENSE).
