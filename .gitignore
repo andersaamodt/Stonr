@@ -4,5 +4,7 @@
 apps/stonr-control/.log
 /dist
 /.DS_Store
+/result
+/result-*
 onstr/app/.log
 stonr/app/.log
